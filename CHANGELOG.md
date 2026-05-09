@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (nothing yet)
 
+## [0.1.2] - 2026-05-09
+
+Distribution release. No behavioral changes.
+
+### Added
+
+- **`@spytensor/coderoom` on npm.** Same install story as the
+  underlying engines (`@anthropic-ai/claude-code`, `@openai/codex`,
+  `@google/gemini-cli`):
+
+  ```bash
+  npm install -g @spytensor/coderoom
+  ```
+
+  The package is a thin wrapper. Its postinstall script downloads the
+  matching pre-built binary for the user's platform from this release,
+  verifies its SHA-256, and installs it on the user's PATH via npm's
+  standard `bin` field. Pure Node stdlib — no runtime npm dependencies.
+
+### Changed
+
+- README install section restructured: npm path is now the default
+  surface; direct binary tarball + cargo build are tucked into
+  `<details>` disclosures so the default reader sees one thing.
+
 ## [0.1.1] - 2026-05-09
 
 UX-only release. No behavioral changes to the engine adapters or CREP.
@@ -135,6 +160,7 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.2
 [0.1.1]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.1
 [0.1.0]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.0
