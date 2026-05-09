@@ -39,6 +39,15 @@ pub enum Command {
     },
     /// Bare text — routed to the configured host role.
     SendToHost(String),
+    /// `/patch <role> <text>` — save a session-time correction for the
+    /// named role. Persisted under `.coderoom/patches/<role>/`. Loaded
+    /// on the role's next `/refresh` (or next `cr start`).
+    Patch {
+        /// Role whose priors will be patched.
+        role: String,
+        /// Correction text — written verbatim into the new patch file.
+        text: String,
+    },
     /// `/stop <role>` — terminate the named role's subprocess.
     Stop(String),
     /// `/help` — print the help banner.
@@ -63,6 +72,7 @@ pub fn parse_line(input: &str) -> Command {
         return match cmd {
             "exit" | "quit" => Command::Exit,
             "stop" if !arg.is_empty() => Command::Stop(arg.to_owned()),
+            "patch" => parse_patch_arg(arg).unwrap_or(Command::Help),
             // /help, /h, and any unknown slash command all fall through here.
             _ => Command::Help,
         };
@@ -76,6 +86,30 @@ pub fn parse_line(input: &str) -> Command {
         }
     }
     Command::SendToHost(trimmed.to_owned())
+}
+
+/// Parse the argument string of `/patch <role> <text>`. Accepts both
+/// `backend foo bar` and `@backend foo bar` for ergonomics. Returns
+/// `None` (caller falls back to Help) if either side is empty.
+fn parse_patch_arg(arg: &str) -> Option<Command> {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let role_token = parts.next().unwrap_or("");
+    let text = parts.next().unwrap_or("").trim();
+    let role = role_token
+        .strip_prefix('@')
+        .unwrap_or(role_token)
+        .to_owned();
+    if role.is_empty() || text.is_empty() {
+        return None;
+    }
+    Some(Command::Patch {
+        role,
+        text: text.to_owned(),
+    })
 }
 
 /// Live state for a single running role inside the REPL.
@@ -106,49 +140,8 @@ pub async fn run(project_root: &Path) -> Result<()> {
         .map(ToOwned::to_owned)
         .collect::<Vec<String>>()
     {
-        // Compose shared.md + role.md + active patches into a single
-        // tempfile; the engine's --append-system-prompt-file points at it.
-        // We hold the tempfile in RunningRole so it survives until the
-        // role exits.
-        let composed = priors::compose_for(&coderoom_dir, &name)
-            .with_context(|| format!("composing priors for role `{name}`"))?;
-        let priors_temp = write_priors_tempfile(&name, &composed)
-            .with_context(|| format!("staging priors for role `{name}`"))?;
-
-        let mut role_cfg = cfg
-            .role_config(&name, &coderoom_dir)
-            .expect("role declared but role_config returned None");
-        priors_temp.path().clone_into(&mut role_cfg.priors_path);
-
-        let handle = match role_cfg.engine {
-            Engine::Cc => cc_adapter
-                .start(role_cfg)
-                .await
-                .with_context(|| format!("spawning role `{name}`"))?,
-            Engine::Codex | Engine::Gemini => {
-                bail!(
-                    "engine `{}` is not yet supported in v0.1 — only `cc` is implemented",
-                    role_cfg.engine.as_str(),
-                );
-            }
-        };
-
-        // Split the handle: events get forwarded to the bus in a background
-        // task; the user-message sender goes into the REPL's roles map.
-        let RoleHandle {
-            role: rname,
-            engine: _,
-            tx_user,
-            rx_events,
-        } = handle;
-        spawn_event_forwarder(rname.clone(), rx_events, Arc::clone(&bus));
-        roles.insert(
-            rname,
-            RunningRole {
-                tx_user,
-                _priors_temp: priors_temp,
-            },
-        );
+        let running = spawn_role(&cfg, &cc_adapter, &coderoom_dir, &name, &bus).await?;
+        roles.insert(name, running);
     }
 
     print_banner(&cfg);
@@ -175,6 +168,38 @@ pub async fn run(project_root: &Path) -> Result<()> {
                     println!("{}", format!("[stopped @{role}]").dim());
                 } else {
                     println!("{}", format!("no such role: @{role}").red());
+                }
+            }
+            Command::Patch { role, text } => {
+                if !cfg.roles.contains_key(&role) {
+                    println!("{}", format!("no such role: @{role}").red());
+                    continue;
+                }
+                match priors::write_patch(&coderoom_dir, &role, &text) {
+                    Ok(outcome) => {
+                        println!(
+                            "{}",
+                            format!("✓ patched @{role} → {}", outcome.path.display()).green()
+                        );
+                        if let Some(archived) = outcome.archived {
+                            println!(
+                                "{}",
+                                format!(
+                                    "  (cap reached; archived oldest → {})",
+                                    archived.display()
+                                )
+                                .dim()
+                            );
+                        }
+                        println!(
+                            "{}",
+                            "  applies to next /refresh; current session still uses old priors"
+                                .dim()
+                        );
+                    }
+                    Err(error) => {
+                        println!("{}", format!("✗ patch failed: {error:#}").red());
+                    }
                 }
             }
             Command::SendTo { role, text } => {
@@ -214,11 +239,12 @@ fn print_banner(cfg: &Config) {
 
 fn print_help(cfg: &Config) {
     println!("commands:");
-    println!("  @<role> <text>   send to a specific role");
-    println!("  <text>           send to host (@{})", cfg.host_role);
-    println!("  /stop <role>     terminate a role's subprocess");
-    println!("  /help            this help");
-    println!("  /exit, /quit     leave the REPL");
+    println!("  @<role> <text>      send to a specific role");
+    println!("  <text>              send to host (@{})", cfg.host_role);
+    println!("  /patch <role> <…>   save a correction; loads on next /refresh");
+    println!("  /stop <role>        terminate a role's subprocess");
+    println!("  /help               this help");
+    println!("  /exit, /quit        leave the REPL");
 }
 
 async fn send_and_drain(
@@ -375,6 +401,53 @@ fn truncate_inline(s: &str, max_chars: usize) -> String {
     out
 }
 
+/// Compose priors, stage them in a tempfile, spawn the role's
+/// subprocess via the configured engine adapter, and wire its event
+/// stream into `bus`. Returns the [`RunningRole`] the REPL should
+/// keep alive.
+async fn spawn_role(
+    cfg: &Config,
+    cc_adapter: &CcAdapter,
+    coderoom_dir: &Path,
+    name: &str,
+    bus: &Arc<MessageBus>,
+) -> Result<RunningRole> {
+    let composed = priors::compose_for(coderoom_dir, name)
+        .with_context(|| format!("composing priors for role `{name}`"))?;
+    let priors_temp = write_priors_tempfile(name, &composed)
+        .with_context(|| format!("staging priors for role `{name}`"))?;
+
+    let mut role_cfg = cfg
+        .role_config(name, coderoom_dir)
+        .expect("role declared but role_config returned None");
+    priors_temp.path().clone_into(&mut role_cfg.priors_path);
+
+    let handle = match role_cfg.engine {
+        Engine::Cc => cc_adapter
+            .start(role_cfg)
+            .await
+            .with_context(|| format!("spawning role `{name}`"))?,
+        Engine::Codex | Engine::Gemini => {
+            bail!(
+                "engine `{}` is not yet supported in v0.1 — only `cc` is implemented",
+                role_cfg.engine.as_str(),
+            );
+        }
+    };
+
+    let RoleHandle {
+        role: rname,
+        engine: _,
+        tx_user,
+        rx_events,
+    } = handle;
+    spawn_event_forwarder(rname, rx_events, Arc::clone(bus));
+    Ok(RunningRole {
+        tx_user,
+        _priors_temp: priors_temp,
+    })
+}
+
 /// Write composed priors to a tempfile in the system temp dir. The
 /// tempfile name embeds the role for easier debugging when something
 /// goes wrong. Caller is expected to keep the returned `NamedTempFile`
@@ -467,6 +540,38 @@ mod tests {
     #[test]
     fn parse_unknown_slash_shows_help() {
         assert_eq!(parse_line("/whatever"), Command::Help);
+    }
+
+    #[test]
+    fn parse_patch_with_role_and_text() {
+        assert_eq!(
+            parse_line("/patch backend rate limit goes in gateway config"),
+            Command::Patch {
+                role: "backend".into(),
+                text: "rate limit goes in gateway config".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_patch_accepts_at_prefixed_role() {
+        assert_eq!(
+            parse_line("/patch @backend use verify_token()"),
+            Command::Patch {
+                role: "backend".into(),
+                text: "use verify_token()".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_patch_without_text_shows_help() {
+        assert_eq!(parse_line("/patch backend"), Command::Help);
+    }
+
+    #[test]
+    fn parse_patch_without_role_shows_help() {
+        assert_eq!(parse_line("/patch"), Command::Help);
     }
 
     #[test]
