@@ -339,7 +339,7 @@ mod tests {
     fn init_yes_output_passes_config_validation() {
         let tmp = TempDir::new().unwrap();
         run(tmp.path(), InitOptions::auto()).expect("init");
-        let cfg = Config::load(tmp.path()).expect("init output should be a valid config");
+        let cfg = Config::load_test(tmp.path()).expect("init output should be a valid config");
         assert_eq!(cfg.host_role, "host");
         assert!(cfg.is_host("host"));
     }
@@ -358,7 +358,7 @@ mod tests {
         std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
         run(tmp.path(), InitOptions::auto()).expect("init");
 
-        let cfg = Config::load(tmp.path()).expect("valid config");
+        let cfg = Config::load_test(tmp.path()).expect("valid config");
         // Cargo.toml → host + backend + security
         assert!(cfg.roles.contains_key("host"));
         assert!(cfg.roles.contains_key("backend"));

@@ -10,7 +10,8 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::adapter::Engine;
-use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use crate::config::{Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use crate::config_layered::ProjectConfigRaw;
 
 /// Default body for a freshly-scaffolded role priors file. Users are
 /// expected to replace this with project-specific guidance.
@@ -31,17 +32,17 @@ pub fn add(
         bail!("{} not found — run `cr init` first", coderoom_dir.display(),);
     }
 
-    let mut cfg = read_config(&coderoom_dir)?;
-    if cfg.roles.contains_key(name) {
+    let mut raw = read_project_raw(&coderoom_dir)?;
+    if raw.roles.contains_key(name) {
         bail!("role `{name}` already exists in {CONFIG_FILE}");
     }
 
-    let entry = crate::config::RoleEntry {
+    let entry = RoleEntry {
         engine,
         model: model.map(ToOwned::to_owned),
     };
-    cfg.roles.insert(name.to_owned(), entry);
-    write_config(&coderoom_dir, &cfg)?;
+    raw.roles.insert(name.to_owned(), entry);
+    write_project_raw(&coderoom_dir, &raw)?;
 
     let priors_path = coderoom_dir.join(ROLES_DIR).join(format!("{name}.md"));
     if !priors_path.exists() {
@@ -66,9 +67,13 @@ pub fn add(
 }
 
 /// Print the configured roles, one per line, with engine + host marker.
+///
+/// Reads the merged `Config` (so the displayed engine/model reflects
+/// the layered defaults), but never writes through it. Writes go via
+/// [`read_project_raw`] / [`write_project_raw`] so user-level fields
+/// don't accidentally end up in the committed project file.
 pub fn list(project_root: &Path) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let cfg = read_config(&coderoom_dir)?;
+    let cfg = Config::load(project_root)?;
 
     let mut names: Vec<&str> = cfg.role_names().collect();
     names.sort_unstable();
@@ -96,20 +101,20 @@ pub fn list(project_root: &Path) -> Result<()> {
 /// `[roles.<name>]` table and the priors file.
 pub fn rm(project_root: &Path, name: &str) -> Result<()> {
     let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let mut cfg = read_config(&coderoom_dir)?;
+    let mut raw = read_project_raw(&coderoom_dir)?;
 
-    if !cfg.roles.contains_key(name) {
+    if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
     }
-    if cfg.is_host(name) {
+    if raw.host_role == name {
         bail!(
             "@{name} is the host role; change `host_role` in {CONFIG_FILE} first, \
              or use `cr role add` to introduce a replacement"
         );
     }
 
-    cfg.roles.remove(name);
-    write_config(&coderoom_dir, &cfg)?;
+    raw.roles.remove(name);
+    write_project_raw(&coderoom_dir, &raw)?;
 
     let priors_path = coderoom_dir.join(ROLES_DIR).join(format!("{name}.md"));
     if priors_path.is_file() {
@@ -140,18 +145,22 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn read_config(coderoom_dir: &Path) -> Result<Config> {
+/// Read just the project-layer raw shape — never the merged config.
+/// This keeps role-edit round-trips free of user-layer values (e.g.
+/// the user's `default_engine` won't accidentally end up in the
+/// committed project file when `cr role add` writes back).
+fn read_project_raw(coderoom_dir: &Path) -> Result<ProjectConfigRaw> {
     let path = coderoom_dir.join(CONFIG_FILE);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let cfg: Config =
+    let raw: ProjectConfigRaw =
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(cfg)
+    Ok(raw)
 }
 
-fn write_config(coderoom_dir: &Path, cfg: &Config) -> Result<()> {
+fn write_project_raw(coderoom_dir: &Path, raw: &ProjectConfigRaw) -> Result<()> {
     let path = coderoom_dir.join(CONFIG_FILE);
-    let body = toml::to_string_pretty(cfg).map_err(|e| anyhow!("serializing config.toml: {e}"))?;
+    let body = toml::to_string_pretty(raw).map_err(|e| anyhow!("serializing config.toml: {e}"))?;
     std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
@@ -194,7 +203,7 @@ host_role = "host"
         add(tmp.path(), "backend", None, None).unwrap();
 
         let coderoom = tmp.path().join(CODEROOM_DIR);
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         assert!(cfg.roles.contains_key("backend"));
         assert!(coderoom.join(ROLES_DIR).join("backend.md").is_file());
     }
@@ -203,7 +212,7 @@ host_role = "host"
     fn add_persists_engine_and_model_overrides() {
         let tmp = fixture();
         add(tmp.path(), "security", Some(Engine::Codex), Some("o3")).unwrap();
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         let entry = cfg.roles.get("security").unwrap();
         assert_eq!(entry.engine, Some(Engine::Codex));
         assert_eq!(entry.model.as_deref(), Some("o3"));
@@ -235,7 +244,7 @@ host_role = "host"
         let tmp = fixture();
         add(tmp.path(), "backend", None, None).unwrap();
         rm(tmp.path(), "backend").unwrap();
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         assert!(!cfg.roles.contains_key("backend"));
         assert!(!tmp
             .path()

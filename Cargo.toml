@@ -50,6 +50,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Time
 chrono = { version = "0.4", features = ["serde", "clock"] }
 
+# Cross-platform config / cache directory resolution (XDG-aware on
+# Linux, falls back to ~/.config on macOS, %APPDATA% on Windows).
+dirs = "5.0"
+
 # Pattern matching
 regex = "1.10"
 

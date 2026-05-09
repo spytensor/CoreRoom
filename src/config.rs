@@ -117,6 +117,29 @@ pub enum ConfigError {
     /// `budget_per_role_usd` was not a positive finite number.
     #[error("budget_per_role_usd must be positive and finite, got {0}")]
     InvalidBudget(f64),
+    /// A categorical scoping rule was violated: a key only allowed in
+    /// one specific layer was found in a different layer (e.g.
+    /// `engines.cc.bin` in committed project config, or `[roles]` in
+    /// user config).
+    #[error("`{field}` is not allowed in {path}: {why}")]
+    Forbidden {
+        /// Path of the offending file.
+        path: PathBuf,
+        /// Field path (e.g. `engines.cc.bin`).
+        field: String,
+        /// Human-readable explanation pointing the user at the right
+        /// layer.
+        why: String,
+    },
+    /// No layer declared `default_engine`. Built-in fallback isn't
+    /// applied because choosing an engine without consent is a real
+    /// failure mode.
+    #[error(
+        "no default_engine is declared. set it in either user config \
+         (~/.config/coderoom/config.toml under [defaults] engine = \"cc\") \
+         or project config (.coderoom/config.toml `default_engine = \"cc\"`)."
+    )]
+    MissingDefaultEngine,
 }
 
 /// Convenience alias for config results.
@@ -134,21 +157,14 @@ impl Config {
     /// 4. Every declared role has a priors file at
     ///    `.coderoom/roles/<role>.md`.
     pub fn load(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
-        let coderoom_dir = project_root.as_ref().join(CODEROOM_DIR);
-        let config_path = coderoom_dir.join(CONFIG_FILE);
-
-        let text = std::fs::read_to_string(&config_path).map_err(|source| ConfigError::Read {
-            path: config_path.clone(),
-            source,
-        })?;
-
-        let cfg: Self = toml::from_str(&text).map_err(|source| ConfigError::Parse {
-            path: config_path.clone(),
-            source,
-        })?;
-
-        cfg.validate(&coderoom_dir)?;
-        Ok(cfg)
+        // Delegate to the layered loader. Production code resolves
+        // the user-config path from $XDG_CONFIG_HOME / ~/.config etc.;
+        // tests can call `crate::config_layered::load` directly to
+        // pass a hermetic user path (or `None`).
+        crate::config_layered::load(
+            project_root.as_ref(),
+            crate::config_layered::user_config_path().as_deref(),
+        )
     }
 
     /// Validate the in-memory config against on-disk state. Used by
@@ -207,6 +223,15 @@ impl Config {
     pub fn role_names(&self) -> impl Iterator<Item = &str> {
         self.roles.keys().map(String::as_str)
     }
+
+    /// Test-only hermetic loader that skips the user layer entirely.
+    /// Used by unit tests so they don't pick up the developer's
+    /// real `~/.config/coderoom/config.toml` and become flaky on
+    /// machines where the user has actually configured CodeRoom.
+    #[cfg(test)]
+    pub(crate) fn load_test(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
+        crate::config_layered::load(project_root.as_ref(), None)
+    }
 }
 
 /// Path where the priors file for `role` lives, given the project's
@@ -250,7 +275,7 @@ host_role = "pm"
 "#,
         );
 
-        let cfg = Config::load(tmp.path()).expect("load");
+        let cfg = Config::load_test(tmp.path()).expect("load");
         assert_eq!(cfg.default_engine, Engine::Cc);
         assert_eq!(cfg.host_role, "pm");
         assert_eq!(cfg.roles.len(), 2);
@@ -271,7 +296,7 @@ host_role = "pm"
 [roles.backend]
 "#,
         );
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         let coderoom = tmp.path().join(CODEROOM_DIR);
 
         let pm = cfg.role_config("pm", &coderoom).unwrap();
@@ -310,7 +335,7 @@ model = "o3"
         )
         .unwrap();
 
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         let security = cfg.role_config("security", &coderoom).unwrap();
         assert_eq!(security.engine, Engine::Codex);
         assert_eq!(security.model.as_deref(), Some("o3"));
@@ -328,7 +353,7 @@ host_role = "ghost"
 [roles.backend]
 "#,
         );
-        let err = Config::load(tmp.path()).expect_err("should reject missing host_role");
+        let err = Config::load_test(tmp.path()).expect_err("should reject missing host_role");
         match err {
             ConfigError::MissingHostRole { host, declared } => {
                 assert_eq!(host, "ghost");
@@ -352,7 +377,7 @@ host_role = "pm"
 "#,
         );
         // frontend declared in config but no .md file — should fail.
-        let err = Config::load(tmp.path()).expect_err("should reject missing priors");
+        let err = Config::load_test(tmp.path()).expect_err("should reject missing priors");
         match err {
             ConfigError::MissingPriors { role, .. } => {
                 assert_eq!(role, "frontend");
@@ -373,7 +398,7 @@ host_role = "pm"
 [roles.backend]
 "#,
         );
-        match Config::load(tmp.path()).expect_err("should reject negative budget") {
+        match Config::load_test(tmp.path()).expect_err("should reject negative budget") {
             ConfigError::InvalidBudget(b) => assert!((b - -1.0).abs() < 1e-9),
             other => panic!("unexpected error: {other:?}"),
         }
@@ -383,7 +408,7 @@ host_role = "pm"
     fn missing_config_file_surfaces_io_error() {
         let tmp = TempDir::new().unwrap();
         // don't even create .coderoom/
-        match Config::load(tmp.path()).expect_err("missing config should error") {
+        match Config::load_test(tmp.path()).expect_err("missing config should error") {
             ConfigError::Read { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
@@ -401,7 +426,7 @@ host_role = "pm"
 [roles.backend]
 "#,
         );
-        let cfg = Config::load(tmp.path()).unwrap();
+        let cfg = Config::load_test(tmp.path()).unwrap();
         let mut names: Vec<&str> = cfg.role_names().collect();
         names.sort_unstable();
         assert_eq!(names, vec!["backend", "pm"]);
