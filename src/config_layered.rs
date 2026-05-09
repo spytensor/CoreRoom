@@ -42,9 +42,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::Engine;
-use crate::config::{
-    Config, ConfigError, ConfigResult, RoleEntry, CODEROOM_DIR, CONFIG_FILE,
-};
+use crate::config::{Config, ConfigError, ConfigResult, RoleEntry, CODEROOM_DIR, CONFIG_FILE};
 
 /// File name of the project-local override file inside `.coderoom/`.
 /// Always gitignored once it exists.
@@ -169,7 +167,9 @@ pub struct UpdatesConfig {
 
 impl Default for UpdatesConfig {
     fn default() -> Self {
-        Self { check_on_start: true }
+        Self {
+            check_on_start: true,
+        }
     }
 }
 
@@ -260,7 +260,9 @@ impl TryFrom<String> for EngineKey {
             "cc" => Ok(Self(Engine::Cc)),
             "codex" => Ok(Self(Engine::Codex)),
             "gemini" => Ok(Self(Engine::Gemini)),
-            other => Err(format!("unknown engine `{other}` — valid: cc / codex / gemini")),
+            other => Err(format!(
+                "unknown engine `{other}` — valid: cc / codex / gemini"
+            )),
         }
     }
 }
@@ -428,7 +430,10 @@ fn merge(
 ) -> ConfigResult<Config> {
     let default_engine = project
         .default_engine
-        .or_else(|| user.and_then(|u| u.defaults.as_ref()).and_then(|d| d.engine))
+        .or_else(|| {
+            user.and_then(|u| u.defaults.as_ref())
+                .and_then(|d| d.engine)
+        })
         .ok_or(ConfigError::MissingDefaultEngine)?;
 
     let default_model = project.default_model.clone().or_else(|| {
@@ -470,10 +475,7 @@ fn merge(
 /// Exposed so PR B's `cr init`-aware suggestions can call it without
 /// duplicating logic.
 #[must_use]
-pub fn merged_always_include(
-    user: Option<&UserConfig>,
-    project: &ProjectConfigRaw,
-) -> Vec<String> {
+pub fn merged_always_include(user: Option<&UserConfig>, project: &ProjectConfigRaw) -> Vec<String> {
     let never = merged_never_include(user, project);
     let mut out: BTreeSet<String> = BTreeSet::new();
     if let Some(init) = user.and_then(|u| u.init.as_ref()) {
@@ -631,8 +633,7 @@ budget_per_role_usd = 5.00
         write_user(&user_path, "[roles.backend]\n");
         let coderoom = tmp.path().join(CODEROOM_DIR);
         write_minimal_project(&coderoom, "");
-        let err =
-            load(tmp.path(), Some(&user_path)).expect_err("user roles must be rejected");
+        let err = load(tmp.path(), Some(&user_path)).expect_err("user roles must be rejected");
         match err {
             ConfigError::Forbidden { field, .. } => assert!(field.starts_with("[roles.")),
             other => panic!("unexpected error: {other:?}"),
