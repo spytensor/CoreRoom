@@ -221,7 +221,7 @@ host_role = "host"
     fn add_validates_name() {
         let tmp = fixture();
         let err = add(tmp.path(), "@backend", None, None).expect_err("leading @");
-        assert!(err.to_string().contains("@"));
+        assert!(err.to_string().contains('@'));
 
         let err = add(tmp.path(), "1bad", None, None).expect_err("starts with digit");
         assert!(err.to_string().contains("ASCII letter"));
