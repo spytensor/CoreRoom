@@ -346,12 +346,8 @@ fn ordered_patches(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PathBuf>>
 /// to within ±20% is fine.
 #[must_use]
 pub fn estimate_role_tokens(coderoom_dir: &Path, role_name: &str) -> u64 {
-    let role_path = coderoom_dir
-        .join(ROLES_DIR)
-        .join(format!("{role_name}.md"));
-    let role_bytes = std::fs::metadata(&role_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let role_path = coderoom_dir.join(ROLES_DIR).join(format!("{role_name}.md"));
+    let role_bytes = std::fs::metadata(&role_path).map(|m| m.len()).unwrap_or(0);
     let shared_bytes = std::fs::metadata(coderoom_dir.join(SHARED_FILE))
         .map(|m| m.len())
         .unwrap_or(0);

@@ -352,15 +352,9 @@ fn print_welcome(cfg: &Config, coderoom_dir: &Path, project_root: &Path) {
     println!();
     println!("{}", "welcome to coderoom".bold());
     println!();
-    println!(
-        "  a single CLAUDE.md doesn't scale. coderoom runs separate"
-    );
-    println!(
-        "  Claude Code / Codex / Gemini sessions per role — backend, frontend,"
-    );
-    println!(
-        "  security, whoever — each carrying only its own organizational"
-    );
+    println!("  a single CLAUDE.md doesn't scale. coderoom runs separate");
+    println!("  Claude Code / Codex / Gemini sessions per role — backend, frontend,");
+    println!("  security, whoever — each carrying only its own organizational");
     println!("  priors. you @-mention them like a group chat.");
     println!();
     println!(
