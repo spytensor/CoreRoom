@@ -261,7 +261,8 @@ impl RpcClient {
                 }),
             )
             .await?;
-        self.notify("notifications/initialized", Value::Null).await?;
+        self.notify("notifications/initialized", Value::Null)
+            .await?;
         let model = result
             .get("serverInfo")
             .and_then(|s| s.get("name"))
