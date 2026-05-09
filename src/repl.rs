@@ -39,6 +39,15 @@ pub enum Command {
     },
     /// Bare text — routed to the configured host role.
     SendToHost(String),
+    /// `/patch <role> <text>` — save a session-time correction for the
+    /// named role. Persisted under `.coderoom/patches/<role>/`. Loaded
+    /// on the role's next `/refresh` (or next `cr start`).
+    Patch {
+        /// Role whose priors will be patched.
+        role: String,
+        /// Correction text — written verbatim into the new patch file.
+        text: String,
+    },
     /// `/stop <role>` — terminate the named role's subprocess.
     Stop(String),
     /// `/help` — print the help banner.
@@ -63,6 +72,7 @@ pub fn parse_line(input: &str) -> Command {
         return match cmd {
             "exit" | "quit" => Command::Exit,
             "stop" if !arg.is_empty() => Command::Stop(arg.to_owned()),
+            "patch" => parse_patch_arg(arg).unwrap_or(Command::Help),
             // /help, /h, and any unknown slash command all fall through here.
             _ => Command::Help,
         };
@@ -76,6 +86,27 @@ pub fn parse_line(input: &str) -> Command {
         }
     }
     Command::SendToHost(trimmed.to_owned())
+}
+
+/// Parse the argument string of `/patch <role> <text>`. Accepts both
+/// `backend foo bar` and `@backend foo bar` for ergonomics. Returns
+/// `None` (caller falls back to Help) if either side is empty.
+fn parse_patch_arg(arg: &str) -> Option<Command> {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let role_token = parts.next().unwrap_or("");
+    let text = parts.next().unwrap_or("").trim();
+    let role = role_token.strip_prefix('@').unwrap_or(role_token).to_owned();
+    if role.is_empty() || text.is_empty() {
+        return None;
+    }
+    Some(Command::Patch {
+        role,
+        text: text.to_owned(),
+    })
 }
 
 /// Live state for a single running role inside the REPL.
@@ -177,6 +208,38 @@ pub async fn run(project_root: &Path) -> Result<()> {
                     println!("{}", format!("no such role: @{role}").red());
                 }
             }
+            Command::Patch { role, text } => {
+                if !cfg.roles.contains_key(&role) {
+                    println!("{}", format!("no such role: @{role}").red());
+                    continue;
+                }
+                match priors::write_patch(&coderoom_dir, &role, &text) {
+                    Ok(outcome) => {
+                        println!(
+                            "{}",
+                            format!("✓ patched @{role} → {}", outcome.path.display()).green()
+                        );
+                        if let Some(archived) = outcome.archived {
+                            println!(
+                                "{}",
+                                format!(
+                                    "  (cap reached; archived oldest → {})",
+                                    archived.display()
+                                )
+                                .dim()
+                            );
+                        }
+                        println!(
+                            "{}",
+                            "  applies to next /refresh; current session still uses old priors"
+                                .dim()
+                        );
+                    }
+                    Err(error) => {
+                        println!("{}", format!("✗ patch failed: {error:#}").red());
+                    }
+                }
+            }
             Command::SendTo { role, text } => {
                 send_and_drain(&roles, &mut renderer_rx, &role, &text).await?;
             }
@@ -214,11 +277,12 @@ fn print_banner(cfg: &Config) {
 
 fn print_help(cfg: &Config) {
     println!("commands:");
-    println!("  @<role> <text>   send to a specific role");
-    println!("  <text>           send to host (@{})", cfg.host_role);
-    println!("  /stop <role>     terminate a role's subprocess");
-    println!("  /help            this help");
-    println!("  /exit, /quit     leave the REPL");
+    println!("  @<role> <text>      send to a specific role");
+    println!("  <text>              send to host (@{})", cfg.host_role);
+    println!("  /patch <role> <…>   save a correction; loads on next /refresh");
+    println!("  /stop <role>        terminate a role's subprocess");
+    println!("  /help               this help");
+    println!("  /exit, /quit        leave the REPL");
 }
 
 async fn send_and_drain(
@@ -467,6 +531,38 @@ mod tests {
     #[test]
     fn parse_unknown_slash_shows_help() {
         assert_eq!(parse_line("/whatever"), Command::Help);
+    }
+
+    #[test]
+    fn parse_patch_with_role_and_text() {
+        assert_eq!(
+            parse_line("/patch backend rate limit goes in gateway config"),
+            Command::Patch {
+                role: "backend".into(),
+                text: "rate limit goes in gateway config".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_patch_accepts_at_prefixed_role() {
+        assert_eq!(
+            parse_line("/patch @backend use verify_token()"),
+            Command::Patch {
+                role: "backend".into(),
+                text: "use verify_token()".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_patch_without_text_shows_help() {
+        assert_eq!(parse_line("/patch backend"), Command::Help);
+    }
+
+    #[test]
+    fn parse_patch_without_role_shows_help() {
+        assert_eq!(parse_line("/patch"), Command::Help);
     }
 
     #[test]

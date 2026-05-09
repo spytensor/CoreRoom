@@ -18,6 +18,18 @@ use anyhow::{Context, Result};
 
 use crate::config::ROLES_DIR;
 
+/// Hard cap on active patches per role at v0.1. Once exceeded, the
+/// oldest patch is moved to `_archive/` (still loadable on demand,
+/// just not auto-loaded) so the active set never silently grows
+/// without bound. Documented in `docs/architecture.md` as a v0.1
+/// invariant — change with care.
+pub const MAX_ACTIVE_PATCHES_PER_ROLE: usize = 50;
+
+/// Subdirectory under each role's `patches/<role>/` that holds patches
+/// evicted by the FIFO cap. Files here are NOT auto-loaded into a
+/// role's priors; they exist for forensics / opt-in re-promotion.
+pub const ARCHIVE_SUBDIR: &str = "_archive";
+
 /// File name of the cross-role priors document inside `.coderoom/`.
 pub const SHARED_FILE: &str = "shared.md";
 
@@ -67,6 +79,146 @@ pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
 
     out.push('\n');
     Ok(out)
+}
+
+/// Outcome of a [`write_patch`] call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchWriteOutcome {
+    /// Path of the file the new patch was written to.
+    pub path: PathBuf,
+    /// If the FIFO cap was exceeded, the path moved to `_archive/`.
+    pub archived: Option<PathBuf>,
+}
+
+/// Persist a new correction for `role_name` under
+/// `.coderoom/patches/<role>/NNN-<slug>.md`.
+///
+/// Sequence number is `1 + max(prefix)` across both the active patches
+/// directory AND its `_archive/` subdir, so numbers stay monotonic
+/// across archival. `slug` is derived from the first ~40 chars of
+/// `text` (ASCII-lowercased, non-alphanumeric collapsed to dashes).
+///
+/// After writing, enforces [`MAX_ACTIVE_PATCHES_PER_ROLE`] — the oldest
+/// active patch (lowest sequence number) is moved into `_archive/`.
+pub fn write_patch(coderoom_dir: &Path, role_name: &str, text: &str) -> Result<PatchWriteOutcome> {
+    let dir = coderoom_dir.join(PATCHES_DIR).join(role_name);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+
+    let next_seq = next_patch_seq(&dir)?;
+    let slug = slugify(text);
+    let filename = format!("{next_seq:03}-{slug}.md");
+    let path = dir.join(&filename);
+
+    let trimmed = text.trim();
+    let body = if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("{trimmed}\n")
+    };
+    std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+
+    let archived = enforce_active_cap(&dir)?;
+    Ok(PatchWriteOutcome { path, archived })
+}
+
+/// Pick the next patch sequence number for `dir`. Considers both the
+/// directory's active patch files and its `_archive/` subdirectory so
+/// numbers never collide post-archival. Returns 1 for an empty role.
+fn next_patch_seq(dir: &Path) -> Result<u32> {
+    let mut max = 0u32;
+    if dir.is_dir() {
+        for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+            let path = entry?.path();
+            if let Some(seq) = leading_seq_from_md(&path) {
+                max = max.max(seq);
+            }
+        }
+    }
+    let archive = dir.join(ARCHIVE_SUBDIR);
+    if archive.is_dir() {
+        for entry in
+            std::fs::read_dir(&archive).with_context(|| format!("reading {}", archive.display()))?
+        {
+            let path = entry?.path();
+            if let Some(seq) = leading_seq_from_md(&path) {
+                max = max.max(seq);
+            }
+        }
+    }
+    Ok(max + 1)
+}
+
+fn leading_seq_from_md(path: &Path) -> Option<u32> {
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        != Some("md")
+    {
+        return None;
+    }
+    let name = path.file_name()?.to_str()?;
+    if name.starts_with('_') {
+        return None;
+    }
+    let leading: String = name.chars().take_while(char::is_ascii_digit).collect();
+    leading.parse::<u32>().ok()
+}
+
+/// If the active patches directory has more than [`MAX_ACTIVE_PATCHES_PER_ROLE`]
+/// entries, move the oldest (lowest-sequence) into `_archive/`.
+fn enforce_active_cap(dir: &Path) -> Result<Option<PathBuf>> {
+    let mut active: Vec<(u32, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(seq) = leading_seq_from_md(&path) {
+            active.push((seq, path));
+        }
+    }
+    if active.len() <= MAX_ACTIVE_PATCHES_PER_ROLE {
+        return Ok(None);
+    }
+    active.sort_by_key(|(seq, _)| *seq);
+    let (_, oldest) = active.into_iter().next().expect("non-empty after cap check");
+
+    let archive = dir.join(ARCHIVE_SUBDIR);
+    std::fs::create_dir_all(&archive)
+        .with_context(|| format!("creating {}", archive.display()))?;
+    let dest = archive.join(oldest.file_name().expect("file_name on existing path"));
+    std::fs::rename(&oldest, &dest).with_context(|| {
+        format!("archiving {} → {}", oldest.display(), dest.display())
+    })?;
+    Ok(Some(dest))
+}
+
+/// Lowercase, ASCII-only, dash-separated slug. Empty input → `"untitled"`.
+/// Truncated to ~40 chars at a word boundary so filenames stay readable.
+fn slugify(text: &str) -> String {
+    let mut out = String::with_capacity(40);
+    let mut last_dash = false;
+    for c in text.chars() {
+        if out.len() >= 40 {
+            break;
+        }
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("untitled");
+    }
+    out
 }
 
 /// Return patch files for `role_name`, sorted by their leading numeric
@@ -227,5 +379,93 @@ mod tests {
         let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
         assert!(composed.ends_with('\n'));
         assert!(!composed.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn slugify_basic_cases() {
+        assert_eq!(slugify("Use verify_token() instead"), "use-verify-token-instead");
+        assert_eq!(slugify(""), "untitled");
+        assert_eq!(slugify("!!!"), "untitled");
+        assert_eq!(slugify("rate-limit in gateway"), "rate-limit-in-gateway");
+        assert!(
+            slugify("a really really really long description that goes on and on and on")
+                .len()
+                <= 40
+        );
+    }
+
+    #[test]
+    fn write_patch_creates_numbered_file() {
+        let tmp = fixture("backend", "BACKEND_PRIORS");
+        let coderoom = coderoom_of(&tmp);
+        let outcome = write_patch(&coderoom, "backend", "use verify_token()").unwrap();
+
+        assert!(outcome.path.exists());
+        assert!(outcome.archived.is_none());
+        let name = outcome.path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("001-"),
+            "first patch should be sequence 001: {name}"
+        );
+        assert!(name.ends_with(".md"));
+        let content = fs::read_to_string(&outcome.path).unwrap();
+        assert!(content.contains("verify_token"));
+    }
+
+    #[test]
+    fn write_patch_increments_across_archived_entries() {
+        let tmp = fixture("backend", "BACKEND_PRIORS");
+        let coderoom = coderoom_of(&tmp);
+        let dir = coderoom.join(PATCHES_DIR).join("backend");
+        let archive = dir.join(ARCHIVE_SUBDIR);
+        fs::create_dir_all(&archive).unwrap();
+        // Pretend 003 was already archived.
+        fs::write(archive.join("003-old.md"), "OLD").unwrap();
+
+        let outcome = write_patch(&coderoom, "backend", "fresh patch").unwrap();
+        let name = outcome.path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("004-"),
+            "next seq should be 004 (max 003 + 1): {name}"
+        );
+    }
+
+    #[test]
+    fn write_patch_enforces_fifo_cap() {
+        let tmp = fixture("backend", "BACKEND_PRIORS");
+        let coderoom = coderoom_of(&tmp);
+
+        // Write MAX patches; none should be archived yet.
+        for i in 0..MAX_ACTIVE_PATCHES_PER_ROLE {
+            let out = write_patch(&coderoom, "backend", &format!("patch {i}")).unwrap();
+            assert!(out.archived.is_none(), "iteration {i} unexpectedly archived");
+        }
+
+        // The (MAX+1)-th write should evict the oldest active entry.
+        let out = write_patch(&coderoom, "backend", "overflow").unwrap();
+        let archived = out.archived.expect("expected archival on overflow");
+        let name = archived.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("001-"),
+            "FIFO should evict sequence 001 first: {name}"
+        );
+        assert!(archived.starts_with(coderoom.join(PATCHES_DIR).join("backend").join(ARCHIVE_SUBDIR)));
+
+        // Active dir should now hold exactly MAX entries again.
+        let dir = coderoom.join(PATCHES_DIR).join("backend");
+        let active_count = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_file() && leading_seq_from_md(&e.path()).is_some())
+            .count();
+        assert_eq!(active_count, MAX_ACTIVE_PATCHES_PER_ROLE);
+    }
+
+    #[test]
+    fn next_patch_seq_starts_at_1_for_empty() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("patches/backend");
+        // No directory at all — should still yield 1.
+        assert_eq!(next_patch_seq(&dir).unwrap(), 1);
     }
 }
