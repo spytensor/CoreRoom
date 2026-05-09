@@ -247,9 +247,7 @@ fn main() -> Result<()> {
 
 fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {
     match cmd {
-        ConfigCmd::Show { project } => {
-            coderoom::config_cmd::show(&project_root_or_cwd(project)?)
-        }
+        ConfigCmd::Show { project } => coderoom::config_cmd::show(&project_root_or_cwd(project)?),
         ConfigCmd::Edit {
             project,
             user,

@@ -43,16 +43,6 @@ pub enum LayerTarget {
     Local,
 }
 
-impl LayerTarget {
-    fn label(self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Project => "project",
-            Self::Local => "local",
-        }
-    }
-}
-
 /// Print the absolute path of the requested config layer file.
 ///
 /// Does not check whether the file exists — `show` and `edit` are the
@@ -88,9 +78,10 @@ pub fn show_with_user(project_root: &Path, user_path: Option<&Path>) -> Result<(
 /// Refuses `--project` if `.coderoom/config.toml` is missing — `cr init`
 /// is the right command for bootstrapping a project.
 pub fn edit(layer: LayerTarget, project_root: &Path) -> Result<()> {
-    let editor = pick_editor()?;
+    // Validate the layer's prerequisites first, then seed any missing
+    // file. We pick the editor LAST so that a missing $EDITOR doesn't
+    // mask a more useful "run cr init first" error.
     let target = resolve_path(layer, project_root)?;
-
     match layer {
         LayerTarget::Project => {
             if !target.is_file() {
@@ -114,15 +105,23 @@ pub fn edit(layer: LayerTarget, project_root: &Path) -> Result<()> {
         }
     }
 
-    let status = Command::new(&editor).arg(&target).status().with_context(|| {
-        format!(
-            "launching $EDITOR={} on {}",
-            editor.display(),
-            target.display()
-        )
-    })?;
+    let editor = pick_editor()?;
+    let status = Command::new(&editor)
+        .arg(&target)
+        .status()
+        .with_context(|| {
+            format!(
+                "launching $EDITOR={} on {}",
+                editor.display(),
+                target.display()
+            )
+        })?;
     if !status.success() {
-        bail!("editor `{}` exited with status {}", editor.display(), status);
+        bail!(
+            "editor `{}` exited with status {}",
+            editor.display(),
+            status
+        );
     }
     Ok(())
 }
@@ -379,7 +378,10 @@ mod tests {
             "EDITOR" => Some("/usr/bin/nano".to_owned()),
             _ => None,
         };
-        assert_eq!(pick_editor_from(env).unwrap(), PathBuf::from("/usr/bin/vim"));
+        assert_eq!(
+            pick_editor_from(env).unwrap(),
+            PathBuf::from("/usr/bin/vim")
+        );
     }
 
     #[test]
@@ -389,7 +391,10 @@ mod tests {
             "EDITOR" => Some("/usr/bin/nano".to_owned()),
             _ => None,
         };
-        assert_eq!(pick_editor_from(env).unwrap(), PathBuf::from("/usr/bin/nano"));
+        assert_eq!(
+            pick_editor_from(env).unwrap(),
+            PathBuf::from("/usr/bin/nano")
+        );
     }
 
     #[test]
@@ -432,4 +437,3 @@ mod tests {
         assert!(err.to_string().contains("cr init"));
     }
 }
-
