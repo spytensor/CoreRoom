@@ -410,7 +410,10 @@ mod tests {
             name.starts_with("001-"),
             "first patch should be sequence 001: {name}"
         );
-        assert!(name.ends_with(".md"));
+        assert_eq!(
+            outcome.path.extension().and_then(|e| e.to_str()),
+            Some("md")
+        );
         let content = fs::read_to_string(&outcome.path).unwrap();
         assert!(content.contains("verify_token"));
     }
