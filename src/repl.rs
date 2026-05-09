@@ -13,7 +13,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use crossterm::style::Stylize;
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -22,6 +22,7 @@ use tracing::{debug, warn};
 
 use crate::adapter::cc::CcAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::gemini::GeminiAdapter;
 use crate::adapter::{Engine, EngineAdapter, RoleHandle, UserMessage};
 use crate::bus::MessageBus;
 use crate::config::{Config, CODEROOM_DIR};
@@ -125,6 +126,26 @@ fn parse_patch_arg(arg: &str) -> Option<Command> {
     })
 }
 
+/// Bundle of every available engine adapter, constructed once per
+/// `cr start` invocation. Bundled so REPL helpers don't have to
+/// thread three separate references through every call site.
+#[derive(Debug)]
+struct Adapters {
+    cc: CcAdapter,
+    codex: CodexAdapter,
+    gemini: GeminiAdapter,
+}
+
+impl Adapters {
+    fn new() -> Self {
+        Self {
+            cc: CcAdapter::new(),
+            codex: CodexAdapter::new(),
+            gemini: GeminiAdapter::new(),
+        }
+    }
+}
+
 /// Live state for a single running role inside the REPL.
 struct RunningRole {
     tx_user: mpsc::Sender<UserMessage>,
@@ -149,8 +170,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
     let log_path = coderoom_dir.join("messages.jsonl");
     let bus = Arc::new(MessageBus::open(&log_path).await?);
 
-    let cc_adapter = CcAdapter::new();
-    let codex_adapter = CodexAdapter::new();
+    let adapters = Adapters::new();
 
     let mut roles: HashMap<String, RunningRole> = HashMap::new();
     for name in cfg
@@ -158,15 +178,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
         .map(ToOwned::to_owned)
         .collect::<Vec<String>>()
     {
-        let running = spawn_role(
-            &cfg,
-            &cc_adapter,
-            &codex_adapter,
-            &coderoom_dir,
-            &name,
-            &bus,
-        )
-        .await?;
+        let running = spawn_role(&cfg, &adapters, &coderoom_dir, &name, &bus).await?;
         roles.insert(name, running);
     }
 
@@ -197,16 +209,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
                 }
             }
             Command::Refresh(role) => {
-                refresh_role(
-                    &cfg,
-                    &cc_adapter,
-                    &codex_adapter,
-                    &coderoom_dir,
-                    &bus,
-                    &mut roles,
-                    &role,
-                )
-                .await;
+                refresh_role(&cfg, &adapters, &coderoom_dir, &bus, &mut roles, &role).await;
             }
             Command::Patch { role, text } => {
                 if !cfg.roles.contains_key(&role) {
@@ -499,8 +502,7 @@ fn truncate_inline(s: &str, max_chars: usize) -> String {
 /// REPL.
 async fn refresh_role(
     cfg: &Config,
-    cc_adapter: &CcAdapter,
-    codex_adapter: &CodexAdapter,
+    adapters: &Adapters,
     coderoom_dir: &Path,
     bus: &Arc<MessageBus>,
     roles: &mut HashMap<String, RunningRole>,
@@ -514,7 +516,7 @@ async fn refresh_role(
         drop(old);
         println!("{}", format!("refreshing @{role}...").dim());
     }
-    match spawn_role(cfg, cc_adapter, codex_adapter, coderoom_dir, role, bus).await {
+    match spawn_role(cfg, adapters, coderoom_dir, role, bus).await {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
             println!("{}", format!("✓ @{role} refreshed").green());
@@ -534,8 +536,7 @@ async fn refresh_role(
 /// keep alive.
 async fn spawn_role(
     cfg: &Config,
-    cc_adapter: &CcAdapter,
-    codex_adapter: &CodexAdapter,
+    adapters: &Adapters,
     coderoom_dir: &Path,
     name: &str,
     bus: &Arc<MessageBus>,
@@ -551,20 +552,21 @@ async fn spawn_role(
     priors_temp.path().clone_into(&mut role_cfg.priors_path);
 
     let handle = match role_cfg.engine {
-        Engine::Cc => cc_adapter
+        Engine::Cc => adapters
+            .cc
             .start(role_cfg)
             .await
             .with_context(|| format!("spawning role `{name}`"))?,
-        Engine::Codex => codex_adapter
+        Engine::Codex => adapters
+            .codex
             .start(role_cfg)
             .await
             .with_context(|| format!("spawning role `{name}` (codex)"))?,
-        Engine::Gemini => {
-            bail!(
-                "engine `gemini` is not yet supported in v0.1; \
-                 use `cc` or `codex` for now",
-            );
-        }
+        Engine::Gemini => adapters
+            .gemini
+            .start(role_cfg)
+            .await
+            .with_context(|| format!("spawning role `{name}` (gemini)"))?,
     };
 
     let RoleHandle {

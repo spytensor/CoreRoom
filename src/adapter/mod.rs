@@ -12,6 +12,7 @@
 
 pub mod cc;
 pub mod codex;
+pub mod gemini;
 
 use std::path::PathBuf;
 
