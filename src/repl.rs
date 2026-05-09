@@ -131,7 +131,10 @@ struct RunningRole {
     /// path passed to the engine via `--append-system-prompt-file`
     /// remains valid until the subprocess has fully read it. Dropped
     /// at role removal, which deletes the file.
-    #[allow(dead_code, reason = "kept alive only for its Drop side-effect (tempfile cleanup)")]
+    #[allow(
+        dead_code,
+        reason = "kept alive only for its Drop side-effect (tempfile cleanup)"
+    )]
     priors_temp: NamedTempFile,
 }
 
