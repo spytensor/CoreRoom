@@ -204,7 +204,7 @@ fn main() -> Result<()> {
         }
         Some(Cmd::Init { project, yes }) => {
             let opts = if yes {
-                coderoom::init::InitOptions::auto()
+                coderoom::init::InitOptions::accepted_defaults()
             } else {
                 coderoom::init::InitOptions::manual()
             };
