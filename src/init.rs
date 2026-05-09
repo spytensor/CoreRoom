@@ -247,12 +247,12 @@ fn human_label(signal: &StackSignal) -> String {
     match signal {
         StackSignal::CargoToml => "Cargo.toml (Rust)".into(),
         StackSignal::GoMod => "go.mod (Go)".into(),
-        StackSignal::PackageJson { has_ui_framework: true } => {
-            "package.json (with UI framework)".into()
-        }
-        StackSignal::PackageJson { has_ui_framework: false } => {
-            "package.json (no UI framework detected)".into()
-        }
+        StackSignal::PackageJson {
+            has_ui_framework: true,
+        } => "package.json (with UI framework)".into(),
+        StackSignal::PackageJson {
+            has_ui_framework: false,
+        } => "package.json (no UI framework detected)".into(),
         StackSignal::PythonProject => "Python project (requirements.txt or pyproject.toml)".into(),
         StackSignal::JvmProject => "JVM project (pom.xml or build.gradle)".into(),
         StackSignal::Migrations => "migrations/ or db/ directory".into(),
@@ -379,7 +379,10 @@ mod tests {
         run(tmp.path(), InitOptions::auto()).expect("init");
 
         let backend_priors = std::fs::read_to_string(
-            tmp.path().join(CODEROOM_DIR).join(ROLES_DIR).join("backend.md"),
+            tmp.path()
+                .join(CODEROOM_DIR)
+                .join(ROLES_DIR)
+                .join("backend.md"),
         )
         .unwrap();
         // Template's `{ROLE}` placeholder should be replaced.
