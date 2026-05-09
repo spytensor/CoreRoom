@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (nothing yet)
 
+## [0.1.8] - 2026-05-09
+
+### Fixed
+
+- Role expansion picker no longer bleeds across rows in real terminals.
+  The previous implementation padded `StyledContent` values with `{:<N}`
+  format specifiers; SGR escape bytes were counted in the padding budget,
+  so visible row widths drifted unpredictably and lines wrapped onto each
+  other. The picker is now rendered as a single line per role with
+  fixed-width plain padding applied before color, and the description is
+  truncated (with `…`) to fit terminal width minus a 22-char prefix.
+  Verified at 60 / 80 / 120 columns.
+- `print_engine_summary`, `print_role_summary`, `push_engine_status_compact`,
+  `push_tree_preview`, `print_role_plan_to_buffer`, and the engine picker
+  shared the same SGR-pollution bug; all are corrected.
+
+### Added
+
+- `cr` aborts cleanly with install instructions when none of `claude`,
+  `codex`, or `gemini` is on `$PATH`. `cr config` and `cr update` are
+  exempted (both are useful when fixing the very setup that's missing).
+- `src/output.rs` centralises the color palette and semantic helpers
+  per the new `docs/colors.md` spec. Truecolor RGB replaces the previous
+  ANSI-name palette; FNV-1a hashing replaces `DefaultHasher` so a role's
+  color is stable across Rust toolchain versions, not just within a
+  single build.
+- `docs/DEVELOPMENT.md` now requires screenshot verification at
+  60 × 20, 80 × 24, and 120 × 40 for any PR that touches the wizard,
+  pickers, dashboard, or palette. `cargo test` cannot validate layout.
+- `cargo test --lib picker_visual_smoke -- --nocapture --ignored`
+  renders the picker rows at three widths to stderr for human review.
+
+### Changed
+
+- The boot dashboard, REPL status messages, tool traces, and system
+  bracket lines (`[@role ready]`, `[@role stopped: ...]`) all route
+  through `output::*`. The previous palette of ANSI color names
+  rendered inconsistently across terminals; the new truecolor palette
+  is muted L 70–83% pastels chosen for AA-text contrast on common
+  dark backgrounds.
+- `init.rs` no longer maintains its own role color table; it imports
+  `output::role_color` so the wizard and the REPL agree on the palette.
+- Picker descriptions no longer show a per-row `0.2k` token estimate or
+  the cursor-row preview tree (`└─ knows X, Y`). Both were noise that
+  fragmented the layout.
+
 ## [0.1.7] - 2026-05-09
 
 ### Added

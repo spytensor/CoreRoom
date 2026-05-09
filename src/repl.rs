@@ -28,6 +28,7 @@ use crate::adapter::{Engine, EngineAdapter, RoleHandle, UserMessage};
 use crate::bus::MessageBus;
 use crate::config::{Config, CODEROOM_DIR};
 use crate::crep::CrepEvent;
+use crate::output;
 use crate::priors;
 
 /// One parsed user input.
@@ -260,61 +261,59 @@ pub async fn run(project_root: &Path) -> Result<()> {
             Command::Stop(role) => {
                 if let Some(running) = roles.remove(&role) {
                     drop(running.tx_user);
-                    println!("{}", format!("[stopped @{role}]").dim());
+                    output::system(format!("stopped @{role}"));
                 } else {
-                    println!("{}", format!("no such role: @{role}").red());
+                    output::bad(format!("no such role: @{role}"));
                 }
             }
             Command::Refresh(role) => {
                 refresh_role(&cfg, &adapters, &coderoom_dir, &bus, &mut roles, &role).await;
             }
             Command::Transcript(role) => {
-                show_transcript(&coderoom_dir, &role).await;
+                show_transcript(&coderoom_dir, &role, &cfg.host_role).await;
             }
             Command::Journal(role) => {
-                write_journal(&roles, &mut renderer_rx, &coderoom_dir, &role).await;
+                write_journal(
+                    &roles,
+                    &mut renderer_rx,
+                    &coderoom_dir,
+                    &role,
+                    &cfg.host_role,
+                )
+                .await;
             }
             Command::Welcome => {
                 print_home(&cfg, &coderoom_dir, project_root, false);
             }
             Command::Patch { role, text } => {
                 if !cfg.roles.contains_key(&role) {
-                    println!("{}", format!("no such role: @{role}").red());
+                    output::bad(format!("no such role: @{role}"));
                     continue;
                 }
                 match priors::write_patch(&coderoom_dir, &role, &text) {
                     Ok(outcome) => {
-                        println!(
-                            "{}",
-                            format!("✓ patched @{role} → {}", outcome.path.display()).green()
-                        );
+                        output::ok(format!("patched @{role} → {}", outcome.path.display()));
                         if let Some(archived) = outcome.archived {
-                            println!(
-                                "{}",
-                                format!(
-                                    "  (cap reached; archived oldest → {})",
-                                    archived.display()
-                                )
-                                .dim()
-                            );
+                            output::hint(format!(
+                                "(cap reached; archived oldest → {})",
+                                archived.display()
+                            ));
                         }
-                        println!(
-                            "{}",
-                            "  applies to next /refresh; current session still uses old priors"
-                                .dim()
+                        output::hint(
+                            "applies to next /refresh; current session still uses old priors",
                         );
                     }
                     Err(error) => {
-                        println!("{}", format!("✗ patch failed: {error:#}").red());
+                        output::bad(format!("patch failed: {error:#}"));
                     }
                 }
             }
             Command::SendTo { role, text } => {
-                send_and_drain(&roles, &mut renderer_rx, &role, &text).await?;
+                send_and_drain(&roles, &mut renderer_rx, &role, &text, &cfg.host_role).await?;
             }
             Command::SendToHost(text) => {
                 let host = cfg.host_role.clone();
-                send_and_drain(&roles, &mut renderer_rx, &host, &text).await?;
+                send_and_drain(&roles, &mut renderer_rx, &host, &text, &cfg.host_role).await?;
             }
         }
     }
@@ -323,7 +322,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
 }
 
 async fn prompt(stdout: &mut tokio::io::Stdout) -> Result<()> {
-    let prompt = format!("\n{} ", "cr ›".green().bold());
+    let prompt = output::prompt();
     stdout.write_all(prompt.as_bytes()).await?;
     stdout.flush().await?;
     Ok(())
@@ -382,11 +381,14 @@ fn empty_cell() -> UiCell {
 
 fn label_cell(label: &str, value: UiCell) -> UiCell {
     let padded = format!("{label:<8}");
-    join_cells(&[styled_cell(&padded, padded.as_str().dim()), value])
+    join_cells(&[
+        styled_cell(&padded, padded.as_str().with(output::MUTE)),
+        value,
+    ])
 }
 
 fn heading_cell(text: &str) -> UiCell {
-    styled_cell(text, text.with(crossterm::style::Color::DarkYellow).bold())
+    styled_cell(text, text.with(output::KEY).bold())
 }
 
 fn home_width() -> usize {
@@ -497,12 +499,13 @@ fn role_profile_cell(cfg: &Config, coderoom_dir: &Path, name: &str, max_width: u
         context
     );
     let role_name = format!("@{name}");
+    let role_paint = output::role_color(name, &cfg.host_role);
     let cell = join_cells(&[
-        styled_cell("●", "●".with(role_color(name))),
+        styled_cell("●", "●".with(role_paint)),
         plain_cell(" "),
         styled_cell(
             &format!("{role_name:<14}"),
-            format!("{role_name:<14}").with(role_color(name)).bold(),
+            format!("{role_name:<14}").with(role_paint).bold(),
         ),
         plain_cell(format!(
             " {:<6} {:<18} {:<12} {tokens:>7} tokens{host_suffix}",
@@ -541,6 +544,7 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
         "Welcome back. CodeRoom loaded your effective project configuration."
     };
 
+    let host_paint = output::role_color(&cfg.host_role, &cfg.host_role);
     let left = [
         heading_cell("Project"),
         label_cell(
@@ -548,14 +552,14 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
             styled_cell(
                 project_name,
                 truncate_inline(project_name, left_width.saturating_sub(8))
-                    .with(crossterm::style::Color::White)
+                    .with(output::EM)
                     .bold(),
             ),
         ),
         label_cell("config", plain_cell(config_layers(project_root))),
         label_cell(
             "host",
-            styled_cell(&host, host.as_str().with(role_color(&cfg.host_role)).bold()),
+            styled_cell(&host, host.as_str().with(host_paint).bold()),
         ),
         label_cell(
             "roles",
@@ -577,19 +581,19 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
     let right = [
         heading_cell("Operate"),
         join_cells(&[
-            styled_cell("cr ›", "cr ›".green().bold()),
+            styled_cell("cr ›", "cr ›".with(output::PROMPT).bold()),
             plain_cell(" ask the host"),
         ]),
         join_cells(&[
-            styled_cell("@role", "@role".yellow()),
+            styled_cell("@role", "@role".with(output::KEY)),
             plain_cell(" route to a specialist"),
         ]),
         join_cells(&[
-            styled_cell("/patch", "/patch".yellow()),
+            styled_cell("/patch", "/patch".with(output::KEY)),
             plain_cell(" persist a correction"),
         ]),
         join_cells(&[
-            styled_cell("cr update", "cr update".yellow()),
+            styled_cell("cr update", "cr update".with(output::KEY)),
             plain_cell(" upgrade this install"),
         ]),
         plain_cell("/help · /welcome · /exit"),
@@ -599,7 +603,7 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
     let title = styled_cell(
         &format!(" codeRoom v{} ", env!("CARGO_PKG_VERSION")),
         format!(" codeRoom v{} ", env!("CARGO_PKG_VERSION"))
-            .with(crossterm::style::Color::DarkYellow)
+            .with(output::KEY)
             .bold(),
     );
     println!("{}", top_border(width, &title));
@@ -610,12 +614,9 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
             width,
             &join_cells(&[
                 plain_cell("room "),
-                styled_cell(
-                    project_name,
-                    project_name.with(crossterm::style::Color::White).bold()
-                ),
+                styled_cell(project_name, project_name.with(output::EM).bold()),
                 plain_cell(" · "),
-                styled_cell(&host, host.as_str().with(role_color(&cfg.host_role)).bold()),
+                styled_cell(&host, host.as_str().with(host_paint).bold()),
                 plain_cell(format!(
                     " · {} base tokens",
                     priors::format_token_count(total_tokens)
@@ -647,7 +648,7 @@ fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run:
     println!("{}", bottom_border(width));
     println!(
         "{}",
-        "type a task to begin; bare text goes to the host role".dim()
+        "type a task to begin; bare text goes to the host role".with(output::DIM)
     );
 }
 
@@ -666,7 +667,7 @@ fn print_help(cfg: &Config) {
     println!();
     println!(
         "{}",
-        "tool traces are folded live; run `cr show` for the full event log".dim()
+        "tool traces are folded live; run `cr show` for the full event log".with(output::DIM)
     );
 }
 
@@ -680,8 +681,9 @@ async fn send_and_drain(
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     role: &str,
     text: &str,
+    host_role: &str,
 ) -> Result<()> {
-    let Some(captured) = drain_one_turn(roles, rx, role, text).await? else {
+    let Some(captured) = drain_one_turn(roles, rx, role, text, host_role).await? else {
         return Ok(());
     };
 
@@ -693,10 +695,16 @@ async fn send_and_drain(
         }
         let brief = format!("From @{role}: {}", captured.text);
         println!(
-            "{}",
-            format!("  ↳ auto-routing to @{mention}").dim().italic()
+            "  {} {}",
+            "↳".with(output::FADE),
+            format!("auto-routing to @{mention}")
+                .with(output::DIM)
+                .italic(),
         );
-        if drain_one_turn(roles, rx, mention, &brief).await?.is_none() {
+        if drain_one_turn(roles, rx, mention, &brief, host_role)
+            .await?
+            .is_none()
+        {
             break;
         }
     }
@@ -747,7 +755,7 @@ impl ThinkingSpinner {
         // unambiguously "status" and not confused with a RoleSpoke.
         print!(
             "\r\x1b[2K{}",
-            format!("  @{} thinking {}", self.role, frame).dim()
+            format!("  @{} thinking {}", self.role, frame).with(output::DIM)
         );
         let _ = std::io::stdout().flush();
         self.is_painted = true;
@@ -873,7 +881,7 @@ impl TurnActivity {
 
     fn render_summary(&self, role: &str) {
         if let Some(line) = self.summary_line(role) {
-            println!("{}", line.dim());
+            println!("{}", line.with(output::DIM));
         }
     }
 }
@@ -890,9 +898,10 @@ async fn drain_one_turn(
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     role: &str,
     text: &str,
+    host_role: &str,
 ) -> Result<Option<CapturedTurn>> {
     let Some(running) = roles.get(role) else {
-        println!("{}", format!("no such role: @{role}").red());
+        output::bad(format!("no such role: @{role}"));
         return Ok(None);
     };
 
@@ -934,16 +943,16 @@ async fn drain_one_turn(
                                 mentions: mentions.clone(),
                             });
                             activity.render_summary(role);
-                            render_event(&event);
+                            render_event(&event, host_role);
                             true
                         }
                         CrepEvent::RoleStopped { role: stopped, .. } if stopped == role => {
                             activity.render_summary(role);
-                            render_event(&event);
+                            render_event(&event, host_role);
                             true
                         }
                         _ => {
-                            render_event(&event);
+                            render_event(&event, host_role);
                             false
                         }
                     };
@@ -954,10 +963,9 @@ async fn drain_one_turn(
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     spinner.clear();
-                    println!(
-                        "{}",
-                        format!("[renderer fell behind, skipped {skipped} event(s)]").dim()
-                    );
+                    output::system(format!(
+                        "renderer fell behind, skipped {skipped} event(s)"
+                    ));
                     spinner.repaint();
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -978,13 +986,18 @@ pub async fn show_log(project_root: &Path) -> Result<()> {
         println!("(no messages — has `cr start` ever run in this project?)");
         return Ok(());
     }
+    // Loading config gives us the host role for stable lavender rendering.
+    // If the config can't load (e.g. malformed), fall back to the default
+    // host name — the replay still renders, lavender just won't pin.
+    let host_role =
+        Config::load(project_root).map_or_else(|_| "host".to_owned(), |cfg| cfg.host_role);
     let events = MessageBus::replay(&log_path).await?;
     if events.is_empty() {
         println!("(message log is empty)");
         return Ok(());
     }
     for event in &events {
-        render_event(event);
+        render_event(event, &host_role);
     }
     Ok(())
 }
@@ -1000,9 +1013,10 @@ async fn write_journal(
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     coderoom_dir: &Path,
     role: &str,
+    host_role: &str,
 ) {
     if !roles.contains_key(role) {
-        println!("{}", format!("no such role: @{role}").red());
+        output::bad(format!("no such role: @{role}"));
         return;
     }
 
@@ -1012,13 +1026,13 @@ async fn write_journal(
         - a repo file path (`src/auth/verify.go`).\n\
         Do not include claims you can't cite. Keep it under 30 lines.";
 
-    println!("{}", format!("asking @{role} for a journal entry...").dim());
+    println!(
+        "{}",
+        format!("asking @{role} for a journal entry...").with(output::DIM)
+    );
 
-    let Ok(Some(captured)) = drain_one_turn(roles, rx, role, prompt).await else {
-        println!(
-            "{}",
-            format!("✗ @{role} did not produce a journal entry").red()
-        );
+    let Ok(Some(captured)) = drain_one_turn(roles, rx, role, prompt, host_role).await else {
+        output::bad(format!("@{role} did not produce a journal entry"));
         return;
     };
 
@@ -1027,10 +1041,7 @@ async fn write_journal(
         .join(priors::JOURNAL_DIR)
         .join(today.format("%Y-%m-%d").to_string());
     if let Err(error) = std::fs::create_dir_all(&day_dir) {
-        println!(
-            "{}",
-            format!("✗ failed to create {}: {error}", day_dir.display()).red()
-        );
+        output::bad(format!("failed to create {}: {error}", day_dir.display()));
         return;
     }
     let path = day_dir.join(format!("{role}.md"));
@@ -1040,30 +1051,24 @@ async fn write_journal(
         format!("{}\n", captured.text)
     };
     if let Err(error) = std::fs::write(&path, body) {
-        println!(
-            "{}",
-            format!("✗ failed to write {}: {error}", path.display()).red()
-        );
+        output::bad(format!("failed to write {}: {error}", path.display()));
         return;
     }
 
-    println!(
-        "{}",
-        format!("✓ journal saved → {}", path.display()).green()
-    );
-    println!(
-        "{}",
-        "  next spawn (or /refresh) will load this entry into the role's priors".dim()
-    );
+    output::ok(format!("journal saved → {}", path.display()));
+    output::hint("next spawn (or /refresh) will load this entry into the role's priors");
 }
 
 /// In-REPL: print the last few RoleSpoke events for `role` from the
 /// active session's message log.
-async fn show_transcript(coderoom_dir: &Path, role: &str) {
+async fn show_transcript(coderoom_dir: &Path, role: &str, host_role: &str) {
     const TAIL: usize = 5;
     let log_path = coderoom_dir.join("messages.jsonl");
     if !log_path.is_file() {
-        println!("{}", "(no messages logged yet this session)".dim());
+        println!(
+            "{}",
+            "(no messages logged yet this session)".with(output::DIM)
+        );
         return;
     }
     match MessageBus::replay(&log_path).await {
@@ -1073,7 +1078,10 @@ async fn show_transcript(coderoom_dir: &Path, role: &str) {
                 .filter(|e| matches!(e, CrepEvent::RoleSpoke { role: r, .. } if r == role))
                 .collect();
             if filtered.is_empty() {
-                println!("{}", format!("(no spoken turns from @{role} yet)").dim());
+                println!(
+                    "{}",
+                    format!("(no spoken turns from @{role} yet)").with(output::DIM)
+                );
                 return;
             }
             let start = filtered.len().saturating_sub(TAIL);
@@ -1084,25 +1092,22 @@ async fn show_transcript(coderoom_dir: &Path, role: &str) {
                     filtered.len() - start,
                     filtered.len()
                 )
-                .dim()
+                .with(output::DIM)
             );
             for event in &filtered[start..] {
-                render_event(event);
+                render_event(event, host_role);
             }
         }
         Err(error) => {
-            println!("{}", format!("✗ failed to read message log: {error}").red());
+            output::bad(format!("failed to read message log: {error}"));
         }
     }
 }
 
-fn render_event(event: &CrepEvent) {
+fn render_event(event: &CrepEvent, host_role: &str) {
     match event {
         CrepEvent::RoleStarted { role, model, .. } => {
-            println!(
-                "{}",
-                format!("[@{role} ready · model={model}]").dim().italic()
-            );
+            output::system(format!("@{role} ready · model={model}"));
         }
         CrepEvent::RoleSpoke {
             role,
@@ -1110,11 +1115,7 @@ fn render_event(event: &CrepEvent) {
             cost_usd,
             ..
         } => {
-            println!(
-                "{} {}",
-                format!("@{role}").with(role_color(role)).bold(),
-                text,
-            );
+            println!("{} {}", output::role_token(role, host_role), text);
             debug!(role, cost_usd, "RoleSpoke rendered");
         }
         CrepEvent::ToolCallProposed {
@@ -1124,7 +1125,7 @@ fn render_event(event: &CrepEvent) {
             ..
         } => {
             let summary = summarize_tool_input(tool_input);
-            println!("{}", format!("  ↳ @{role} · {tool_name} {summary}").dim());
+            output::tool_trace(role, format!("{tool_name} {summary}"));
         }
         CrepEvent::ToolCallExecuted {
             role,
@@ -1132,8 +1133,17 @@ fn render_event(event: &CrepEvent) {
             output_summary,
             ..
         } => {
-            let glyph = if *ok { "✓" } else { "✗" };
-            println!("{}", format!("  {glyph} @{role} · {output_summary}").dim());
+            // Tool executed lines borrow the trace shape but swap in
+            // ✓/✗ in their semantic colors per docs/colors.md §4.
+            let glyph = if *ok {
+                "✓".with(output::OK)
+            } else {
+                "✗".with(output::BAD)
+            };
+            println!(
+                "  {glyph} @{role} · {}",
+                output_summary.as_str().with(output::DIM)
+            );
         }
         CrepEvent::PermissionDenied {
             role,
@@ -1141,41 +1151,17 @@ fn render_event(event: &CrepEvent) {
             reason,
             ..
         } => {
+            // ⊘ is `warn` per the glyph table; the message tier stays dim.
             println!(
-                "{}",
-                format!("  ⊘ @{role} · {tool_name} denied: {reason}").yellow()
+                "  {} @{role} · {}",
+                "⊘".with(output::WARN),
+                format!("{tool_name} denied: {reason}").with(output::DIM),
             );
         }
         CrepEvent::RoleStopped { role, reason } => {
-            println!(
-                "{}",
-                format!("[@{role} stopped: {reason:?}]").dim().italic()
-            );
+            output::system(format!("@{role} stopped: {reason:?}"));
         }
     }
-}
-
-/// Stable per-role color so the same role keeps its color across the
-/// whole session. Hash the role name into the 256-color palette,
-/// avoiding the dim/black region.
-fn role_color(role: &str) -> crossterm::style::Color {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    role.hash(&mut hasher);
-    // Map into a curated set of bright, distinguishable colors.
-    let palette = [
-        crossterm::style::Color::Cyan,
-        crossterm::style::Color::Magenta,
-        crossterm::style::Color::Yellow,
-        crossterm::style::Color::Green,
-        crossterm::style::Color::Blue,
-        crossterm::style::Color::Red,
-    ];
-    // The modular result is always in `0..palette.len()` (= 6), so the
-    // `as usize` cast cannot truncate even on 32-bit pointer targets.
-    #[allow(clippy::cast_possible_truncation)]
-    let idx = (hasher.finish() % palette.len() as u64) as usize;
-    palette[idx]
 }
 
 fn summarize_tool_input(input: &serde_json::Value) -> String {
@@ -1216,23 +1202,26 @@ async fn refresh_role(
     role: &str,
 ) {
     if !cfg.roles.contains_key(role) {
-        println!("{}", format!("no such role: @{role}").red());
+        output::bad(format!("no such role: @{role}"));
         return;
     }
     if let Some(old) = roles.remove(role) {
         drop(old);
-        println!("{}", format!("refreshing @{role}...").dim());
+        // ⟳ is `warn` per docs/colors.md §4 — refresh is "attention,
+        // non-fatal," not success or failure.
+        println!(
+            "{} {}",
+            "⟳".with(output::WARN),
+            format!("refreshing @{role}...").with(output::TEXT),
+        );
     }
     match spawn_role(cfg, adapters, coderoom_dir, role, bus).await {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
-            println!("{}", format!("✓ @{role} refreshed").green());
+            output::ok(format!("@{role} refreshed"));
         }
         Err(error) => {
-            println!(
-                "{}",
-                format!("✗ refreshing @{role} failed: {error:#}").red()
-            );
+            output::bad(format!("refreshing @{role} failed: {error:#}"));
         }
     }
 }
@@ -1605,12 +1594,6 @@ mod tests {
             }
             other => panic!("expected SendTo, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn role_color_is_stable_for_same_name() {
-        assert_eq!(role_color("backend"), role_color("backend"));
-        assert_eq!(role_color("frontend"), role_color("frontend"));
     }
 
     #[test]

@@ -102,6 +102,48 @@ docs/
 └── DEVELOPMENT.md             # this file
 ```
 
+## Visual / TUI changes need screenshot verification
+
+**`cargo test` cannot validate layout.** It catches type errors and
+dataflow bugs but not "this picker bleeds across rows on a 200-col
+terminal" — and that's exactly the class of regression that just shipped
+and broke the role expansion picker. Anything that touches a code path
+the user looks at must be eyeballed in a real terminal before merge.
+
+PRs that modify any of:
+
+- `src/init.rs` (the wizard, role / engine pickers, project summary)
+- `src/repl.rs::print_home` (the boot dashboard)
+- `src/repl.rs::ThinkingSpinner`, tool-trace rendering, role turn
+  formatting
+- `src/output.rs` palette or helpers
+- the CLI's first-run abort screen (`src/engines.rs`)
+
+must include screenshots at three terminal widths and call out any
+visible truncation:
+
+- [ ] **80 × 24** — default xterm / SSH session
+- [ ] **120 × 40** — modern desktop terminal
+- [ ] **60 × 20** — split pane / mobile SSH
+
+For the role expansion picker specifically, run:
+
+```bash
+cargo test --lib picker_visual_smoke -- --nocapture --ignored
+```
+
+This renders the picker rows at 60 / 80 / 120 columns to stderr. Eyeball
+the alignment; descriptions should truncate with `…` at narrow widths
+and never wrap to a second line.
+
+For the no-engine abort screen, force-trigger it with:
+
+```bash
+PATH=/tmp ./target/debug/cr
+```
+
+A row that wraps is a regression even if the test suite is green.
+
 ## Debugging tips
 
 ### Tracing logs

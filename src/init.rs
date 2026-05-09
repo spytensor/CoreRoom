@@ -26,7 +26,13 @@ use crossterm::{execute, queue};
 use crate::adapter::Engine;
 use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
 use crate::detect::{self, StackSignal};
+use crate::output;
 use crate::role::{self, RoleAddition};
+
+/// The host-role name baked into the wizard. `init` runs before
+/// `.coderoom/config.toml` is committed, so the host name is fixed at
+/// "host" until the first `Config::load` after the wizard finishes.
+const WIZARD_HOST_ROLE: &str = "host";
 
 const DEFAULT_HOST_PRIORS: &str = include_str!("init_defaults/host.md");
 const DEFAULT_SHARED_PRIORS: &str = include_str!("init_defaults/shared.md");
@@ -46,91 +52,44 @@ struct RolePlan {
 struct RoleInfo {
     name: &'static str,
     description: &'static str,
-    preview: &'static [&'static str],
-    estimated_tokens: &'static str,
 }
 
 const ROLE_CATALOG: &[RoleInfo] = &[
     RoleInfo {
         name: "host",
         description: "orchestrates requests and keeps the room coherent",
-        preview: &[
-            "routes bare messages, pulls in specialists, and synthesizes",
-            "the final answer without pretending to own risky decisions",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "backend",
         description: "APIs, services, storage boundaries",
-        preview: &[
-            "knows service contracts, persistence rules, migrations,",
-            "background jobs, queues, and backend-only gotchas",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "frontend",
         description: "UI, components, routing, client-side state",
-        preview: &[
-            "knows component conventions, accessibility expectations,",
-            "design tokens, state boundaries, and browser-side regressions",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "security",
         description: "authn, authz, threat modeling",
-        preview: &[
-            "checks permission boundaries, secrets, auth flows, injection",
-            "surfaces, data exposure, and unsafe operational shortcuts",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "data",
         description: "schemas, migrations, query patterns",
-        preview: &[
-            "tracks schemas, migrations, data quality assumptions,",
-            "query plans, retention rules, and reporting contracts",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "devops",
         description: "CI/CD, infra, deploys, runtime health",
-        preview: &[
-            "owns deployment shape, environment drift, observability,",
-            "container boundaries, and operational recovery paths",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "ci",
         description: "workflows, checks, release gates",
-        preview: &[
-            "keeps test gates, release jobs, artifact generation,",
-            "and flaky workflow recovery grounded in the repo",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "qa",
         description: "test strategy, edge cases, regression risk",
-        preview: &[
-            "thinks in scenarios, missing coverage, edge conditions,",
-            "and the checks that should fail before users do",
-        ],
-        estimated_tokens: "0.2k",
     },
     RoleInfo {
         name: "docs",
         description: "technical writing, examples, API reference",
-        preview: &[
-            "keeps installation, usage, architecture, and migration",
-            "docs accurate enough that users trust the tool",
-        ],
-        estimated_tokens: "0.2k",
     },
 ];
 
@@ -590,24 +549,26 @@ fn print_engine_summary(installed: &InstalledEngines) {
     println!(
         "{} {}",
         "detect engines".bold(),
-        "· each role can use a different CLI".dark_grey()
+        "· each role can use a different CLI".with(output::DIM)
     );
     for engine in [Engine::Cc, Engine::Codex, Engine::Gemini] {
-        let label = engine_label(engine);
+        // Pad PLAIN, style after — `{:<13}` on a `StyledContent` would
+        // count the SGR escapes in the padding budget and break alignment.
+        let label_padded = format!("{:<13}", engine_label(engine));
         if installed.is_present(engine) {
             println!(
-                "  {} {:<13} {}",
-                "✓".green(),
-                label.with(Color::White),
-                engine_install_hint(engine).dark_grey()
+                "  {} {} {}",
+                "✓".with(output::OK),
+                label_padded.with(output::EM),
+                engine_install_hint(engine).with(output::DIM),
             );
         } else {
             println!(
-                "  {} {:<13} {} {}",
-                "×".red(),
-                label.dark_grey(),
-                "not installed ·".dark_grey(),
-                engine_install_hint(engine).yellow()
+                "  {} {} {} {}",
+                "✗".with(output::BAD),
+                label_padded.with(output::DIM),
+                "not installed ·".with(output::DIM),
+                engine_install_hint(engine).with(output::WARN),
             );
         }
     }
@@ -617,21 +578,20 @@ fn print_role_summary(roles: &[RolePlan]) {
     println!(
         "{} {}",
         "assign roles".bold(),
-        "· generated from detected project signals".dark_grey()
+        "· generated from detected project signals".with(output::DIM)
     );
-    println!(
-        "  {:<13} {:<13} {}",
-        "role".dark_grey(),
-        "engine".dark_grey(),
-        "focus".dark_grey()
-    );
+    let header = format!("  {:<13} {:<13} {}", "role", "engine", "focus");
+    println!("{}", header.with(output::DIM));
     for role in roles {
         let info = role_info(&role.name);
+        // Pad PLAIN before applying role / engine colors.
+        let role_token = format!("@{:<width$}", role.name, width = 12);
+        let engine_label_padded = format!("{:<13}", engine_label(role.engine));
         println!(
-            "  {:<13} {:<13} {}",
-            format!("@{}", role.name).with(role_color(&role.name)),
-            engine_label(role.engine).with(engine_color(role.engine)),
-            info.description.dark_grey()
+            "  {} {} {}",
+            role_token.with(role_color(&role.name)),
+            engine_label_padded.with(engine_color(role.engine)),
+            info.description.with(output::DIM),
         );
     }
 }
@@ -863,6 +823,70 @@ fn cycle_assignment(assignments: &mut HashMap<String, Engine>, role: &str, direc
     assignments.insert(role.to_owned(), ENGINES[next]);
 }
 
+/// Visible-cell budget used by the role picker layout.
+///
+/// `    [x] ● @<name>....description...`
+///  ^^^^^^^^^^^^^^^^^^^
+///  4    4   2  NAME_VISIBLE
+///
+/// The description fills whatever's left of the terminal width,
+/// truncated (not wrapped) so each row stays exactly one line.
+const NAME_VISIBLE: usize = 12;
+const PICKER_PREFIX_VISIBLE: usize = 4 + 4 + 2 + NAME_VISIBLE;
+const PICKER_RIGHT_MARGIN: usize = 2;
+const PICKER_DEFAULT_COLS: u16 = 80;
+const PICKER_MIN_DESC: usize = 16;
+
+/// Detect terminal columns; fall back to 80 when unavailable
+/// (non-TTY / piped output).
+fn picker_columns() -> usize {
+    terminal::size()
+        .map_or(PICKER_DEFAULT_COLS, |(cols, _)| cols)
+        .max(40) as usize
+}
+
+/// Render one row of the picker.
+///
+/// Each row is exactly one terminal line: prefix is fixed-width, the
+/// description gets truncated with `…` so it can never wrap. Styling is
+/// applied **after** all visible-width math so SGR escapes never leak
+/// into padding budgets.
+fn picker_row(
+    info: &RoleInfo,
+    selected: bool,
+    is_cursor: bool,
+    columns: usize,
+    extra_tag: Option<&str>,
+) -> String {
+    let cursor_glyph = if is_cursor { "  > " } else { "    " };
+    let check = if selected { "[x] " } else { "[ ] " };
+
+    // `@<name>` left-padded to NAME_VISIBLE visible cells. Pad PLAIN,
+    // colour after — that's the bug the previous picker tripped on.
+    let name_plain = format!("@{:<width$}", info.name, width = NAME_VISIBLE - 1);
+
+    let mut desc_plain = info.description.to_owned();
+    if let Some(tag) = extra_tag {
+        desc_plain.push_str(" · ");
+        desc_plain.push_str(tag);
+    }
+    let desc_budget = columns
+        .saturating_sub(PICKER_PREFIX_VISIBLE)
+        .saturating_sub(PICKER_RIGHT_MARGIN)
+        .max(PICKER_MIN_DESC);
+    let desc_truncated = output::truncate_visible(&desc_plain, desc_budget);
+
+    let paint = role_color(info.name);
+    format!(
+        "{}{}{} {} {}",
+        cursor_glyph.with(output::PROMPT),
+        check.with(if is_cursor { output::EM } else { output::TEXT }),
+        "●".with(paint),
+        name_plain.with(paint).bold(),
+        desc_truncated.with(output::DIM),
+    )
+}
+
 fn render_role_picker(
     project_root: &Path,
     scan: &detect::ProjectScan,
@@ -871,51 +895,43 @@ fn render_role_picker(
 ) -> String {
     let project_name = project_name(project_root);
     let selected_count = choices.iter().filter(|choice| choice.selected).count();
+    let columns = picker_columns();
     let mut out = String::new();
 
     push_header(
         &mut out,
         &project_name,
         "pick roles",
-        "space toggles · enter continues · esc backs out · q quits",
+        "space toggles · ↑↓ moves · enter continues · esc backs out",
     );
     push_scan_compact(&mut out, scan);
     let _ = writeln!(out);
 
     for (index, choice) in choices.iter().enumerate() {
-        let marker = if index == cursor { "›" } else { " " };
-        let check = if choice.selected { "[x]" } else { "[ ]" };
-        let lock = if choice.info.name == "host" {
-            " required"
+        let extra_tag = if choice.info.name == "host" {
+            Some("required")
         } else {
-            ""
+            None
         };
-        let row = format!(
-            "{marker} {check} ● @{:<10} {:<52} {:>5}{lock}",
-            choice.info.name, choice.info.description, choice.info.estimated_tokens
+        let _ = writeln!(
+            out,
+            "{}",
+            picker_row(
+                &choice.info,
+                choice.selected,
+                index == cursor,
+                columns,
+                extra_tag,
+            )
         );
-        if index == cursor {
-            let _ = writeln!(out, "{}", row.with(Color::White).on(Color::DarkGrey));
-            for line in choice.info.preview {
-                let _ = writeln!(out, "      {} {}", "└─".dark_grey(), line.dark_grey());
-            }
-        } else {
-            let role = format!("@{}", choice.info.name).with(role_color(choice.info.name));
-            let _ = writeln!(
-                out,
-                "{marker} {check} ● {:<19} {:<52} {:>5}{lock}",
-                role,
-                choice.info.description.dark_grey(),
-                choice.info.estimated_tokens.dark_grey()
-            );
-        }
     }
 
     let _ = writeln!(out);
     let _ = writeln!(
         out,
         "{}",
-        format!("{selected_count} selected · host is always present · enter continues").dark_grey()
+        format!("{selected_count} selected · host is always present · enter continues")
+            .with(output::DIM)
     );
     out
 }
@@ -931,56 +947,48 @@ fn render_role_expansion_picker(
         .iter()
         .filter(|choice| choice.selected && choice.info.name != "host")
         .count();
+    let columns = picker_columns();
     let mut out = String::new();
 
     push_header(
         &mut out,
         &project_name,
         "suggest roles",
-        "space toggles · enter adds selected roles · esc skips",
+        "space toggles · ↑↓ moves · enter adds selected · esc skips",
     );
     push_scan_compact(&mut out, scan);
     let _ = writeln!(
         out,
         "{}",
-        "CodeRoom found only @host. Choose the specialists to add:".dark_grey()
+        "CodeRoom found only @host. Choose the specialists to add:".with(output::DIM)
     );
     let _ = writeln!(out);
 
     for (index, choice) in choices.iter().enumerate() {
-        let marker = if index == cursor { "›" } else { " " };
-        let check = if choice.selected { "[x]" } else { "[ ]" };
-        let lock = if choice.info.name == "host" {
-            " existing"
+        let extra_tag = if choice.info.name == "host" {
+            Some("existing")
         } else {
-            ""
+            None
         };
-        let row = format!(
-            "{marker} {check} ● @{:<10} {:<52} {:>5}{lock}",
-            choice.info.name, choice.info.description, choice.info.estimated_tokens
+        let _ = writeln!(
+            out,
+            "{}",
+            picker_row(
+                &choice.info,
+                choice.selected,
+                index == cursor,
+                columns,
+                extra_tag,
+            )
         );
-        if index == cursor {
-            let _ = writeln!(out, "{}", row.with(Color::White).on(Color::DarkGrey));
-            for line in choice.info.preview {
-                let _ = writeln!(out, "      {} {}", "└─".dark_grey(), line.dark_grey());
-            }
-        } else {
-            let role = format!("@{}", choice.info.name).with(role_color(choice.info.name));
-            let _ = writeln!(
-                out,
-                "{marker} {check} ● {:<19} {:<52} {:>5}{lock}",
-                role,
-                choice.info.description.dark_grey(),
-                choice.info.estimated_tokens.dark_grey()
-            );
-        }
     }
 
     let _ = writeln!(out);
     let _ = writeln!(
         out,
         "{}",
-        format!("{selected_count} new roles selected · enter writes config and priors").dark_grey()
+        format!("{selected_count} new role(s) selected · enter writes config and priors")
+            .with(output::DIM)
     );
     out
 }
@@ -992,6 +1000,13 @@ fn render_engine_picker(
     assignments: &HashMap<String, Engine>,
     cursor: usize,
 ) -> String {
+    // Pad PLAIN, style after — same fix as the role picker (`StyledContent`
+    // includes SGR escapes when formatted, so `{:<N}` padding leaks into
+    // the visible row width and the layout bleeds across lines).
+    const ROLE_W: usize = 13;
+    const ENGINE_W: usize = 10;
+    const MODEL_W: usize = 18;
+
     let project_name = project_name(project_root);
     let mut out = String::new();
 
@@ -1003,38 +1018,28 @@ fn render_engine_picker(
     );
     push_engine_status_compact(&mut out, installed);
     let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "  {:<14} {:<15} {:<18} {}",
-        "role".dark_grey(),
-        "engine".dark_grey(),
-        "model".dark_grey(),
-        "note".dark_grey()
+    let header = format!(
+        "  {:<ROLE_W$} ‹ {:<ENGINE_W$} › {:<MODEL_W$} {}",
+        "role", "engine", "model", "note"
     );
+    let _ = writeln!(out, "{}", header.with(output::DIM));
 
     for (index, role) in roles.iter().enumerate() {
         let engine = *assignments.get(role).unwrap_or(&DEFAULT_ENGINE);
         let note = engine_note(engine, installed);
-        let row = format!(
-            "{} {:<13} ‹ {:<10} › {:<18} {}",
-            if index == cursor { "›" } else { " " },
-            format!("@{role}"),
-            engine_label(engine),
-            model_label(engine),
-            note
+        let cursor_glyph = if index == cursor { "  > " } else { "    " };
+        let role_plain = format!("@{role:<width$}", width = ROLE_W - 1);
+        let engine_plain = format!("{:<ENGINE_W$}", engine_label(engine));
+        let model_plain = format!("{:<MODEL_W$}", model_label(engine));
+        let _ = writeln!(
+            out,
+            "{}{} ‹ {} › {} {}",
+            cursor_glyph.with(output::PROMPT),
+            role_plain.with(role_color(role)).bold(),
+            engine_plain.with(engine_color(engine)),
+            model_plain.with(output::DIM),
+            note.with(output::DIM),
         );
-        if index == cursor {
-            let _ = writeln!(out, "{}", row.with(Color::White).on(Color::DarkGrey));
-        } else {
-            let _ = writeln!(
-                out,
-                "  {:<13} ‹ {:<10} › {:<18} {}",
-                format!("@{role}").with(role_color(role)),
-                engine_label(engine).with(engine_color(engine)),
-                model_label(engine).dark_grey(),
-                note.dark_grey()
-            );
-        }
     }
 
     let _ = writeln!(out);
@@ -1130,22 +1135,23 @@ fn push_scan_compact(out: &mut String, scan: &detect::ProjectScan) {
 fn push_engine_status_compact(out: &mut String, installed: &InstalledEngines) {
     let _ = writeln!(out, "detected on your system:");
     for engine in [Engine::Cc, Engine::Codex, Engine::Gemini] {
+        let label_padded = format!("{:<13}", engine_label(engine));
         if installed.is_present(engine) {
             let _ = writeln!(
                 out,
-                "  {} {:<13} {}",
-                "✓".green(),
-                engine_label(engine).with(engine_color(engine)),
-                "installed".dark_grey()
+                "  {} {} {}",
+                "✓".with(output::OK),
+                label_padded.with(engine_color(engine)),
+                "installed".with(output::DIM),
             );
         } else {
             let _ = writeln!(
                 out,
-                "  {} {:<13} {} {}",
-                "×".red(),
-                engine_label(engine).dark_grey(),
-                "not installed ·".dark_grey(),
-                engine_install_hint(engine).yellow()
+                "  {} {} {} {}",
+                "✗".with(output::BAD),
+                label_padded.with(output::DIM),
+                "not installed ·".with(output::DIM),
+                engine_install_hint(engine).with(output::WARN),
             );
         }
     }
@@ -1160,12 +1166,12 @@ fn push_tree_preview(out: &mut String, coderoom_dir: &Path, plan: &[RolePlan]) {
     let _ = writeln!(
         out,
         "├─ config.toml              {}",
-        format!("{} roles", plan.len()).dark_grey()
+        format!("{} roles", plan.len()).with(output::DIM)
     );
     let _ = writeln!(
         out,
         "├─ shared.md                {}",
-        "project-wide priors".dark_grey()
+        "project-wide priors".with(output::DIM)
     );
     let _ = writeln!(out, "├─ roles/");
     for (index, role) in plan.iter().enumerate() {
@@ -1174,32 +1180,31 @@ fn push_tree_preview(out: &mut String, coderoom_dir: &Path, plan: &[RolePlan]) {
         } else {
             "├─"
         };
+        let role_filename = format!("{}.md", role.name);
+        let role_filename_padded = format!("{role_filename:<18}");
         let _ = writeln!(
             out,
-            "│  {branch} {:<18} {}",
-            format!("{}.md", role.name).with(role_color(&role.name)),
-            engine_label(role.engine).dark_grey()
+            "│  {branch} {} {}",
+            role_filename_padded.with(role_color(&role.name)),
+            engine_label(role.engine).with(output::DIM),
         );
     }
     let _ = writeln!(out, "└─ .gitignore");
 }
 
 fn print_role_plan_to_buffer(out: &mut String, plan: &[RolePlan]) {
-    let _ = writeln!(
-        out,
-        "  {:<14} {:<12} {}",
-        "role".dark_grey(),
-        "engine".dark_grey(),
-        "focus".dark_grey()
-    );
+    let header = format!("  {:<14} {:<12} {}", "role", "engine", "focus");
+    let _ = writeln!(out, "{}", header.with(output::DIM));
     for role in plan {
         let info = role_info(&role.name);
+        let role_token = format!("@{:<width$}", role.name, width = 13);
+        let engine_padded = format!("{:<12}", engine_label(role.engine));
         let _ = writeln!(
             out,
-            "  {:<14} {:<12} {}",
-            format!("@{}", role.name).with(role_color(&role.name)),
-            engine_label(role.engine).with(engine_color(role.engine)),
-            info.description.dark_grey()
+            "  {} {} {}",
+            role_token.with(role_color(&role.name)),
+            engine_padded.with(engine_color(role.engine)),
+            info.description.with(output::DIM),
         );
     }
 }
@@ -1297,22 +1302,9 @@ fn human_label(signal: &StackSignal) -> String {
     }
 }
 
-/// Result of probing `claude`/`codex`/`gemini` on `$PATH`.
-struct InstalledEngines {
-    cc: bool,
-    codex: bool,
-    gemini: bool,
-}
-
-impl InstalledEngines {
-    fn is_present(&self, engine: Engine) -> bool {
-        match engine {
-            Engine::Cc => self.cc,
-            Engine::Codex => self.codex,
-            Engine::Gemini => self.gemini,
-        }
-    }
-}
+/// Re-exported under the old name so the rest of `init.rs` doesn't have
+/// to change. Single source of truth lives in `crate::engines`.
+type InstalledEngines = crate::engines::Engines;
 
 fn project_name(project_root: &Path) -> String {
     project_root
@@ -1330,32 +1322,11 @@ fn role_info(name: &str) -> RoleInfo {
         .unwrap_or(RoleInfo {
             name: "custom",
             description: "project-specific specialist",
-            preview: &["custom role loaded from .coderoom/roles/<role>.md"],
-            estimated_tokens: "2.0k",
         })
 }
 
 fn role_color(role: &str) -> Color {
-    match role {
-        "host" => Color::Cyan,
-        "backend" => Color::Green,
-        "frontend" => Color::Rgb {
-            r: 255,
-            g: 168,
-            b: 120,
-        },
-        "security" => Color::Rgb {
-            r: 255,
-            g: 140,
-            b: 140,
-        },
-        "data" => Color::Magenta,
-        "devops" => Color::DarkYellow,
-        "ci" => Color::Blue,
-        "qa" => Color::Yellow,
-        "docs" => Color::DarkGrey,
-        _ => Color::White,
-    }
+    output::role_color(role, WIZARD_HOST_ROLE)
 }
 
 fn engine_color(engine: Engine) -> Color {
@@ -1398,27 +1369,10 @@ fn engine_note(engine: Engine, installed: &InstalledEngines) -> &'static str {
     }
 }
 
-/// Probe `$PATH` for the three engine binaries. Each probe runs
-/// `<bin> --version` once with all I/O captured, ~30 ms per call —
-/// init runs once per project so this is cheap.
+/// Thin wrapper around [`crate::engines::Engines::detect`] kept under
+/// its old name so existing call sites compile unchanged.
 fn detect_installed_engines() -> InstalledEngines {
-    InstalledEngines {
-        cc: bin_present("claude"),
-        codex: bin_present("codex"),
-        gemini: bin_present("gemini"),
-    }
-}
-
-fn bin_present(name: &str) -> bool {
-    use std::process::Command;
-    Command::new(name)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::engines::Engines::detect()
 }
 
 #[cfg(test)]
@@ -1428,6 +1382,128 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use tempfile::TempDir;
+
+    /// Visible-cell width of `s`, ignoring ANSI SGR escapes. ASCII-only
+    /// approximation — matches the role picker's text content.
+    fn visible_width(s: &str) -> usize {
+        let mut count = 0usize;
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' && chars.peek() == Some(&'[') {
+                // Skip CSI ... letter
+                chars.next();
+                for c2 in chars.by_ref() {
+                    if c2.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            count += 1;
+        }
+        count
+    }
+
+    fn sample_choices() -> Vec<RoleChoice> {
+        ROLE_CATALOG
+            .iter()
+            .map(|info| RoleChoice {
+                info: *info,
+                selected: matches!(info.name, "host" | "backend" | "security"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn picker_row_never_exceeds_terminal_columns_at_60() {
+        let info = role_info("backend");
+        let row = picker_row(&info, true, true, 60, None);
+        assert!(
+            visible_width(&row) <= 60,
+            "row visible width = {}, columns = 60, row = {row:?}",
+            visible_width(&row)
+        );
+    }
+
+    #[test]
+    fn picker_row_never_exceeds_terminal_columns_at_80() {
+        for info in ROLE_CATALOG {
+            for selected in [true, false] {
+                for is_cursor in [true, false] {
+                    for tag in [None, Some("required"), Some("existing")] {
+                        let row = picker_row(info, selected, is_cursor, 80, tag);
+                        assert!(
+                            visible_width(&row) <= 80,
+                            "row visible width = {}, columns = 80, row = {row:?}",
+                            visible_width(&row)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn picker_row_uses_more_room_at_120() {
+        // At wider widths the description should not be truncated for
+        // any of the catalog entries (their descriptions all fit).
+        for info in ROLE_CATALOG {
+            let row = picker_row(info, true, false, 120, None);
+            assert!(
+                !row.contains('…'),
+                "120-col row should not be truncated, got {row:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn picker_row_handles_extreme_narrow_columns_without_panic() {
+        // Below the floor (40 effective) we still produce output; the
+        // description is heavily truncated but the row stays one line.
+        let info = role_info("frontend");
+        let _row = picker_row(&info, true, false, 30, None);
+        let _row = picker_row(&info, true, false, 0, None);
+    }
+
+    /// Visual smoke. Run with:
+    ///   cargo test --lib picker_visual_smoke -- --nocapture --ignored
+    /// and eyeball the three rendered widths. Not a real test — it's a
+    /// substitute for "open three terminals at 60/80/120 cols and try".
+    #[test]
+    #[ignore = "visual-only; render a sample picker at 60/80/120 cols for human review"]
+    fn picker_visual_smoke() {
+        for width in [60usize, 80, 120] {
+            eprintln!("\n──── picker at columns = {width} ────");
+            for (i, info) in ROLE_CATALOG.iter().enumerate() {
+                let selected = matches!(info.name, "host" | "backend" | "security");
+                let is_cursor = i == 1;
+                let tag = if info.name == "host" {
+                    Some("existing")
+                } else {
+                    None
+                };
+                eprintln!("{}", picker_row(info, selected, is_cursor, width, tag));
+            }
+        }
+    }
+
+    #[test]
+    fn full_role_expansion_picker_fits_at_80_columns() {
+        let dir = TempDir::new().unwrap();
+        let scan = detect::scan(dir.path());
+        let choices = sample_choices();
+        // We can't override picker_columns() at the call site, so render
+        // a single row at columns = 80 across the catalog and verify
+        // none would exceed terminal width — the assemblage of rows in
+        // render_role_expansion_picker shares the same width budget.
+        for choice in &choices {
+            let row = picker_row(&choice.info, choice.selected, false, 80, None);
+            assert!(visible_width(&row) <= 80);
+        }
+        // Header / scan / footer lines come from push_header etc. They
+        // are short by construction; only the rows hit the width gate.
+        let _ = scan; // kept to anchor the project-scan codepath
+    }
 
     fn host_only_config(default_engine: Engine, default_model: Option<&str>) -> Config {
         Config {

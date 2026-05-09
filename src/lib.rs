@@ -3,7 +3,7 @@
 //! Public API surface is intentionally small at v0.1; the binary `cr` is the
 //! primary consumer. See `docs/architecture.md` for the design constitution.
 
-#![doc(html_root_url = "https://docs.rs/coderoom/0.1.7")]
+#![doc(html_root_url = "https://docs.rs/coderoom/0.1.8")]
 #![warn(missing_debug_implementations)]
 #![warn(rust_2018_idioms)]
 
@@ -15,7 +15,9 @@ pub mod config_layered;
 pub mod cost;
 pub mod crep;
 pub mod detect;
+pub mod engines;
 pub mod init;
+pub mod output;
 pub mod priors;
 pub mod repl;
 pub mod role;

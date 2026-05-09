@@ -194,6 +194,15 @@ fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .try_init();
 
+    // Engine-binary check up front. `cr config` and `cr update` are
+    // useful without any engine installed (inspecting / fixing the very
+    // setup that's missing); everything else requires at least one of
+    // claude / codex / gemini on $PATH.
+    let needs_engine = !matches!(cli.command, Some(Cmd::Config { .. } | Cmd::Update));
+    if needs_engine && coderoom::engines::require_any_installed().is_err() {
+        std::process::exit(1);
+    }
+
     match cli.command {
         None => run_start(None),
         Some(Cmd::Init { project, yes }) => {
