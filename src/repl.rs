@@ -99,7 +99,10 @@ fn parse_patch_arg(arg: &str) -> Option<Command> {
     let mut parts = trimmed.splitn(2, char::is_whitespace);
     let role_token = parts.next().unwrap_or("");
     let text = parts.next().unwrap_or("").trim();
-    let role = role_token.strip_prefix('@').unwrap_or(role_token).to_owned();
+    let role = role_token
+        .strip_prefix('@')
+        .unwrap_or(role_token)
+        .to_owned();
     if role.is_empty() || text.is_empty() {
         return None;
     }

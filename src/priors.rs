@@ -183,15 +183,16 @@ fn enforce_active_cap(dir: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
     active.sort_by_key(|(seq, _)| *seq);
-    let (_, oldest) = active.into_iter().next().expect("non-empty after cap check");
+    let (_, oldest) = active
+        .into_iter()
+        .next()
+        .expect("non-empty after cap check");
 
     let archive = dir.join(ARCHIVE_SUBDIR);
-    std::fs::create_dir_all(&archive)
-        .with_context(|| format!("creating {}", archive.display()))?;
+    std::fs::create_dir_all(&archive).with_context(|| format!("creating {}", archive.display()))?;
     let dest = archive.join(oldest.file_name().expect("file_name on existing path"));
-    std::fs::rename(&oldest, &dest).with_context(|| {
-        format!("archiving {} → {}", oldest.display(), dest.display())
-    })?;
+    std::fs::rename(&oldest, &dest)
+        .with_context(|| format!("archiving {} → {}", oldest.display(), dest.display()))?;
     Ok(Some(dest))
 }
 
@@ -383,13 +384,15 @@ mod tests {
 
     #[test]
     fn slugify_basic_cases() {
-        assert_eq!(slugify("Use verify_token() instead"), "use-verify-token-instead");
+        assert_eq!(
+            slugify("Use verify_token() instead"),
+            "use-verify-token-instead"
+        );
         assert_eq!(slugify(""), "untitled");
         assert_eq!(slugify("!!!"), "untitled");
         assert_eq!(slugify("rate-limit in gateway"), "rate-limit-in-gateway");
         assert!(
-            slugify("a really really really long description that goes on and on and on")
-                .len()
+            slugify("a really really really long description that goes on and on and on").len()
                 <= 40
         );
     }
@@ -438,7 +441,10 @@ mod tests {
         // Write MAX patches; none should be archived yet.
         for i in 0..MAX_ACTIVE_PATCHES_PER_ROLE {
             let out = write_patch(&coderoom, "backend", &format!("patch {i}")).unwrap();
-            assert!(out.archived.is_none(), "iteration {i} unexpectedly archived");
+            assert!(
+                out.archived.is_none(),
+                "iteration {i} unexpectedly archived"
+            );
         }
 
         // The (MAX+1)-th write should evict the oldest active entry.
@@ -449,7 +455,12 @@ mod tests {
             name.starts_with("001-"),
             "FIFO should evict sequence 001 first: {name}"
         );
-        assert!(archived.starts_with(coderoom.join(PATCHES_DIR).join("backend").join(ARCHIVE_SUBDIR)));
+        assert!(archived.starts_with(
+            coderoom
+                .join(PATCHES_DIR)
+                .join("backend")
+                .join(ARCHIVE_SUBDIR)
+        ));
 
         // Active dir should now hold exactly MAX entries again.
         let dir = coderoom.join(PATCHES_DIR).join("backend");
