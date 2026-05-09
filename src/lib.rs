@@ -19,3 +19,4 @@ pub mod init;
 pub mod priors;
 pub mod repl;
 pub mod role;
+pub mod update;
