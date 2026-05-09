@@ -13,7 +13,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use crossterm::style::Stylize;
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -22,6 +22,7 @@ use tracing::{debug, warn};
 
 use crate::adapter::cc::CcAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::gemini::GeminiAdapter;
 use crate::adapter::{Engine, EngineAdapter, RoleHandle, UserMessage};
 use crate::bus::MessageBus;
 use crate::config::{Config, CODEROOM_DIR};
@@ -151,6 +152,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
 
     let cc_adapter = CcAdapter::new();
     let codex_adapter = CodexAdapter::new();
+    let gemini_adapter = GeminiAdapter::new();
 
     let mut roles: HashMap<String, RunningRole> = HashMap::new();
     for name in cfg
@@ -162,6 +164,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
             &cfg,
             &cc_adapter,
             &codex_adapter,
+            &gemini_adapter,
             &coderoom_dir,
             &name,
             &bus,
@@ -201,6 +204,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
                     &cfg,
                     &cc_adapter,
                     &codex_adapter,
+                    &gemini_adapter,
                     &coderoom_dir,
                     &bus,
                     &mut roles,
@@ -501,6 +505,7 @@ async fn refresh_role(
     cfg: &Config,
     cc_adapter: &CcAdapter,
     codex_adapter: &CodexAdapter,
+    gemini_adapter: &GeminiAdapter,
     coderoom_dir: &Path,
     bus: &Arc<MessageBus>,
     roles: &mut HashMap<String, RunningRole>,
@@ -514,7 +519,17 @@ async fn refresh_role(
         drop(old);
         println!("{}", format!("refreshing @{role}...").dim());
     }
-    match spawn_role(cfg, cc_adapter, codex_adapter, coderoom_dir, role, bus).await {
+    match spawn_role(
+        cfg,
+        cc_adapter,
+        codex_adapter,
+        gemini_adapter,
+        coderoom_dir,
+        role,
+        bus,
+    )
+    .await
+    {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
             println!("{}", format!("✓ @{role} refreshed").green());
@@ -536,6 +551,7 @@ async fn spawn_role(
     cfg: &Config,
     cc_adapter: &CcAdapter,
     codex_adapter: &CodexAdapter,
+    gemini_adapter: &GeminiAdapter,
     coderoom_dir: &Path,
     name: &str,
     bus: &Arc<MessageBus>,
@@ -559,12 +575,10 @@ async fn spawn_role(
             .start(role_cfg)
             .await
             .with_context(|| format!("spawning role `{name}` (codex)"))?,
-        Engine::Gemini => {
-            bail!(
-                "engine `gemini` is not yet supported in v0.1; \
-                 use `cc` or `codex` for now",
-            );
-        }
+        Engine::Gemini => gemini_adapter
+            .start(role_cfg)
+            .await
+            .with_context(|| format!("spawning role `{name}` (gemini)"))?,
     };
 
     let RoleHandle {
