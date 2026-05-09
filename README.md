@@ -8,11 +8,11 @@
 [![CI](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Status: v0.1.4 — user-runnable, still pre-1.0.** Claude Code,
-> Codex, and Gemini adapters are wired up; `cr init` now opens with a
-> polished role / engine setup flow on interactive terminals and a clean
-> non-interactive summary for scripts. Per semver, 0.x.y means the public
-> API is not yet stable.
+> **Status: v0.1.5 — user-runnable, still pre-1.0.** Claude Code,
+> Codex, and Gemini adapters are wired up; bare `cr` now opens CodeRoom
+> directly, guides setup when `.coderoom/` is missing, and shows the
+> effective role / engine / model configuration on entry. Per semver,
+> 0.x.y means the public API is not yet stable.
 
 ## Why
 
@@ -65,6 +65,9 @@ That's it. `cr` is now on your PATH. Same install story as
 `@anthropic-ai/claude-code`, `@openai/codex`, and `@google/gemini-cli` —
 which CodeRoom drives.
 
+If `cr` conflicts with an existing command in your environment, npm also
+installs `croom` as an alias for the same binary.
+
 The npm package is a thin wrapper: on install, its postinstall script
 downloads the right pre-built binary for your platform from the
 matching [GitHub Release](https://github.com/spytensor/codeRoom/releases)
@@ -75,7 +78,7 @@ aarch64.
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.1.4
+TAG=v0.1.5
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/codeRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -109,8 +112,7 @@ sudo cp target/release/cr /usr/local/bin/
 
 ```bash
 cd your-project
-cr init                         # polished role + engine setup
-cr start                        # enter the REPL
+cr                              # setup if needed, then enter the room
 $EDITOR .coderoom/roles/host.md # optional: give @host real priors
 
 cr › hello
@@ -123,8 +125,10 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr start` auto-creates `.coderoom/` with sensible defaults when you skip
-  `cr init`.
+- `cr` and `cr start` both enter the room; if `.coderoom/` is missing, an
+  interactive terminal gets the guided setup first.
+- `cr init` runs setup explicitly when you want to prepare the project without
+  entering the REPL.
 - `cr role add <name> --engine codex` adds or pins a specialist role.
 - `/patch <role> <text>`, `/refresh <role>`, `/transcript <role>`, and
   `/journal <role>` are available inside the REPL.

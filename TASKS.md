@@ -13,6 +13,9 @@ Make the first-run CLI experience match the polished terminal UI direction from 
 - [x] Clean README / changelog wording so public promises match shipped behavior.
 - [x] Run formatting, tests, and manual CLI output checks before handoff.
 - [x] Fix release automation so tag pushes create the GitHub Release before uploading assets.
+- [x] Make bare `cr` enter CodeRoom directly and send missing-config users through guided setup.
+- [x] Replace the returning `cr start` banner with a persistent config dashboard.
+- [x] Add `croom` as an alias for environments where `cr` conflicts.
 
 ## Notes
 

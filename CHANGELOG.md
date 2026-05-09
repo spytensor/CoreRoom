@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (nothing yet)
 
+## [0.1.5] - 2026-05-09
+
+### Changed
+
+- Bare `cr` now enters the CodeRoom REPL directly; `cr start` remains
+  as the explicit spelling.
+- Missing `.coderoom/` on an interactive terminal now opens the guided
+  setup flow instead of silently accepting defaults.
+- `cr start` now renders a persistent home dashboard on every launch:
+  effective config layers, host role, role count, priors token total,
+  and each role's engine / model / context / token profile.
+- npm installs now expose both `cr` and `croom` command names, and
+  release archives include a `croom` binary alias for environments
+  where `cr` conflicts with an existing command.
+
 ## [0.1.4] - 2026-05-09
 
 ### Changed
@@ -236,7 +251,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.5
 [0.1.4]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.4
 [0.1.3]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.3
 [0.1.2]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.2

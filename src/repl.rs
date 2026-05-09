@@ -200,13 +200,26 @@ struct RunningRole {
 pub async fn run(project_root: &Path) -> Result<()> {
     let coderoom_dir = project_root.join(CODEROOM_DIR);
     if !coderoom_dir.exists() {
-        crate::init::run(project_root, crate::init::InitOptions::auto())
-            .context("auto-initializing .coderoom/")?;
+        let opts = if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+            crate::init::InitOptions::manual()
+        } else {
+            crate::init::InitOptions::auto()
+        };
+        crate::init::run(project_root, opts).context("auto-initializing .coderoom/")?;
+        if !coderoom_dir.exists() {
+            return Ok(());
+        }
         println!();
     }
 
     let cfg = Config::load(project_root)
         .with_context(|| format!("loading config in {project_root:?}"))?;
+
+    let first_run = is_first_run(&coderoom_dir);
+    print_home(&cfg, &coderoom_dir, project_root, first_run);
+    if first_run {
+        mark_welcomed(&coderoom_dir);
+    }
 
     let log_path = coderoom_dir.join("messages.jsonl");
     let bus = Arc::new(MessageBus::open(&log_path).await?);
@@ -221,13 +234,6 @@ pub async fn run(project_root: &Path) -> Result<()> {
     {
         let running = spawn_role(&cfg, &adapters, &coderoom_dir, &name, &bus).await?;
         roles.insert(name, running);
-    }
-
-    if is_first_run(&coderoom_dir) {
-        print_welcome(&cfg, &coderoom_dir, project_root);
-        mark_welcomed(&coderoom_dir);
-    } else {
-        print_steady_state(&cfg, &coderoom_dir, project_root);
     }
 
     let mut renderer_rx = bus.subscribe();
@@ -264,7 +270,7 @@ pub async fn run(project_root: &Path) -> Result<()> {
                 write_journal(&roles, &mut renderer_rx, &coderoom_dir, &role).await;
             }
             Command::Welcome => {
-                print_welcome(&cfg, &coderoom_dir, project_root);
+                print_home(&cfg, &coderoom_dir, project_root, false);
             }
             Command::Patch { role, text } => {
                 if !cfg.roles.contains_key(&role) {
@@ -319,145 +325,324 @@ async fn prompt(stdout: &mut tokio::io::Stdout) -> Result<()> {
 }
 
 /// Marker file inside `.coderoom/` that tracks whether the first-run
-/// welcome has been shown. Hidden (leading dot) so it never shows up
+/// home copy has been shown. Hidden (leading dot) so it never shows up
 /// in `ls`-without-`-a`.
 const WELCOMED_MARKER: &str = ".welcomed";
 
-/// Whether to use the heavyweight first-run welcome (E) or the light
-/// steady-state line (B) at REPL entry.
+/// Whether to label the startup home screen as a freshly-created room
+/// or a returning project.
 fn is_first_run(coderoom_dir: &Path) -> bool {
     !coderoom_dir.join(WELCOMED_MARKER).exists()
 }
 
-/// Drop a marker so future `cr start` runs use the steady-state line
-/// instead of the welcome card. Best-effort: a write failure here just
-/// means the user sees the welcome twice — not worth surfacing.
+/// Drop a marker so future `cr start` runs use returning-project copy.
+/// Best-effort: a write failure here just means the user sees the
+/// first-run copy twice — not worth surfacing.
 fn mark_welcomed(coderoom_dir: &Path) {
     let _ = std::fs::write(coderoom_dir.join(WELCOMED_MARKER), b"");
 }
 
-/// First-run welcome (Variant E from the design review). Shown exactly
-/// once per project unless the user types `/welcome` to re-show.
-fn print_welcome(cfg: &Config, coderoom_dir: &Path, project_root: &Path) {
-    let project_name = project_root
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("(this project)");
-    let mut role_names: Vec<&str> = cfg.role_names().collect();
-    role_names.sort_unstable();
-    let total_tokens: u64 = role_names
-        .iter()
-        .map(|n| priors::estimate_role_tokens(coderoom_dir, n))
-        .sum();
-
-    println!();
-    println!(
-        "{} {} {}",
-        "coderoom".bold(),
-        format!("v{}", env!("CARGO_PKG_VERSION")).dim(),
-        "· role-scoped agent sessions".dim()
-    );
-    println!(
-        "{}",
-        "────────────────────────────────────────────────────────".dim()
-    );
-    println!();
-    println!(
-        "  {:<9} {}",
-        "project".dim(),
-        project_name.with(crossterm::style::Color::White).bold()
-    );
-    println!(
-        "  {:<9} {} role{} · {} base tokens",
-        "loaded".dim(),
-        role_names.len(),
-        if role_names.len() == 1 { "" } else { "s" },
-        priors::format_token_count(total_tokens)
-    );
-    println!();
-    println!("{}", "roles".bold());
-    println!();
-    for name in &role_names {
-        let tokens = priors::estimate_role_tokens(coderoom_dir, name);
-        let tokens_str = priors::format_token_count(tokens);
-        let host_tag = if cfg.is_host(name) { " (host)" } else { "" };
-        let engine = cfg
-            .role_config(name, coderoom_dir)
-            .map_or(cfg.default_engine, |role| role.engine);
-        println!(
-            "  {} {:<13} {:<12} {:>7}{}",
-            "●".with(role_color(name)),
-            format!("@{name}").with(role_color(name)).bold(),
-            engine.as_str().dim(),
-            tokens_str.dim(),
-            host_tag.dim(),
-        );
-    }
-    println!();
-    println!("{}", "commands".bold());
-    println!();
-    println!(
-        "  {:<26} {}",
-        "@<role> <text>".yellow(),
-        "send to a specialist".dim()
-    );
-    println!(
-        "  {:<26} {}",
-        "/patch <role> <text>".yellow(),
-        "save a correction for next refresh".dim()
-    );
-    println!(
-        "  {:<26} {}",
-        "/refresh <role>".yellow(),
-        "respawn a role with fresh priors".dim()
-    );
-    println!();
-    println!(
-        "{}",
-        "won't show this again automatically; type /welcome to revisit.".dim()
-    );
-    println!();
+#[derive(Debug, Clone)]
+struct UiCell {
+    styled: String,
+    visible: usize,
 }
 
-/// Steady-state two-line summary (Variant B from the design review).
-/// Total token count is the only "live" signal that earns its pixels.
-fn print_steady_state(cfg: &Config, coderoom_dir: &Path, project_root: &Path) {
-    let project_name = project_root
+fn plain_cell(text: impl Into<String>) -> UiCell {
+    let styled = text.into();
+    let visible = styled.chars().count();
+    UiCell { styled, visible }
+}
+
+fn styled_cell(plain: &str, styled: impl std::fmt::Display) -> UiCell {
+    UiCell {
+        styled: styled.to_string(),
+        visible: plain.chars().count(),
+    }
+}
+
+fn join_cells(parts: &[UiCell]) -> UiCell {
+    let mut styled = String::new();
+    let mut visible = 0;
+    for part in parts {
+        styled.push_str(&part.styled);
+        visible += part.visible;
+    }
+    UiCell { styled, visible }
+}
+
+fn empty_cell() -> UiCell {
+    plain_cell("")
+}
+
+fn label_cell(label: &str, value: UiCell) -> UiCell {
+    let padded = format!("{label:<8}");
+    join_cells(&[styled_cell(&padded, padded.as_str().dim()), value])
+}
+
+fn heading_cell(text: &str) -> UiCell {
+    styled_cell(text, text.with(crossterm::style::Color::DarkYellow).bold())
+}
+
+fn home_width() -> usize {
+    let columns = crossterm::terminal::size().map_or(96, |(columns, _)| usize::from(columns));
+    columns.saturating_sub(2).clamp(68, 118)
+}
+
+fn top_border(width: usize, title: &UiCell) -> String {
+    let fill = width.saturating_sub(title.visible + 3);
+    format!("╭─{}{}╮", title.styled, "─".repeat(fill))
+}
+
+fn mid_border(left_width: usize, right_width: usize) -> String {
+    format!(
+        "├{}┬{}┤",
+        "─".repeat(left_width + 2),
+        "─".repeat(right_width + 2)
+    )
+}
+
+fn section_border(width: usize) -> String {
+    format!("├{}┤", "─".repeat(width.saturating_sub(2)))
+}
+
+fn bottom_border(width: usize) -> String {
+    format!("╰{}╯", "─".repeat(width.saturating_sub(2)))
+}
+
+fn full_line(width: usize, cell: &UiCell) -> String {
+    let content_width = width.saturating_sub(4);
+    format!(
+        "│ {}{} │",
+        cell.styled,
+        " ".repeat(content_width.saturating_sub(cell.visible))
+    )
+}
+
+fn pair_line(left: &UiCell, right: &UiCell, left_width: usize, right_width: usize) -> String {
+    format!(
+        "│ {}{} │ {}{} │",
+        left.styled,
+        " ".repeat(left_width.saturating_sub(left.visible)),
+        right.styled,
+        " ".repeat(right_width.saturating_sub(right.visible))
+    )
+}
+
+fn project_display_name(project_root: &Path) -> &str {
+    project_root
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("(project)");
+        .unwrap_or("(this project)")
+}
+
+fn config_layers(project_root: &Path) -> String {
+    let mut layers = Vec::from(["project"]);
+    if crate::config_layered::user_config_path().is_some_and(|path| path.exists()) {
+        layers.push("user");
+    }
+    if crate::config_layered::local_config_path(project_root).exists() {
+        layers.push("local");
+    }
+    layers.join(" + ")
+}
+
+fn context_hint(engine: Engine, model: Option<&str>) -> &'static str {
+    let normalized = model.unwrap_or_default().to_ascii_lowercase();
+    match engine {
+        Engine::Cc if normalized.contains("opus") || normalized.is_empty() => "1M context",
+        Engine::Cc if normalized.contains("sonnet") || normalized.contains("haiku") => {
+            "200k context"
+        }
+        Engine::Cc => "Claude context",
+        Engine::Codex if normalized.contains("gpt-5") => "400k context",
+        Engine::Gemini if normalized.contains("pro") => "1M context",
+        Engine::Codex | Engine::Gemini => "model context",
+    }
+}
+
+fn model_label(engine: Engine, model: Option<&str>) -> String {
+    model.map_or_else(
+        || match engine {
+            Engine::Cc => "Claude default".to_owned(),
+            Engine::Codex => "Codex default".to_owned(),
+            Engine::Gemini => "Gemini default".to_owned(),
+        },
+        ToOwned::to_owned,
+    )
+}
+
+fn role_profile_cell(cfg: &Config, coderoom_dir: &Path, name: &str, max_width: usize) -> UiCell {
+    let role_cfg = cfg.role_config(name, coderoom_dir);
+    let engine = role_cfg
+        .as_ref()
+        .map_or(cfg.default_engine, |role| role.engine);
+    let model = role_cfg
+        .as_ref()
+        .and_then(|role| role.model.as_deref())
+        .or(cfg.default_model.as_deref());
+    let context = context_hint(engine, model);
+    let model = model_label(engine, model);
+    let tokens = priors::format_token_count(priors::estimate_role_tokens(coderoom_dir, name));
+    let host_suffix = if cfg.is_host(name) { "  host" } else { "" };
+    let plain = format!(
+        "● @{name:<13} {:<6} {:<18} {:<12} {tokens:>7} tokens{host_suffix}",
+        engine.as_str(),
+        model,
+        context
+    );
+    let role_name = format!("@{name}");
+    let cell = join_cells(&[
+        styled_cell("●", "●".with(role_color(name))),
+        plain_cell(" "),
+        styled_cell(
+            &format!("{role_name:<14}"),
+            format!("{role_name:<14}").with(role_color(name)).bold(),
+        ),
+        plain_cell(format!(
+            " {:<6} {:<18} {:<12} {tokens:>7} tokens{host_suffix}",
+            engine.as_str(),
+            model,
+            context
+        )),
+    ]);
+    if cell.visible <= max_width {
+        cell
+    } else {
+        plain_cell(truncate_inline(&plain, max_width))
+    }
+}
+
+/// Product-grade REPL home screen. It is shown on every `cr start` and
+/// bare `cr`, not only the first time. The first-run marker only changes
+/// the intro copy; the status dashboard stays useful for returning users.
+fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run: bool) {
+    let project_name = project_display_name(project_root);
     let mut role_names: Vec<&str> = cfg.role_names().collect();
     role_names.sort_unstable();
-
     let total_tokens: u64 = role_names
         .iter()
         .map(|n| priors::estimate_role_tokens(coderoom_dir, n))
         .sum();
+    let width = home_width();
+    let usable = width.saturating_sub(7);
+    let left_width = (usable / 3).clamp(28, 38);
+    let right_width = usable.saturating_sub(left_width);
+    let content_width = width.saturating_sub(4);
+    let host = format!("@{}", cfg.host_role);
+    let intro = if first_run {
+        "First CodeRoom launch for this project. Effective configuration loaded."
+    } else {
+        "Welcome back. CodeRoom loaded your effective project configuration."
+    };
 
-    let role_list = role_names
-        .iter()
-        .map(|r| format!("@{r}").with(role_color(r)).to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let left = [
+        heading_cell("Project"),
+        label_cell(
+            "name",
+            styled_cell(
+                project_name,
+                truncate_inline(project_name, left_width.saturating_sub(8))
+                    .with(crossterm::style::Color::White)
+                    .bold(),
+            ),
+        ),
+        label_cell("config", plain_cell(config_layers(project_root))),
+        label_cell(
+            "host",
+            styled_cell(&host, host.as_str().with(role_color(&cfg.host_role)).bold()),
+        ),
+        label_cell(
+            "roles",
+            plain_cell(format!(
+                "{} role{}",
+                role_names.len(),
+                if role_names.len() == 1 { "" } else { "s" }
+            )),
+        ),
+        label_cell(
+            "priors",
+            plain_cell(format!(
+                "{} tokens",
+                priors::format_token_count(total_tokens)
+            )),
+        ),
+    ];
 
-    println!(
-        "{} {} {}",
-        "coderoom".bold(),
-        format!("v{}", env!("CARGO_PKG_VERSION")).dim(),
-        "· role-scoped agent sessions".dim(),
+    let right = [
+        heading_cell("Operate"),
+        join_cells(&[
+            styled_cell("cr ›", "cr ›".green().bold()),
+            plain_cell(" ask the host"),
+        ]),
+        join_cells(&[
+            styled_cell("@role", "@role".yellow()),
+            plain_cell(" route to a specialist"),
+        ]),
+        join_cells(&[
+            styled_cell("/patch", "/patch".yellow()),
+            plain_cell(" persist a correction"),
+        ]),
+        join_cells(&[
+            styled_cell("cr update", "cr update".yellow()),
+            plain_cell(" upgrade this install"),
+        ]),
+        plain_cell("/help · /welcome · /exit"),
+    ];
+
+    println!();
+    let title = styled_cell(
+        &format!(" codeRoom v{} ", env!("CARGO_PKG_VERSION")),
+        format!(" codeRoom v{} ", env!("CARGO_PKG_VERSION"))
+            .with(crossterm::style::Color::DarkYellow)
+            .bold(),
     );
-    println!(
-        "{} {} {} {} {} base tokens",
-        project_name.dim(),
-        "·".dim(),
-        role_list,
-        "·".dim(),
-        priors::format_token_count(total_tokens).dim(),
-    );
-    let host = &cfg.host_role;
+    println!("{}", top_border(width, &title));
+    println!("{}", full_line(width, &plain_cell(intro)));
     println!(
         "{}",
-        format!("type @<role> <text>; bare text → @{host}; /help, /welcome, /exit").dim()
+        full_line(
+            width,
+            &join_cells(&[
+                plain_cell("room "),
+                styled_cell(
+                    project_name,
+                    project_name.with(crossterm::style::Color::White).bold()
+                ),
+                plain_cell(" · "),
+                styled_cell(&host, host.as_str().with(role_color(&cfg.host_role)).bold()),
+                plain_cell(format!(
+                    " · {} base tokens",
+                    priors::format_token_count(total_tokens)
+                )),
+            ]),
+        )
+    );
+    println!("{}", mid_border(left_width, right_width));
+    let rows = left.len().max(right.len());
+    for idx in 0..rows {
+        let left_cell = left.get(idx).cloned().unwrap_or_else(empty_cell);
+        let right_cell = right.get(idx).cloned().unwrap_or_else(empty_cell);
+        println!(
+            "{}",
+            pair_line(&left_cell, &right_cell, left_width, right_width)
+        );
+    }
+    println!("{}", section_border(width));
+    println!("{}", full_line(width, &heading_cell("Roles")));
+    for name in &role_names {
+        println!(
+            "{}",
+            full_line(
+                width,
+                &role_profile_cell(cfg, coderoom_dir, name, content_width)
+            )
+        );
+    }
+    println!("{}", bottom_border(width));
+    println!(
+        "{}",
+        "type a task to begin; bare text goes to the host role".dim()
     );
 }
 

@@ -7,8 +7,7 @@ chat-style terminal.
 npm install -g @spytensor/coderoom
 
 cd your-project
-cr init
-cr start
+cr
 ```
 
 This package is a thin npm wrapper. On install it downloads the
@@ -16,6 +15,9 @@ matching pre-built `cr` binary from the
 [GitHub Release](https://github.com/spytensor/codeRoom/releases) for
 your platform and installs it. Supported: linux + macOS, x86_64 and
 aarch64.
+
+It also installs `croom` as an alias for the same binary in case `cr`
+conflicts with another command on your PATH.
 
 For the full project documentation, source, and architecture see
 [github.com/spytensor/codeRoom](https://github.com/spytensor/codeRoom).

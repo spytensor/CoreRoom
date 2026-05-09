@@ -6,7 +6,7 @@
 //! - `cr role add <name> [--engine cc|codex|gemini] [--model X]` — add a role
 //! - `cr role list`              — list configured roles
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
-//! - `cr start [--project PATH]` — enter the interactive REPL
+//! - `cr [start] [--project PATH]` — enter the interactive REPL
 //!
 //! Future subcommands (`cr show`, `cr cost`) land in their own PRs per the
 //! v0.1 sequence in `docs/architecture.md`.
@@ -195,13 +195,7 @@ fn main() -> Result<()> {
         .try_init();
 
     match cli.command {
-        None => {
-            println!(
-                "cr {} — try `cr init` then `cr start`. See `cr --help`.",
-                env!("CARGO_PKG_VERSION")
-            );
-            Ok(())
-        }
+        None => run_start(None),
         Some(Cmd::Init { project, yes }) => {
             let opts = if yes {
                 coderoom::init::InitOptions::accepted_defaults()
@@ -211,15 +205,7 @@ fn main() -> Result<()> {
             coderoom::init::run(&project_root_or_cwd(project)?, opts)
         }
         Some(Cmd::Role { command }) => run_role_cmd(command),
-        Some(Cmd::Start { project }) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            runtime.block_on(async move {
-                let project_root = project_root_or_cwd(project)?;
-                coderoom::repl::run(&project_root).await
-            })
-        }
+        Some(Cmd::Start { project }) => run_start(project),
         Some(Cmd::Show { project }) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -248,6 +234,16 @@ fn main() -> Result<()> {
             })
         }
     }
+}
+
+fn run_start(project: Option<PathBuf>) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let project_root = project_root_or_cwd(project)?;
+        coderoom::repl::run(&project_root).await
+    })
 }
 
 fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {

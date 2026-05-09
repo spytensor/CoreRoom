@@ -1,6 +1,6 @@
 {
   "name": "@spytensor/coderoom",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A coordination shell for multi-role agent CLI sessions in a single chat-style terminal.",
   "keywords": [
     "cli",
@@ -21,7 +21,8 @@
   "license": "MIT",
   "author": "Charlie Zhu",
   "bin": {
-    "cr": "./bin/cr"
+    "cr": "./bin/cr",
+    "croom": "./bin/cr"
   },
   "scripts": {
     "postinstall": "node ./install.js"
