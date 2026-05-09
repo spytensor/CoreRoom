@@ -112,10 +112,7 @@ fn planned_files(coderoom_dir: &Path, suggested_roles: &[&str]) -> Vec<PathBuf> 
 /// for a wall of text, just a heads-up that we're setting things up.
 fn print_auto_intro(scan: &detect::ProjectScan) {
     let role_list = scan.suggested_roles.join(", @");
-    println!(
-        "no .coderoom/ found — bootstrapping defaults: @{} (engine: cc).",
-        role_list
-    );
+    println!("no .coderoom/ found — bootstrapping defaults: @{role_list} (engine: cc).");
     println!("  edit .coderoom/roles/<role>.md to give each one real project priors.");
     println!();
 }
