@@ -152,8 +152,14 @@ mod tests {
 
     #[test]
     fn stop_reason_serializes_snake_case() {
-        assert_eq!(serde_json::to_string(&StopReason::Refreshed).unwrap(), "\"refreshed\"");
-        assert_eq!(serde_json::to_string(&StopReason::Budget).unwrap(), "\"budget\"");
+        assert_eq!(
+            serde_json::to_string(&StopReason::Refreshed).unwrap(),
+            "\"refreshed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopReason::Budget).unwrap(),
+            "\"budget\""
+        );
         assert_eq!(
             serde_json::from_str::<StopReason>("\"completed\"").unwrap(),
             StopReason::Completed
