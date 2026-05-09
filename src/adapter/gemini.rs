@@ -91,10 +91,7 @@ impl EngineAdapter for GeminiAdapter {
             .send(CrepEvent::RoleStarted {
                 role: config.name.clone(),
                 engine: Engine::Gemini.as_str().to_owned(),
-                model: config
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "gemini".to_owned()),
+                model: config.model.clone().unwrap_or_else(|| "gemini".to_owned()),
                 session_id,
                 priors_hash,
             })
