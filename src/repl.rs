@@ -57,6 +57,11 @@ pub enum Command {
     /// `/transcript <role>` — show the last few RoleSpoke entries for a
     /// role from `.coderoom/messages.jsonl`.
     Transcript(String),
+    /// `/journal <role>` — ask the role to write a dated journal entry
+    /// summarizing what it learned this session. Persisted at
+    /// `.coderoom/journal/YYYY-MM-DD/<role>.md`; auto-loaded into the
+    /// role's priors on next spawn.
+    Journal(String),
     /// `/stop <role>` — terminate the named role's subprocess.
     Stop(String),
     /// `/help` — print the help banner.
@@ -95,6 +100,14 @@ pub fn parse_line(input: &str) -> Command {
                     Command::Help
                 } else {
                     Command::Transcript(role)
+                }
+            }
+            "journal" if !arg.is_empty() => {
+                let role = arg.strip_prefix('@').unwrap_or(arg).to_owned();
+                if role.is_empty() {
+                    Command::Help
+                } else {
+                    Command::Journal(role)
                 }
             }
             "patch" => parse_patch_arg(arg).unwrap_or(Command::Help),
@@ -225,6 +238,9 @@ pub async fn run(project_root: &Path) -> Result<()> {
             Command::Transcript(role) => {
                 show_transcript(&coderoom_dir, &role).await;
             }
+            Command::Journal(role) => {
+                write_journal(&roles, &mut renderer_rx, &coderoom_dir, &role).await;
+            }
             Command::Patch { role, text } => {
                 if !cfg.roles.contains_key(&role) {
                     println!("{}", format!("no such role: @{role}").red());
@@ -299,6 +315,7 @@ fn print_help(cfg: &Config) {
     println!("  /patch <role> <…>   save a correction; loads on next /refresh");
     println!("  /refresh <role>     re-instantiate role with latest priors+patches");
     println!("  /transcript <role>  show that role's recent spoken turns");
+    println!("  /journal <role>     ask role to write today's journal entry");
     println!("  /stop <role>        terminate a role's subprocess");
     println!("  /help               this help");
     println!("  /exit, /quit        leave the REPL");
@@ -422,6 +439,74 @@ pub async fn show_log(project_root: &Path) -> Result<()> {
         render_event(event);
     }
     Ok(())
+}
+
+/// Prompt the named role to write a journal entry, capture the reply,
+/// and persist it under `.coderoom/journal/YYYY-MM-DD/<role>.md`.
+///
+/// v0.1: free-form, no schema validation. The prompt asks for cited
+/// learnings explicitly so the saved markdown matches the structure
+/// `priors::compose_for` expects on next spawn.
+async fn write_journal(
+    roles: &HashMap<String, RunningRole>,
+    rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
+    coderoom_dir: &Path,
+    role: &str,
+) {
+    if !roles.contains_key(role) {
+        println!("{}", format!("no such role: @{role}").red());
+        return;
+    }
+
+    let prompt = "Write a journal entry summarizing what you learned in this session.\n\
+        Use markdown bullets. Cite any factual claim about the codebase with either:\n\
+        - a transcript anchor (`[turn 12]`-style line reference), or\n\
+        - a repo file path (`src/auth/verify.go`).\n\
+        Do not include claims you can't cite. Keep it under 30 lines.";
+
+    println!("{}", format!("asking @{role} for a journal entry...").dim());
+
+    let Ok(Some(captured)) = drain_one_turn(roles, rx, role, prompt).await else {
+        println!(
+            "{}",
+            format!("✗ @{role} did not produce a journal entry").red()
+        );
+        return;
+    };
+
+    let today = chrono::Local::now().date_naive();
+    let day_dir = coderoom_dir
+        .join(priors::JOURNAL_DIR)
+        .join(today.format("%Y-%m-%d").to_string());
+    if let Err(error) = std::fs::create_dir_all(&day_dir) {
+        println!(
+            "{}",
+            format!("✗ failed to create {}: {error}", day_dir.display()).red()
+        );
+        return;
+    }
+    let path = day_dir.join(format!("{role}.md"));
+    let body = if captured.text.ends_with('\n') {
+        captured.text
+    } else {
+        format!("{}\n", captured.text)
+    };
+    if let Err(error) = std::fs::write(&path, body) {
+        println!(
+            "{}",
+            format!("✗ failed to write {}: {error}", path.display()).red()
+        );
+        return;
+    }
+
+    println!(
+        "{}",
+        format!("✓ journal saved → {}", path.display()).green()
+    );
+    println!(
+        "{}",
+        "  next spawn (or /refresh) will load this entry into the role's priors".dim()
+    );
 }
 
 /// In-REPL: print the last few RoleSpoke events for `role` from the
@@ -818,6 +903,23 @@ mod tests {
     #[test]
     fn parse_transcript_without_role_shows_help() {
         assert_eq!(parse_line("/transcript"), Command::Help);
+    }
+
+    #[test]
+    fn parse_journal_with_role() {
+        assert_eq!(
+            parse_line("/journal backend"),
+            Command::Journal("backend".into())
+        );
+        assert_eq!(
+            parse_line("/journal @backend"),
+            Command::Journal("backend".into())
+        );
+    }
+
+    #[test]
+    fn parse_journal_without_role_shows_help() {
+        assert_eq!(parse_line("/journal"), Command::Help);
     }
 
     #[test]
