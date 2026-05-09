@@ -571,11 +571,7 @@ mod tests {
                 .join(JOURNAL_DIR)
                 .join(date.format("%Y-%m-%d").to_string());
             fs::create_dir_all(&dir).unwrap();
-            fs::write(
-                dir.join("backend.md"),
-                format!("entry for {date}"),
-            )
-            .unwrap();
+            fs::write(dir.join("backend.md"), format!("entry for {date}")).unwrap();
         }
 
         let entries = recent_journals(&coderoom, "backend", 7).unwrap();
