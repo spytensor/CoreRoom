@@ -22,7 +22,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       # rust-toolchain.toml pins channel + components (rustfmt, clippy);
       # the first cargo invocation activates them.
       - name: Activate pinned toolchain
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: fmt
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Activate pinned toolchain
         run: cargo --version
       - uses: Swatinem/rust-cache@v2
@@ -51,7 +51,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Activate pinned toolchain
         run: cargo --version
       - uses: Swatinem/rust-cache@v2
@@ -72,7 +72,7 @@ jobs:
     name: shellcheck (spike scripts)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Run shellcheck on spike harness
         # -S warning: ignore style/info-level findings. The spike scripts use
         # several patterns that are deliberate (literal backticks in prompts,
