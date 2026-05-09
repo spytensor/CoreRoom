@@ -136,6 +136,14 @@ This renders the picker rows at 60 / 80 / 120 columns to stderr. Eyeball
 the alignment; descriptions should truncate with `…` at narrow widths
 and never wrap to a second line.
 
+**The visual smoke is necessary but not sufficient.** It bypasses raw
+mode and prints with `eprintln!`, which translates LF to the
+terminal's preferred line ending. The actual wizard runs in raw mode
+where `\n` does NOT return to column 0 — a layout that looks fine in
+the smoke can still drift diagonally on real `cr init`. Always
+manually run `cr init` in an empty directory and watch the picker
+render before merging. This lesson is paid for in v0.1.7 → v0.1.10.
+
 For the no-engine abort screen, force-trigger it with:
 
 ```bash
