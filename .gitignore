@@ -24,6 +24,12 @@
 /.coderoom/messages.jsonl
 /.coderoom/sessions/
 
+# This repo IS coderoom's source — devs running `cr start` here for
+# dogfooding will auto-bootstrap a `.coderoom/` whose roles/configs
+# describe their personal dev setup, not anything that belongs in
+# the published source.
+/.coderoom/
+
 # Spike sandbox leftovers (tmp dirs are normally cleaned by mktemp;
 # this catches anything left behind by interrupted runs)
 /spike/sandbox-*/
