@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use coderoom::adapter::Engine;
+use coderoom::config_cmd::LayerTarget;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -72,6 +73,11 @@ enum Cmd {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Inspect or edit the layered config (user / project / .local).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCmd,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -104,6 +110,55 @@ enum RoleCmd {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCmd {
+    /// Print the effective merged config plus which layer files were
+    /// read. Use this to debug "why is my engine cc when I set codex
+    /// in user config?" — answer is in the layer footer.
+    Show {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Open `$EDITOR` (or `$VISUAL`) on a layer's config file.
+    /// Creates a commented stub for `--user` / `--local` if missing;
+    /// refuses `--project` if `.coderoom/config.toml` is missing
+    /// (run `cr init` first).
+    Edit {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Edit the user-level config (~/.config/coderoom/config.toml).
+        #[arg(long, group = "layer")]
+        user: bool,
+        /// Edit the project-local override (.coderoom/config.local.toml).
+        #[arg(long, group = "layer")]
+        local: bool,
+    },
+    /// Print the absolute path of a layer's config file.
+    Path {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Print the user-level path.
+        #[arg(long, group = "layer")]
+        user: bool,
+        /// Print the project-local path.
+        #[arg(long, group = "layer")]
+        local: bool,
+    },
+}
+
+fn layer_from_flags(user: bool, local: bool) -> LayerTarget {
+    match (user, local) {
+        (true, _) => LayerTarget::User,
+        (_, true) => LayerTarget::Local,
+        // Default: project. clap's `group = "layer"` already makes
+        // --user / --local mutually exclusive at parse time.
+        _ => LayerTarget::Project,
+    }
 }
 
 fn parse_engine(s: &str) -> Result<Engine, String> {
@@ -170,6 +225,7 @@ fn main() -> Result<()> {
                 coderoom::repl::show_log(&project_root).await
             })
         }
+        Some(Cmd::Config { command }) => run_config_cmd(command),
         Some(Cmd::Cost { project, since }) => {
             let since_date = match since {
                 Some(s) => Some(
@@ -185,6 +241,30 @@ fn main() -> Result<()> {
                 let project_root = project_root_or_cwd(project)?;
                 coderoom::cost::run(&project_root, since_date).await
             })
+        }
+    }
+}
+
+fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {
+    match cmd {
+        ConfigCmd::Show { project } => {
+            coderoom::config_cmd::show(&project_root_or_cwd(project)?)
+        }
+        ConfigCmd::Edit {
+            project,
+            user,
+            local,
+        } => {
+            let layer = layer_from_flags(user, local);
+            coderoom::config_cmd::edit(layer, &project_root_or_cwd(project)?)
+        }
+        ConfigCmd::Path {
+            project,
+            user,
+            local,
+        } => {
+            let layer = layer_from_flags(user, local);
+            coderoom::config_cmd::path(layer, &project_root_or_cwd(project)?)
         }
     }
 }
