@@ -12,6 +12,7 @@ Make the first-run CLI experience match the polished terminal UI direction from 
 - [x] Improve `cr start` first-run and steady-state welcome screens.
 - [x] Clean README / changelog wording so public promises match shipped behavior.
 - [x] Run formatting, tests, and manual CLI output checks before handoff.
+- [x] Fix release automation so tag pushes create the GitHub Release before uploading assets.
 
 ## Notes
 

@@ -2,7 +2,7 @@ name: Release
 
 # Triggered by pushing a `v*.*.*` tag from main. Builds release binaries
 # for the supported platforms and uploads them as assets on the matching
-# GitHub Release.
+# GitHub Release, creating it first when the tag does not have one yet.
 on:
   push:
     tags:
@@ -105,7 +105,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           tag="${GITHUB_REF##*/}"
+          release_args=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "$tag" --generate-notes)
+
+          if [[ "$tag" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" "${release_args[@]}"
+          fi
+
           gh release upload "$tag" dist/cr-*.tar.gz dist/cr-*.tar.gz.sha256 \
             --repo "$GITHUB_REPOSITORY" --clobber
 
