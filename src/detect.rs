@@ -31,12 +31,14 @@ pub enum StackSignal {
     GoMod,
     /// `package.json` at the project root.
     ///
-    /// `has_ui_framework` is `true` when one of `react`, `vue`, `svelte`,
-    /// `next`, `nuxt`, `angular`, or `solid-js` appears as a key in
-    /// `dependencies` or `devDependencies`. Distinguishing UI vs.
-    /// service is the one place we read manifest *keys* (not values,
-    /// not source).
-    PackageJson { has_ui_framework: bool },
+    /// Distinguishing UI vs. service is the one place we read manifest
+    /// *keys* (not values, not source).
+    PackageJson {
+        /// `true` when one of `react`, `vue`, `svelte`, `next`, `nuxt`,
+        /// `@angular/core`, `solid-js`, `preact`, `lit`, or `qwik`
+        /// appears as a key in `dependencies` or `devDependencies`.
+        has_ui_framework: bool,
+    },
     /// `requirements.txt` or `pyproject.toml`.
     PythonProject,
     /// `pom.xml` or `build.gradle{,.kts}`.
@@ -58,7 +60,10 @@ pub enum StackSignal {
     /// Existing `CLAUDE.md` at the project root. The line count is
     /// reported so init can phrase its split offer as
     /// "found CLAUDE.md (1,238 lines)".
-    ExistingClaudeMd { line_count: usize },
+    ExistingClaudeMd {
+        /// Newline count of the file, used by init's split-offer copy.
+        line_count: usize,
+    },
 }
 
 /// Detector output, consumed by `cr init` and the advanced wizard.
