@@ -387,13 +387,18 @@ These are real questions but answering them now adds risk without value.
 
 ## Implementation language
 
-**TBD — pending one decision:** Rust vs Go.
+**Rust.** Tokio for the async subprocess + stream-json IO, `serde_json` for
+event parsing, `clap` for CLI, `crossterm` for the colored REPL output. The
+choice tracks four reasons:
 
-Rust gives the cleanest single-binary distribution but adds weeks of velocity
-cost for a one-person side project. Go is the pragmatic middle and matches
-the user's existing comfort. Python is rejected (poor distribution story for
-a CLI tool, mismatched aesthetics with `claude`/`codex`/`gemini` which are
-all native binaries or single npm packages).
+- Single binary, no runtime, ~3–5 MB on disk, sub-10ms startup.
+- Codex itself is Rust (`codex_cli_rs/0.128.0`); we sit in the same
+  community + tooling ecosystem as the engines we wrap.
+- Ownership/lifetimes match the system invariants we care about (one
+  role-handle per spawned subprocess, exclusive write to the bus, etc.).
+- I/O-bound work with a few MB working set means Rust vs Go performance
+  is indistinguishable in practice — but the type system is worth the
+  velocity cost on a project meant to last.
 
-This decision is not blocking the architecture. Both languages can implement
-this design. Pick before the first commit of code.
+Python and Node are rejected (distribution story is worse than both
+native options, and the engines we wrap are not Python/Node native).
