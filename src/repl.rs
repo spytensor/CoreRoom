@@ -75,6 +75,15 @@ impl Adapters {
 struct RunningRole {
     tx_user: mpsc::Sender<UserMessage>,
     stop_tx: Option<oneshot::Sender<StopReason>>,
+    /// Turn-level cancellation channel surfaced by the adapter. PR a
+    /// stores the sender on every `RunningRole`; PR b is the consumer
+    /// (the upcoming `/halt` command and Ctrl-C-1× handler). Marked
+    /// `dead_code` until then so clippy stays quiet on the parking lot.
+    #[allow(
+        dead_code,
+        reason = "wired in PR a, consumed by /halt and Ctrl-C in PR b"
+    )]
+    interrupt_tx: mpsc::Sender<crate::turn::TurnId>,
     /// Composed priors temp file. Held for the role's lifetime so the
     /// path passed to the engine via `--append-system-prompt-file`
     /// remains valid until the subprocess has fully read it. Dropped
@@ -838,12 +847,14 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         tx_user,
         rx_events,
         stop_tx,
+        interrupt_tx,
         tempfiles,
     } = parts;
     spawn_event_forwarder(rname, rx_events, Arc::clone(context.bus));
     Ok(RunningRole {
         tx_user,
         stop_tx: Some(stop_tx),
+        interrupt_tx,
         priors_temp,
         adapter_tempfiles: tempfiles,
     })

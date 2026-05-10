@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- v0.2 plumbing: every CREP event tied to a specific turn now carries
+  `turn_id` and `thread_id` (or `Option<turn_id>` on `RoleStopped` for
+  crash-during-turn attribution). Two new events — `TurnDispatched` and
+  `TurnInterrupted` — make queue depth and turn-level cancellations
+  visible without conflating them with role lifecycle. v0.1-shaped
+  `messages.jsonl` lines deserialize unchanged thanks to
+  `#[serde(default)]` on every new field. See
+  `docs/v0.2-trust-and-interrupt.md` § D.
+- New `crate::turn` module with monotonic `new_turn_id` and
+  `new_thread_id` generators (process-local, allocation-free).
+- `RoleHandle` exposes a new `interrupt_tx: mpsc::Sender<TurnId>` for
+  turn-level cancellation. The codex adapter wires it end-to-end via
+  JSON-RPC `notifications/cancelled`; gemini wires it via SIGTERM on
+  the per-turn child while a streaming accumulator captures whatever
+  partial output was produced before the kill. cc keeps a stub drain
+  pending the `spike/L4-cc-interrupt.sh` probe in PR b.
+- `Engine::session_kind()` returns the new `SessionKind` enum
+  (`SessionBound` for cc, `StatelessDispatch` for codex/gemini), so
+  PR b's per-role queue can decide whether queueing preserves cached
+  state (cc) or just schedules fresh dispatches (codex/gemini).
+
 ### Fixed
 
 - Codex roles now stream WorkCard steps in real time. The adapter was listening

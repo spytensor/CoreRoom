@@ -22,5 +22,6 @@ pub mod permissions;
 pub mod priors;
 pub mod repl;
 pub mod role;
+pub mod turn;
 pub mod update;
 mod work;

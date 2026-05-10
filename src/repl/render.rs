@@ -83,7 +83,7 @@ pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
                     .italic()
             )
         }
-        CrepEvent::WorkTitle { role, title } => {
+        CrepEvent::WorkTitle { role, title, .. } => {
             let role_paint = output::role_color(role, host_role);
             format!(
                 "{} {}",
@@ -171,12 +171,43 @@ pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
                 format!("{tool_name} denied: {reason}").with(output::DIM),
             )
         }
-        CrepEvent::RoleStopped { role, reason } => {
+        CrepEvent::RoleStopped { role, reason, .. } => {
             let role_paint = output::role_color(role, host_role);
             format!(
                 "{} {}",
                 GUTTER.with(role_paint),
                 format!("@{role} stopped: {reason:?}")
+                    .with(output::DIM)
+                    .italic()
+            )
+        }
+        // PR a CREP additions. The REPL doesn't yet emit these
+        // (PR b is the producer); for now they render as a one-line
+        // dim trace so any future test fixtures or replay logs that
+        // include them don't surprise the renderer with a panic.
+        CrepEvent::TurnDispatched {
+            role,
+            queue_position,
+            ..
+        } => {
+            let role_paint = output::role_color(role, host_role);
+            let queued = if *queue_position == 0 {
+                "starting".to_owned()
+            } else {
+                format!("queued · {queue_position} ahead")
+            };
+            format!(
+                "{} {}",
+                GUTTER.with(role_paint),
+                format!("@{role} {queued}").with(output::DIM).italic()
+            )
+        }
+        CrepEvent::TurnInterrupted { role, source, .. } => {
+            let role_paint = output::role_color(role, host_role);
+            format!(
+                "{} {}",
+                GUTTER.with(role_paint),
+                format!("@{role} interrupted ({source:?})")
                     .with(output::DIM)
                     .italic()
             )

@@ -1,13 +1,25 @@
 //! CodeRoom Event Protocol — the normalized event stream emitted by every
 //! engine adapter and consumed by the message bus, REPL, and patch logic.
 //!
-//! See `docs/architecture.md` § "CodeRoom Event Protocol (CREP)".
+//! See `docs/architecture.md` § "CodeRoom Event Protocol (CREP)" and
+//! `docs/v0.2-trust-and-interrupt.md` § D for the v0.2 amendment.
 //!
 //! Wire format is JSON: each event serializes to a single object with a
 //! `"type"` discriminator and snake_case field names. The append-only
 //! `.coderoom/messages.jsonl` log stores events in this exact shape.
+//!
+//! ### v0.2 turn-id and thread-id
+//!
+//! Every turn-scoped event carries `turn_id` (this turn) and `thread_id`
+//! (the conversation chain that survives auto-routing). Both default to
+//! the empty string [`crate::turn::LEGACY_TURN_ID`] when missing, so
+//! v0.1-shaped logs replay without modification. New CREP producers
+//! should always populate them via [`crate::turn::new_turn_id`] and
+//! [`crate::turn::new_thread_id`].
 
 use serde::{Deserialize, Serialize};
+
+use crate::turn::TurnId;
 
 /// A single event in the CodeRoom Event Protocol stream.
 ///
@@ -35,6 +47,28 @@ pub enum CrepEvent {
         /// Used to detect drift between intended and actual role identity.
         priors_hash: String,
     },
+    /// A new turn was dispatched to a role. Emitted by the REPL (or the
+    /// auto-router) before the role's adapter starts producing events,
+    /// so `cr show` and the renderer can mark queued state visibly.
+    ///
+    /// `parent_turn_id` is set when this turn was triggered by another
+    /// role's `@<peer>` mention (auto-routed); `queue_position` reports
+    /// where this turn sits in the role's per-role queue at dispatch
+    /// time (0 = will start immediately, 1 = one turn ahead, …).
+    TurnDispatched {
+        /// Configured name of the dispatched role.
+        role: String,
+        /// Opaque turn id, also carried on every later turn-scoped event.
+        turn_id: TurnId,
+        /// Opaque conversation-thread id; preserved across auto-routed
+        /// hops within a single chain.
+        thread_id: TurnId,
+        /// `turn_id` of the role-turn that auto-routed to this one, when
+        /// applicable. `None` for user-originated dispatches.
+        parent_turn_id: Option<TurnId>,
+        /// Queue depth ahead of this turn at dispatch time.
+        queue_position: usize,
+    },
     /// Role supplied a display title for the current work unit.
     ///
     /// This is metadata for terminal cards, not user-visible chat. The
@@ -45,6 +79,13 @@ pub enum CrepEvent {
         role: String,
         /// Sanitized one-line work title.
         title: String,
+        /// Opaque turn id this title belongs to. Empty string for v0.1
+        /// log replay.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
     },
     /// The role emitted a final assistant turn (the LLM finished its
     /// response for the current user message).
@@ -64,6 +105,36 @@ pub enum CrepEvent {
         cost_usd: f64,
         /// Tokens served from prompt cache for this turn (engine-reported).
         cache_read: u64,
+        /// Opaque turn id this reply belongs to. Empty string for v0.1
+        /// log replay.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
+    },
+    /// Turn was interrupted before the role produced a final reply.
+    /// Distinct from `RoleStopped` — the role process is still alive
+    /// and reachable for the next dispatch.
+    ///
+    /// `partial_text` carries whatever the engine had emitted for this
+    /// turn before cancellation (best-effort per adapter); mentions
+    /// parsed from a partial reply are surfaced for the user but
+    /// **never auto-routed** (a half-thought shouldn't cascade).
+    TurnInterrupted {
+        /// Configured name of the interrupted role.
+        role: String,
+        /// Opaque turn id matching the dispatched turn.
+        turn_id: TurnId,
+        /// Opaque conversation-thread id of the interrupted turn.
+        thread_id: TurnId,
+        /// What requested the interruption.
+        source: InterruptSource,
+        /// Best-effort engine output captured before cancellation.
+        partial_text: Option<String>,
+        /// `@<name>` references parsed from `partial_text`, surfaced
+        /// for the user but not auto-routed.
+        partial_mentions: Vec<String>,
     },
     /// Engine asked to call a tool; the wrapper's PreToolUse hook saw it
     /// before the tool ran. May be followed by either `ToolCallExecuted`
@@ -79,6 +150,13 @@ pub enum CrepEvent {
         /// Engine-issued tool-use id; pairs this proposal with its later
         /// `ToolCallExecuted` or `PermissionDenied` event.
         tool_use_id: String,
+        /// Opaque turn id this tool call belongs to. Empty string for
+        /// v0.1 log replay.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
     },
     /// Tool call ran to completion. `output_summary` is a one-line
     /// human-readable summary; full output lives in the transcript.
@@ -92,6 +170,13 @@ pub enum CrepEvent {
         /// One-line summary of the tool output (truncated to a reasonable
         /// width); full output is captured in the transcript JSONL.
         output_summary: String,
+        /// Opaque turn id this tool call belongs to. Empty string for
+        /// v0.1 log replay.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
     },
     /// Wrapper denied a proposed tool call via the PreToolUse hook.
     /// The tool did not run.
@@ -104,6 +189,13 @@ pub enum CrepEvent {
         tool_input: serde_json::Value,
         /// Human-readable reason from the hook.
         reason: String,
+        /// Opaque turn id this denial belongs to. Empty string for
+        /// v0.1 log replay.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
     },
     /// Role subprocess exited. Final event emitted for the role's
     /// session id — any subsequent activity comes from a re-instantiated
@@ -113,6 +205,12 @@ pub enum CrepEvent {
         role: String,
         /// Why the role stopped.
         reason: StopReason,
+        /// Set when the role stopped while a specific turn was in
+        /// flight (crash mid-turn, refresh during a turn, …); used to
+        /// finalize the right WorkCard. `None` for clean
+        /// between-turn stops. Empty string for v0.1 log replay.
+        #[serde(default)]
+        turn_id: Option<TurnId>,
     },
 }
 
@@ -132,7 +230,29 @@ pub enum StopReason {
     Budget,
     /// The wrapper timed out while waiting for the role to finish its
     /// current turn.
+    ///
+    /// Retired from the v0.2 wall-clock path: the REPL's
+    /// `PER_TURN_TIMEOUT` is going away (see PR b).
+    /// Kept on the wire so v0.1 logs still deserialize.
     TimedOut,
+}
+
+/// Why a turn was interrupted. Distinct sources are kept separate so
+/// renderers and `cr show` can attribute cleanly.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptSource {
+    /// User typed `/halt` or `/halt @role`.
+    UserHalt,
+    /// User pressed Ctrl-C once (first-press cancels in-flight turns).
+    UserCtrlC,
+    /// Per-adapter stdio idle watchdog fired (engine emitted no events
+    /// for the configured idle window — see
+    /// `docs/v0.2-trust-and-interrupt.md` § B).
+    WatchdogIdle,
+    /// `cancel_turn` did not produce a turn-final event within the 5s
+    /// SLO; adapter escalated to a process kill via `stop_tx`.
+    CancelTimeout,
 }
 
 #[cfg(test)]
@@ -163,12 +283,118 @@ mod tests {
             mentions: vec!["security".into(), "frontend".into()],
             cost_usd: 0.0625,
             cache_read: 17_889,
+            turn_id: "t-1".into(),
+            thread_id: "th-1".into(),
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_spoke");
         assert_eq!(wire["mentions"], json!(["security", "frontend"]));
+        assert_eq!(wire["turn_id"], "t-1");
+        assert_eq!(wire["thread_id"], "th-1");
         let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
         assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn role_spoke_legacy_log_replay_tolerates_missing_turn_ids() {
+        // v0.1-shaped messages.jsonl has no turn_id / thread_id;
+        // deserialization must still succeed and fall back to empty.
+        let legacy = json!({
+            "type": "role_spoke",
+            "role": "backend",
+            "text": "ok",
+            "mentions": [],
+            "cost_usd": 0.0,
+            "cache_read": 0,
+        });
+        let parsed: CrepEvent = serde_json::from_value(legacy).unwrap();
+        match parsed {
+            CrepEvent::RoleSpoke {
+                turn_id, thread_id, ..
+            } => {
+                assert_eq!(turn_id, "");
+                assert_eq!(thread_id, "");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn role_stopped_with_in_flight_turn_round_trips() {
+        let event = CrepEvent::RoleStopped {
+            role: "backend".into(),
+            reason: StopReason::Crashed,
+            turn_id: Some("t-7".into()),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["turn_id"], "t-7");
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn role_stopped_legacy_log_replay_tolerates_missing_turn_id() {
+        let legacy = json!({
+            "type": "role_stopped",
+            "role": "backend",
+            "reason": "completed",
+        });
+        let parsed: CrepEvent = serde_json::from_value(legacy).unwrap();
+        match parsed {
+            CrepEvent::RoleStopped { turn_id, .. } => assert!(turn_id.is_none()),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn turn_dispatched_event_shape() {
+        let event = CrepEvent::TurnDispatched {
+            role: "security".into(),
+            turn_id: "t-2".into(),
+            thread_id: "th-1".into(),
+            parent_turn_id: Some("t-1".into()),
+            queue_position: 1,
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["type"], "turn_dispatched");
+        assert_eq!(wire["parent_turn_id"], "t-1");
+        assert_eq!(wire["queue_position"], 1);
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn turn_interrupted_carries_partial_payload() {
+        let event = CrepEvent::TurnInterrupted {
+            role: "security".into(),
+            turn_id: "t-3".into(),
+            thread_id: "th-2".into(),
+            source: InterruptSource::UserHalt,
+            partial_text: Some("partial reply mentioning @backend".into()),
+            partial_mentions: vec!["backend".into()],
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["type"], "turn_interrupted");
+        assert_eq!(wire["source"], "user_halt");
+        assert_eq!(wire["partial_mentions"], json!(["backend"]));
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn interrupt_source_serializes_snake_case() {
+        for (variant, expected) in [
+            (InterruptSource::UserHalt, "user_halt"),
+            (InterruptSource::UserCtrlC, "user_ctrl_c"),
+            (InterruptSource::WatchdogIdle, "watchdog_idle"),
+            (InterruptSource::CancelTimeout, "cancel_timeout"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!("\"{expected}\""),
+                "variant {variant:?}"
+            );
+        }
     }
 
     #[test]
@@ -176,6 +402,8 @@ mod tests {
         let event = CrepEvent::WorkTitle {
             role: "backend".into(),
             title: "Review adapter timeout paths".into(),
+            turn_id: "t-1".into(),
+            thread_id: "th-1".into(),
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "work_title");
@@ -191,6 +419,8 @@ mod tests {
             tool_name: "Bash".into(),
             tool_input: json!({"command": "ls", "description": "list files"}),
             tool_use_id: "toolu_01abc".into(),
+            turn_id: "t-1".into(),
+            thread_id: "th-1".into(),
         };
         let wire = serde_json::to_string(&event).unwrap();
         let parsed: CrepEvent = serde_json::from_str(&wire).unwrap();
@@ -204,6 +434,8 @@ mod tests {
             tool_name: "Bash".into(),
             tool_input: json!({"command": "rm -rf /"}),
             reason: "destructive shell ops are denied by hook".into(),
+            turn_id: "t-1".into(),
+            thread_id: "th-1".into(),
         };
         let wire = serde_json::to_string(&event).unwrap();
         let parsed: CrepEvent = serde_json::from_str(&wire).unwrap();
@@ -235,6 +467,7 @@ mod tests {
         let event = CrepEvent::RoleStopped {
             role: "backend".into(),
             reason: StopReason::Budget,
+            turn_id: None,
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_stopped");
@@ -243,7 +476,7 @@ mod tests {
 
     #[test]
     fn type_tag_is_snake_case_for_all_variants() {
-        let cases = [
+        let cases: [(CrepEvent, &str); 9] = [
             (
                 CrepEvent::RoleStarted {
                     role: "r".into(),
@@ -255,9 +488,21 @@ mod tests {
                 "role_started",
             ),
             (
+                CrepEvent::TurnDispatched {
+                    role: "r".into(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
+                    parent_turn_id: None,
+                    queue_position: 0,
+                },
+                "turn_dispatched",
+            ),
+            (
                 CrepEvent::WorkTitle {
                     role: "r".into(),
                     title: "t".into(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
                 },
                 "work_title",
             ),
@@ -268,8 +513,21 @@ mod tests {
                     mentions: vec![],
                     cost_usd: 0.0,
                     cache_read: 0,
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
                 },
                 "role_spoke",
+            ),
+            (
+                CrepEvent::TurnInterrupted {
+                    role: "r".into(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
+                    source: InterruptSource::UserHalt,
+                    partial_text: None,
+                    partial_mentions: vec![],
+                },
+                "turn_interrupted",
             ),
             (
                 CrepEvent::ToolCallProposed {
@@ -277,6 +535,8 @@ mod tests {
                     tool_name: "Bash".into(),
                     tool_input: json!({}),
                     tool_use_id: "id".into(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
                 },
                 "tool_call_proposed",
             ),
@@ -286,6 +546,8 @@ mod tests {
                     tool_use_id: "id".into(),
                     ok: true,
                     output_summary: String::new(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
                 },
                 "tool_call_executed",
             ),
@@ -295,6 +557,8 @@ mod tests {
                     tool_name: "Bash".into(),
                     tool_input: json!({}),
                     reason: "no".into(),
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
                 },
                 "permission_denied",
             ),
@@ -302,6 +566,7 @@ mod tests {
                 CrepEvent::RoleStopped {
                     role: "r".into(),
                     reason: StopReason::Completed,
+                    turn_id: None,
                 },
                 "role_stopped",
             ),

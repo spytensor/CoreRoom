@@ -20,6 +20,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::crep::CrepEvent;
+use crate::turn::TurnId;
 
 /// Which engine drives a given role.
 ///
@@ -67,6 +68,33 @@ impl Engine {
             ),
         }
     }
+
+    /// Session model exposed by this adapter. See [`SessionKind`].
+    #[must_use]
+    pub const fn session_kind(self) -> SessionKind {
+        match self {
+            Self::Cc => SessionKind::SessionBound,
+            Self::Codex | Self::Gemini => SessionKind::StatelessDispatch,
+        }
+    }
+}
+
+/// Engine session model.
+///
+/// v0.2 makes the distinction explicit because per-role queue
+/// semantics differ between the two: a queued turn against
+/// [`SessionKind::SessionBound`] reuses cached priors and conversation
+/// state; a queued turn against [`SessionKind::StatelessDispatch`]
+/// forks a fresh engine invocation with no inter-turn state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionKind {
+    /// One long-lived engine session per role. Multiple turns share
+    /// session state (priors-cache, conversation memory). cc fits here.
+    SessionBound,
+    /// Each turn is a fresh engine invocation. No inter-turn state.
+    /// codex (single-turn MCP today) and gemini (per-turn `gemini -p`)
+    /// fit here.
+    StatelessDispatch,
 }
 
 /// Adapter-level capability flags for WorkCard rendering.
@@ -174,8 +202,15 @@ pub struct RoleConfig {
     pub permission_socket_path: Option<PathBuf>,
 }
 
+/// Channel capacity for the per-role interrupt mailbox. Multiple
+/// successive `/halt` requests from the user (or repeated Ctrl-C) must
+/// not block; the adapter drains this whenever it picks up a new turn
+/// or finishes the current one.
+pub(crate) const INTERRUPT_CHANNEL_CAPACITY: usize = 8;
+
 /// A live handle to a running role: send the role new prompts, observe its
-/// CREP event stream, and stop it when done.
+/// CREP event stream, request turn-level cancellation, and stop the role
+/// when done.
 ///
 /// The adapter owns the underlying subprocess; dropping a `RoleHandle`
 /// triggers a graceful `stop()` via the adapter's `Drop` implementation
@@ -197,6 +232,11 @@ pub struct RoleHandle {
     /// waiter. REPL commands use this instead of relying on channel
     /// close / `kill_on_drop` side effects.
     pub stop_tx: oneshot::Sender<crate::crep::StopReason>,
+    /// Channel for **turn-level** cancellation. Sending a [`TurnId`]
+    /// asks the adapter to abort that turn while keeping the role
+    /// process alive, so the next dispatch reaches a working role.
+    /// See `docs/v0.2-trust-and-interrupt.md` § C.2.
+    pub interrupt_tx: mpsc::Sender<TurnId>,
     tempfiles: Vec<tempfile::NamedTempFile>,
 }
 
@@ -214,6 +254,8 @@ pub struct RoleHandleParts {
     pub rx_events: mpsc::Receiver<CrepEvent>,
     /// One-shot shutdown request consumed by the adapter's process waiter.
     pub stop_tx: oneshot::Sender<crate::crep::StopReason>,
+    /// Channel for turn-level cancellation. See [`RoleHandle::interrupt_tx`].
+    pub interrupt_tx: mpsc::Sender<TurnId>,
     /// Adapter-owned tempfiles that must remain alive for the role lifetime.
     pub tempfiles: Vec<tempfile::NamedTempFile>,
 }
@@ -227,8 +269,17 @@ impl RoleHandle {
         tx_user: mpsc::Sender<UserMessage>,
         rx_events: mpsc::Receiver<CrepEvent>,
         stop_tx: oneshot::Sender<crate::crep::StopReason>,
+        interrupt_tx: mpsc::Sender<TurnId>,
     ) -> Self {
-        Self::new_with_tempfiles(role, engine, tx_user, rx_events, stop_tx, Vec::new())
+        Self::new_with_tempfiles(
+            role,
+            engine,
+            tx_user,
+            rx_events,
+            stop_tx,
+            interrupt_tx,
+            Vec::new(),
+        )
     }
 
     /// Construct a role handle and keep adapter-owned tempfiles alive for
@@ -240,6 +291,7 @@ impl RoleHandle {
         tx_user: mpsc::Sender<UserMessage>,
         rx_events: mpsc::Receiver<CrepEvent>,
         stop_tx: oneshot::Sender<crate::crep::StopReason>,
+        interrupt_tx: mpsc::Sender<TurnId>,
         tempfiles: Vec<tempfile::NamedTempFile>,
     ) -> Self {
         Self {
@@ -248,6 +300,7 @@ impl RoleHandle {
             tx_user,
             rx_events,
             stop_tx,
+            interrupt_tx,
             tempfiles,
         }
     }
@@ -262,6 +315,7 @@ impl RoleHandle {
             tx_user: self.tx_user,
             rx_events: self.rx_events,
             stop_tx: self.stop_tx,
+            interrupt_tx: self.interrupt_tx,
             tempfiles: self.tempfiles,
         }
     }
@@ -296,6 +350,8 @@ pub(crate) fn role_spoke_events_from_text(
         events.push(CrepEvent::WorkTitle {
             role: role.to_owned(),
             title,
+            turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
         });
     }
     let body = extracted.body.trim().to_owned();
@@ -306,6 +362,8 @@ pub(crate) fn role_spoke_events_from_text(
         mentions,
         cost_usd,
         cache_read,
+        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
     });
     events
 }
@@ -469,6 +527,8 @@ mod tests {
             CrepEvent::WorkTitle {
                 role: "qa".into(),
                 title: "Review adapter timeout paths".into(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             }
         );
         assert_eq!(
@@ -479,6 +539,8 @@ mod tests {
                 mentions: vec!["backend".into()],
                 cost_usd: 0.5,
                 cache_read: 42,
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             }
         );
     }
@@ -490,6 +552,7 @@ mod tests {
         let (tx_user, _rx_user) = mpsc::channel::<UserMessage>(1);
         let (_tx_events, rx_events) = mpsc::channel::<CrepEvent>(1);
         let (stop_tx, _stop_rx) = oneshot::channel();
+        let (interrupt_tx, _interrupt_rx) = mpsc::channel(1);
 
         let handle = RoleHandle::new_with_tempfiles(
             "qa".into(),
@@ -497,6 +560,7 @@ mod tests {
             tx_user,
             rx_events,
             stop_tx,
+            interrupt_tx,
             vec![temp],
         );
         let parts = handle.into_parts();

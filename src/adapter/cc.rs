@@ -49,6 +49,7 @@ use crate::adapter::{
     UserMessage,
 };
 use crate::crep::{CrepEvent, StopReason};
+use crate::turn::TurnId;
 
 /// Channel capacity for both the user-message inbound queue and the CREP
 /// event outbound queue. Sized for typical interactive usage; can be
@@ -154,6 +155,8 @@ impl EngineAdapter for CcAdapter {
         let (tx_events, rx_events) = mpsc::channel::<CrepEvent>(CHANNEL_CAPACITY);
         let (turn_done_tx, turn_done_rx) = mpsc::channel::<()>(CHANNEL_CAPACITY);
         let (stop_tx, stop_rx) = oneshot::channel::<StopReason>();
+        let (interrupt_tx, interrupt_rx) =
+            mpsc::channel::<TurnId>(crate::adapter::INTERRUPT_CHANNEL_CAPACITY);
 
         // Stdout reader: parse stream-json → CREP.
         tokio::spawn(read_stdout(
@@ -175,6 +178,14 @@ impl EngineAdapter for CcAdapter {
             turn_done_rx,
         ));
 
+        // Turn-interrupt drain: PR a stub. cc cancellation path is gated
+        // on `spike/L4-cc-interrupt.sh` (see docs/v0.2-trust-and-interrupt.md
+        // §F.1). Until the spike confirms a stream-json `interrupt` verb,
+        // this task only logs requested cancellations so the channel is
+        // bound and unit-testable. PR b promotes it to a real cancel
+        // path or falls back to `stop_tx` + respawn.
+        tokio::spawn(drain_interrupts_stub(config.name.clone(), interrupt_rx));
+
         // Process waiter: emit a final RoleStopped when the subprocess exits.
         tokio::spawn(wait_child(config.name.clone(), child, tx_events, stop_rx));
 
@@ -184,8 +195,19 @@ impl EngineAdapter for CcAdapter {
             tx_user,
             rx_events,
             stop_tx,
+            interrupt_tx,
             tempfiles,
         ))
+    }
+}
+
+async fn drain_interrupts_stub(role: String, mut rx: mpsc::Receiver<TurnId>) {
+    while let Some(turn_id) = rx.recv().await {
+        tracing::debug!(
+            role = %role,
+            turn_id = %turn_id,
+            "cc cancel_turn requested (stub — see PR b)"
+        );
     }
 }
 
@@ -385,6 +407,8 @@ fn extract_permission_denials(role: &str, line: &Value) -> Vec<CrepEvent> {
                 tool_name,
                 tool_input,
                 reason,
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             }
         })
         .collect()
@@ -408,6 +432,8 @@ fn extract_assistant_events(role: &str, line: &Value) -> Vec<CrepEvent> {
                         events.push(CrepEvent::WorkTitle {
                             role: role.to_owned(),
                             title,
+                            turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                         });
                     }
                 }
@@ -425,6 +451,8 @@ fn extract_assistant_events(role: &str, line: &Value) -> Vec<CrepEvent> {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             }),
             _ => {}
         }
@@ -467,6 +495,8 @@ fn extract_tool_results(role: &str, line: &Value) -> Vec<CrepEvent> {
                     .to_owned(),
                 ok,
                 output_summary: truncate(&output_summary, 200),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             }
         })
         .collect()
@@ -627,7 +657,13 @@ async fn wait_child(
             reason
         }
     };
-    let _ = events.send(CrepEvent::RoleStopped { role, reason }).await;
+    let _ = events
+        .send(CrepEvent::RoleStopped {
+            role,
+            reason,
+            turn_id: None,
+        })
+        .await;
 }
 
 async fn terminate_child(role: &str, child: &mut Child) {

@@ -51,6 +51,8 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
             CrepEvent::WorkTitle {
                 role: "security".into(),
                 title: "Scan permissions".into(),
+                turn_id: String::new(),
+                thread_id: String::new(),
             },
             &mut seen,
         ),
@@ -60,6 +62,8 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
         CrepEvent::WorkTitle {
             role: "security".into(),
             title: "Scan permissions".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         &mut seen,
     )
@@ -72,6 +76,8 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
                 mentions: vec![],
                 cost_usd: 0.0,
                 cache_read: 0,
+                turn_id: String::new(),
+                thread_id: String::new(),
             },
             &mut seen,
         ),
@@ -83,6 +89,8 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
             CrepEvent::WorkTitle {
                 role: "security".into(),
                 title: "Next turn".into(),
+                turn_id: String::new(),
+                thread_id: String::new(),
             },
             &mut seen,
         ),
@@ -140,6 +148,7 @@ fn translate_result_yields_role_spoke_with_cost_and_cache() {
             mentions,
             cost_usd,
             cache_read,
+            ..
         } => {
             assert_eq!(role, "backend");
             assert!(text.contains("@security"));
@@ -173,6 +182,7 @@ fn translate_result_yields_permission_denied_events() {
             tool_name,
             tool_input,
             reason,
+            ..
         } => {
             assert_eq!(role, "backend");
             assert_eq!(tool_name, "Bash");
@@ -219,6 +229,7 @@ fn translate_assistant_with_tool_use_yields_tool_call_proposed() {
             tool_name,
             tool_use_id,
             tool_input,
+            ..
         } => {
             assert_eq!(role, "backend");
             assert_eq!(tool_name, "Bash");
@@ -252,6 +263,8 @@ fn translate_assistant_text_yields_work_title_before_tool_use() {
         CrepEvent::WorkTitle {
             role: "security".into(),
             title: "Inspect permissions".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         }
     );
     assert!(matches!(
@@ -287,6 +300,7 @@ fn translate_user_with_tool_result_yields_tool_call_executed() {
             tool_use_id,
             ok,
             output_summary,
+            ..
         } => {
             assert_eq!(role, "backend");
             assert_eq!(tool_use_id, "toolu_01abc");

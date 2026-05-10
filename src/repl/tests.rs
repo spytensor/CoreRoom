@@ -54,18 +54,24 @@ fn show_filter_keeps_role_events_and_applies_tail() {
             mentions: vec![],
             cost_usd: 0.0,
             cache_read: 0,
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "tool-1".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "README.md".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
     ];
     let options = ShowOptions {
@@ -86,6 +92,7 @@ fn show_filter_tail_zero_renders_no_events() {
     let events = vec![CrepEvent::RoleStopped {
         role: "backend".into(),
         reason: StopReason::Completed,
+        turn_id: None,
     }];
     let options = ShowOptions {
         role: None,
@@ -104,6 +111,8 @@ fn show_normalizes_legacy_cr_task_role_spoke() {
         mentions: vec!["backend".into()],
         cost_usd: 0.0,
         cache_read: 0,
+        turn_id: String::new(),
+        thread_id: String::new(),
     };
 
     let normalized = normalize_show_event(&event);
@@ -111,7 +120,7 @@ fn show_normalizes_legacy_cr_task_role_spoke() {
     assert_eq!(normalized.len(), 2);
     assert!(matches!(
         &normalized[0],
-        CrepEvent::WorkTitle { role, title }
+        CrepEvent::WorkTitle { role, title, .. }
             if role == "security" && title == "Review permissions"
     ));
     assert!(matches!(
@@ -554,6 +563,8 @@ fn snapshot_render_event_lines() {
         CrepEvent::WorkTitle {
             role: "backend".into(),
             title: "Review work cards".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::RoleSpoke {
             role: "backend".into(),
@@ -561,28 +572,37 @@ fn snapshot_render_event_lines() {
             mentions: vec!["security".into()],
             cost_usd: 0.12,
             cache_read: 42,
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "cargo test --all-features"}),
             tool_use_id: "tool-1".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "tests passed".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::PermissionDenied {
             role: "backend".into(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             reason: "destructive shell ops require review".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::RoleStopped {
             role: "backend".into(),
             reason: StopReason::Refreshed,
+            turn_id: None,
         },
     ];
     let rendered = events
@@ -609,6 +629,8 @@ fn multi_line_role_spoke_keeps_gutter_on_each_line() {
         cost_usd: 0.0,
         cache_read: 0,
         mentions: vec![],
+        turn_id: String::new(),
+        thread_id: String::new(),
     };
     let rendered = strip_ansi(&render_event_line(&event, "host"));
     insta::assert_snapshot!(rendered, @r"
@@ -627,24 +649,32 @@ fn turn_activity_folds_tool_events() {
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "1".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "host".into(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "ls"}),
             tool_use_id: "2".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "host".into(),
             tool_use_id: "1".into(),
             ok: true,
             output_summary: "README.md".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "host".into(),
             tool_use_id: "2".into(),
             ok: true,
             output_summary: "Cargo.toml".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         },
     ] {
         TurnActivity::from_foldable_event(&event, "host")
@@ -665,6 +695,8 @@ fn turn_activity_ignores_other_roles() {
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "README.md"}),
         tool_use_id: "1".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
     };
 
     assert!(TurnActivity::from_foldable_event(&event, "host").is_none());
@@ -761,6 +793,8 @@ fn turn_activity_permission_denied_event_folds_into_denied_count() {
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "src/main.rs"}),
         reason: "denied by CodeRoom".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
     };
     let folded = TurnActivity::from_foldable_event(&event, "host").expect("foldable");
     assert_eq!(folded.denied, 1);

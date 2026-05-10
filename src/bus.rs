@@ -272,6 +272,7 @@ mod tests {
         let stopped = serde_json::to_string(&CrepEvent::RoleStopped {
             role: "ok".to_owned(),
             reason: StopReason::Completed,
+            turn_id: None,
         })
         .unwrap();
         let mixed = format!("{valid}\nthis-is-not-json\n\n{stopped}\n");

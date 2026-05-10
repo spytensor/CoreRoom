@@ -24,6 +24,7 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(unix)]
@@ -32,7 +33,7 @@ use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{debug, warn};
 
 use crate::adapter::{
@@ -40,6 +41,7 @@ use crate::adapter::{
     UserMessage,
 };
 use crate::crep::{CrepEvent, StopReason};
+use crate::turn::TurnId;
 
 const CHANNEL_CAPACITY: usize = 32;
 const GEMINI_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -116,6 +118,8 @@ impl EngineAdapter for GeminiAdapter {
         let (tx_user, rx_user) = mpsc::channel::<UserMessage>(CHANNEL_CAPACITY);
         let (tx_events, rx_events) = mpsc::channel::<CrepEvent>(CHANNEL_CAPACITY);
         let (stop_tx, stop_rx) = oneshot::channel::<StopReason>();
+        let (interrupt_tx, interrupt_rx) =
+            mpsc::channel::<TurnId>(crate::adapter::INTERRUPT_CHANNEL_CAPACITY);
 
         // Synthetic session id — Gemini's CLI offers --resume by index
         // for sessions persisted to disk, but we treat each turn as
@@ -142,6 +146,7 @@ impl EngineAdapter for GeminiAdapter {
                 rx: rx_user,
                 events: tx_events,
                 stop_rx,
+                interrupt_rx,
             }
             .run(),
         );
@@ -152,6 +157,7 @@ impl EngineAdapter for GeminiAdapter {
             tx_user,
             rx_events,
             stop_tx,
+            interrupt_tx,
         ))
     }
 }
@@ -210,11 +216,24 @@ struct GeminiLoop {
     events: mpsc::Sender<CrepEvent>,
     rx: mpsc::Receiver<UserMessage>,
     stop_rx: oneshot::Receiver<StopReason>,
+    /// Turn-level cancellation. PR a wires the channel; the REPL does
+    /// not yet send TurnIds through it (PR b is the consumer). When
+    /// PR b lands, an arriving TurnId aborts the in-flight `gemini -p`
+    /// child and the loop emits a `TurnInterrupted` event with the
+    /// partial bytes captured by the streaming accumulator.
+    interrupt_rx: mpsc::Receiver<TurnId>,
 }
 
 impl GeminiLoop {
     async fn run(mut self) {
         let stop_reason = loop {
+            // Drain any cancel requests that arrived between turns
+            // (e.g. a /halt fired after the last reply finished but
+            // before the next dispatch) so they don't haunt the next
+            // turn. We do not emit TurnInterrupted here — there is no
+            // turn to interrupt.
+            while self.interrupt_rx.try_recv().is_ok() {}
+
             let msg = tokio::select! {
                 biased;
                 requested = &mut self.stop_rx => break requested.unwrap_or(StopReason::Crashed),
@@ -226,7 +245,7 @@ impl GeminiLoop {
             let UserMessage::Prompt(prompt) = msg else {
                 continue;
             };
-            let outcome = run_one_turn_or_stop(
+            let outcome = run_one_turn(
                 GeminiTurnRequest {
                     gemini_path: &self.gemini_path,
                     model: self.model.as_deref(),
@@ -237,10 +256,19 @@ impl GeminiLoop {
                     role: &self.role,
                 },
                 &mut self.stop_rx,
+                &mut self.interrupt_rx,
             )
             .await;
             match outcome {
                 GeminiTurnOutcome::Stopped(reason) => break reason,
+                GeminiTurnOutcome::Interrupted { partial_text: _ } => {
+                    // PR a captures the partial bytes via the accumulator
+                    // but does not yet emit `TurnInterrupted` — that
+                    // event needs the dispatched turn_id, which arrives
+                    // through `UserMessage` plumbing in PR b. The role
+                    // stays alive for the next dispatch.
+                    debug!(role = %self.role, "gemini turn interrupted; partial bytes discarded (pending PR b)");
+                }
                 GeminiTurnOutcome::Completed(Ok(turn)) => {
                     for event in turn.events {
                         let _ = self.events.send(event).await;
@@ -261,6 +289,8 @@ impl GeminiLoop {
                             mentions: Vec::new(),
                             cost_usd: 0.0,
                             cache_read: 0,
+                            turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                         })
                         .await;
                 }
@@ -271,6 +301,7 @@ impl GeminiLoop {
             .send(CrepEvent::RoleStopped {
                 role: self.role,
                 reason: stop_reason,
+                turn_id: None,
             })
             .await;
         debug!("gemini per-turn loop exiting");
@@ -279,7 +310,21 @@ impl GeminiLoop {
 
 enum GeminiTurnOutcome {
     Completed(std::io::Result<GeminiTurn>),
+    /// Role-level stop requested via `stop_tx`. Loop exits.
     Stopped(StopReason),
+    /// Turn-level halt requested via `interrupt_rx`. Loop continues
+    /// for the next dispatch; `partial_text` is whatever the
+    /// streaming accumulator captured before the child was killed.
+    /// PR b will plumb this into `CrepEvent::TurnInterrupted`; PR a
+    /// only proves the capture path works, so the field is held
+    /// without being emitted yet.
+    Interrupted {
+        #[allow(
+            dead_code,
+            reason = "fed into CrepEvent::TurnInterrupted by PR b once UserMessage carries turn_id"
+        )]
+        partial_text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -299,9 +344,18 @@ struct GeminiTurnRequest<'a> {
 }
 
 /// Run a single `gemini -p` invocation and translate its stream-json stdout.
-async fn run_one_turn_or_stop(
+///
+/// Three exit paths:
+///
+/// - Child completes naturally → [`GeminiTurnOutcome::Completed`].
+/// - `stop_rx` fires (role kill) → [`GeminiTurnOutcome::Stopped`].
+/// - `interrupt_rx` fires (turn-only halt) → [`GeminiTurnOutcome::Interrupted`]
+///   with whatever bytes the streaming accumulator captured. The role
+///   stays alive for the next dispatch.
+async fn run_one_turn(
     request: GeminiTurnRequest<'_>,
     stop_rx: &mut oneshot::Receiver<StopReason>,
+    interrupt_rx: &mut mpsc::Receiver<TurnId>,
 ) -> GeminiTurnOutcome {
     let mut cmd = Command::new(request.gemini_path);
     cmd.arg("-p")
@@ -333,8 +387,18 @@ async fn run_one_turn_or_stop(
     };
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
-    let stdout_task = tokio::spawn(read_pipe(stdout));
-    let stderr_task = tokio::spawn(read_pipe(stderr));
+
+    // Streaming accumulators. The reader tasks append every chunk into
+    // these `Arc<Mutex<Vec<u8>>>` buffers. On natural completion the
+    // reader returns the full bytes; on `stop_rx` / `interrupt_rx` we
+    // abort the reader and drain the accumulator for whatever was
+    // captured before the kill landed. v0.1's `read_pipe` discarded
+    // partial bytes via `task::abort()` — that's why early gemini
+    // cancellations produced empty WorkCards.
+    let stdout_accum: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let stderr_accum: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let stdout_task = tokio::spawn(read_pipe_streaming(stdout, Arc::clone(&stdout_accum)));
+    let stderr_task = tokio::spawn(read_pipe_streaming(stderr, Arc::clone(&stderr_accum)));
 
     let status = tokio::select! {
         biased;
@@ -344,6 +408,15 @@ async fn run_one_turn_or_stop(
             stdout_task.abort();
             stderr_task.abort();
             return GeminiTurnOutcome::Stopped(reason);
+        }
+        Some(turn_id) = interrupt_rx.recv() => {
+            debug!(role = %request.role, turn_id = %turn_id, "gemini turn cancellation requested");
+            terminate_child(request.role, &mut child).await;
+            stdout_task.abort();
+            stderr_task.abort();
+            let partial = stdout_accum.lock().await.clone();
+            let partial_text = String::from_utf8_lossy(&partial).into_owned();
+            return GeminiTurnOutcome::Interrupted { partial_text };
         }
         status = child.wait() => status,
     };
@@ -375,10 +448,22 @@ async fn run_one_turn_or_stop(
     )))
 }
 
-async fn read_pipe(mut pipe: impl tokio::io::AsyncRead + Unpin) -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    pipe.read_to_end(&mut bytes).await?;
-    Ok(bytes)
+/// Read a pipe to EOF, appending each chunk into `accum` so partial
+/// bytes survive a `task::abort()`. Returns the cumulative bytes on
+/// natural completion; aborted callers drain `accum` directly.
+async fn read_pipe_streaming(
+    mut pipe: impl tokio::io::AsyncRead + Unpin,
+    accum: Arc<Mutex<Vec<u8>>>,
+) -> std::io::Result<Vec<u8>> {
+    let mut buf = vec![0u8; 4096];
+    loop {
+        match pipe.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => accum.lock().await.extend_from_slice(&buf[..n]),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(accum.lock().await.clone())
 }
 
 #[cfg(unix)]
@@ -511,6 +596,8 @@ fn gemini_tool_use_to_event(
             .cloned()
             .unwrap_or(serde_json::Value::Null),
         tool_use_id: gemini_tool_id(value, synthetic_tool_id),
+        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
     }
 }
 
@@ -538,6 +625,8 @@ fn gemini_tool_result_to_event(
         tool_use_id: gemini_tool_id(value, synthetic_tool_id),
         ok,
         output_summary: truncate(summary, TOOL_OUTPUT_SUMMARY_MAX_CHARS),
+        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
     }
 }
 
@@ -597,12 +686,16 @@ mod tests {
                     tool_name: "Read".into(),
                     tool_input: serde_json::json!({"file_path": "README.md"}),
                     tool_use_id: "read-1".into(),
+                    turn_id: String::new(),
+                    thread_id: String::new(),
                 },
                 CrepEvent::ToolCallExecuted {
                     role: "backend".into(),
                     tool_use_id: "read-1".into(),
                     ok: true,
                     output_summary: "hello".into(),
+                    turn_id: String::new(),
+                    thread_id: String::new(),
                 },
             ]
         );
@@ -622,6 +715,8 @@ mod tests {
                 tool_use_id: "bad-1".into(),
                 ok: false,
                 output_summary: "failed".into(),
+                turn_id: String::new(),
+                thread_id: String::new(),
             }]
         );
     }

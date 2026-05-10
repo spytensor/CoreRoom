@@ -42,6 +42,7 @@ use crate::adapter::{
     UserMessage,
 };
 use crate::crep::{CrepEvent, StopReason};
+use crate::turn::TurnId;
 
 /// Channel capacity for both inbound user messages and outbound CREP
 /// events. Codex's one-shot turn model means at most one outstanding
@@ -141,6 +142,8 @@ impl EngineAdapter for CodexAdapter {
         let (tx_events, rx_events) = mpsc::channel::<CrepEvent>(CHANNEL_CAPACITY);
         let (stop_tx, stop_rx) = oneshot::channel::<StopReason>();
         let (internal_stop_tx, internal_stop_rx) = mpsc::channel::<StopReason>(1);
+        let (interrupt_tx, interrupt_rx) =
+            mpsc::channel::<TurnId>(crate::adapter::INTERRUPT_CHANNEL_CAPACITY);
         let stopping = Arc::new(AtomicBool::new(false));
 
         let pending: Arc<Mutex<HashMap<u64, PendingEntry>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -202,6 +205,19 @@ impl EngineAdapter for CodexAdapter {
             },
         ));
 
+        // Turn-cancellation drain. On every interrupt request, look up
+        // the in-flight tools/call request id from `pending` and emit
+        // `notifications/cancelled` per MCP 2024-11-05. PR a wires the
+        // path; the REPL does not call interrupt_tx yet, so this code
+        // is dormant until PR b. Because codex is single-turn, the
+        // current request id is `pending.keys().max()` (at most one).
+        tokio::spawn(drain_codex_interrupts(
+            config.name.clone(),
+            interrupt_rx,
+            Arc::clone(&pending),
+            Arc::clone(&writer),
+        ));
+
         tokio::spawn(wait_child(
             config.name.clone(),
             child,
@@ -217,8 +233,58 @@ impl EngineAdapter for CodexAdapter {
             tx_user,
             rx_events,
             stop_tx,
+            interrupt_tx,
         ))
     }
+}
+
+async fn drain_codex_interrupts(
+    role: String,
+    mut rx: mpsc::Receiver<TurnId>,
+    pending: Arc<Mutex<HashMap<u64, PendingEntry>>>,
+    writer: Arc<Mutex<ChildStdin>>,
+) {
+    while let Some(turn_id) = rx.recv().await {
+        let request_id = pending.lock().await.keys().copied().max();
+        match request_id {
+            Some(id) => {
+                debug!(
+                    role = %role,
+                    turn_id = %turn_id,
+                    request_id = id,
+                    "codex notifications/cancelled"
+                );
+                if let Err(error) = send_codex_cancellation(&writer, id).await {
+                    warn!(role = %role, %error, "codex cancellation notification write failed");
+                }
+            }
+            None => {
+                debug!(
+                    role = %role,
+                    turn_id = %turn_id,
+                    "codex cancel requested with no in-flight request"
+                );
+            }
+        }
+    }
+}
+
+async fn send_codex_cancellation(
+    writer: &Arc<Mutex<ChildStdin>>,
+    request_id: u64,
+) -> std::io::Result<()> {
+    let envelope = json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/cancelled",
+        "params": {
+            "requestId": request_id,
+            "reason": "CodeRoom user halted turn",
+        },
+    });
+    let line = format!("{envelope}\n");
+    let mut w = writer.lock().await;
+    w.write_all(line.as_bytes()).await?;
+    w.flush().await
 }
 
 #[derive(Clone)]
@@ -748,6 +814,8 @@ async fn approval_response_with_event(
                 tool_name: tool.to_owned(),
                 tool_input: input.clone(),
                 reason: reason.to_owned(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             })
             .await;
     }
@@ -877,6 +945,8 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 tool_name: "Bash".to_owned(),
                 tool_input: Value::Object(tool_input),
                 tool_use_id: call_id,
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             })
         }
         "exec_command_end" => {
@@ -913,6 +983,8 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 tool_use_id: call_id,
                 ok,
                 output_summary: summary.chars().take(200).collect(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             })
         }
         _ => None,
@@ -1027,6 +1099,8 @@ async fn write_loop(
                         mentions: Vec::new(),
                         cost_usd: 0.0,
                         cache_read: 0,
+                        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                     })
                     .await;
             }
@@ -1080,7 +1154,13 @@ async fn wait_child(
         }
     };
     stopping.store(true, Ordering::SeqCst);
-    let _ = events.send(CrepEvent::RoleStopped { role, reason }).await;
+    let _ = events
+        .send(CrepEvent::RoleStopped {
+            role,
+            reason,
+            turn_id: None,
+        })
+        .await;
 }
 
 async fn terminate_child(role: &str, child: &mut Child) {
@@ -1350,6 +1430,7 @@ mod tests {
                 tool_name,
                 tool_input,
                 reason,
+                ..
             } => {
                 assert_eq!(role, "qa");
                 assert_eq!(tool_name, "Bash");
@@ -1437,6 +1518,7 @@ mod tests {
                 tool_name,
                 tool_input,
                 tool_use_id,
+                ..
             } => {
                 assert_eq!(role, "security");
                 assert_eq!(tool_name, "Bash");
@@ -1472,6 +1554,7 @@ mod tests {
                 tool_use_id,
                 ok,
                 output_summary,
+                ..
             } => {
                 assert_eq!(role, "security");
                 assert_eq!(tool_use_id, "call_5TJJ");
