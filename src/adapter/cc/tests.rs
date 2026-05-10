@@ -38,12 +38,56 @@ fn parse_mentions_allows_dashes_and_digits() {
 
 #[test]
 fn parse_mentions_ignores_emails_and_punctuation() {
-    // @foo.bar — match stops at the dot
+    // @foo.bar — match stops at the dot, but email local-parts do not route.
     let text = "send to user@example.com and ping @ops!";
-    assert_eq!(
-        parse_mentions(text),
-        vec!["example".to_owned(), "ops".to_owned()]
-    );
+    assert_eq!(parse_mentions(text), vec!["ops".to_owned()]);
+}
+
+#[test]
+fn work_title_dedupe_keeps_first_title_per_turn() {
+    let mut seen = false;
+    assert!(matches!(
+        dedupe_work_title_for_turn(
+            CrepEvent::WorkTitle {
+                role: "security".into(),
+                title: "Scan permissions".into(),
+            },
+            &mut seen,
+        ),
+        Some(CrepEvent::WorkTitle { .. })
+    ));
+    assert!(dedupe_work_title_for_turn(
+        CrepEvent::WorkTitle {
+            role: "security".into(),
+            title: "Scan permissions".into(),
+        },
+        &mut seen,
+    )
+    .is_none());
+    assert!(matches!(
+        dedupe_work_title_for_turn(
+            CrepEvent::RoleSpoke {
+                role: "security".into(),
+                text: "done".into(),
+                mentions: vec![],
+                cost_usd: 0.0,
+                cache_read: 0,
+            },
+            &mut seen,
+        ),
+        Some(CrepEvent::RoleSpoke { .. })
+    ));
+    seen = false;
+    assert!(matches!(
+        dedupe_work_title_for_turn(
+            CrepEvent::WorkTitle {
+                role: "security".into(),
+                title: "Next turn".into(),
+            },
+            &mut seen,
+        ),
+        Some(CrepEvent::WorkTitle { title, .. }) if title == "Next turn"
+    ));
 }
 
 #[test]
@@ -183,6 +227,41 @@ fn translate_assistant_with_tool_use_yields_tool_call_proposed() {
         }
         other => panic!("expected ToolCallProposed, got {other:?}"),
     }
+}
+
+#[test]
+fn translate_assistant_text_yields_work_title_before_tool_use() {
+    let line = json!({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "```cr-task\nInspect permissions\n```"},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_01abc",
+                    "name": "Read",
+                    "input": {"file_path": "README.md"}
+                }
+            ]
+        }
+    });
+    let events = translate("security", "h", &line);
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[0],
+        CrepEvent::WorkTitle {
+            role: "security".into(),
+            title: "Inspect permissions".into(),
+        }
+    );
+    assert!(matches!(
+        events[1],
+        CrepEvent::ToolCallProposed {
+            ref role,
+            ref tool_name,
+            ..
+        } if role == "security" && tool_name == "Read"
+    ));
 }
 
 #[test]

@@ -269,12 +269,28 @@ pub(crate) fn parse_mentions(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for cap in re.captures_iter(text) {
+        let Some(full) = cap.get(0) else {
+            continue;
+        };
+        if !is_mention_boundary(text, full.start()) {
+            continue;
+        }
         let name = cap[1].to_string();
         if seen.insert(name.clone()) {
             out.push(name);
         }
     }
     out
+}
+
+fn is_mention_boundary(text: &str, at_idx: usize) -> bool {
+    if at_idx == 0 {
+        return true;
+    }
+    let Some(prev) = text[..at_idx].chars().next_back() else {
+        return true;
+    };
+    !(prev.is_ascii_alphanumeric() || matches!(prev, '_' | '-' | '.'))
 }
 
 /// Translate one parsed stream-JSON line into zero or more CREP events.
@@ -322,19 +338,14 @@ fn translate(role: &str, priors_hash: &str, line: &Value) -> Vec<CrepEvent> {
                 .and_then(|u| u.get("cache_read_input_tokens"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let mentions = parse_mentions(&text);
             let mut events = extract_permission_denials(role, line);
-            events.push(CrepEvent::RoleSpoke {
-                role: role.to_owned(),
-                text,
-                mentions,
-                cost_usd,
-                cache_read,
-            });
+            events.extend(crate::adapter::role_spoke_events_from_text(
+                role, &text, cost_usd, cache_read,
+            ));
             events
         }
 
-        "assistant" => extract_tool_uses(role, line),
+        "assistant" => extract_assistant_events(role, line),
 
         "user" => extract_tool_results(role, line),
 
@@ -379,7 +390,7 @@ fn extract_permission_denials(role: &str, line: &Value) -> Vec<CrepEvent> {
         .collect()
 }
 
-fn extract_tool_uses(role: &str, line: &Value) -> Vec<CrepEvent> {
+fn extract_assistant_events(role: &str, line: &Value) -> Vec<CrepEvent> {
     let Some(content) = line
         .get("message")
         .and_then(|m| m.get("content"))
@@ -388,24 +399,37 @@ fn extract_tool_uses(role: &str, line: &Value) -> Vec<CrepEvent> {
         return Vec::new();
     };
 
-    content
-        .iter()
-        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
-        .map(|block| CrepEvent::ToolCallProposed {
-            role: role.to_owned(),
-            tool_name: block
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            tool_input: block.get("input").cloned().unwrap_or(Value::Null),
-            tool_use_id: block
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-        })
-        .collect()
+    let mut events = Vec::new();
+    for block in content {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    if let Some(title) = crate::work::extract_cr_task(text).title {
+                        events.push(CrepEvent::WorkTitle {
+                            role: role.to_owned(),
+                            title,
+                        });
+                    }
+                }
+            }
+            Some("tool_use") => events.push(CrepEvent::ToolCallProposed {
+                role: role.to_owned(),
+                tool_name: block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                tool_input: block.get("input").cloned().unwrap_or(Value::Null),
+                tool_use_id: block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            }),
+            _ => {}
+        }
+    }
+    events
 }
 
 fn extract_tool_results(role: &str, line: &Value) -> Vec<CrepEvent> {
@@ -465,6 +489,7 @@ async fn read_stdout(
     turn_done: mpsc::Sender<()>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
+    let mut emitted_work_title_this_turn = false;
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
@@ -476,6 +501,11 @@ async fn read_stdout(
                     }
                 };
                 for event in translate(&role, &priors_hash, &value) {
+                    let Some(event) =
+                        dedupe_work_title_for_turn(event, &mut emitted_work_title_this_turn)
+                    else {
+                        continue;
+                    };
                     let is_turn_boundary = matches!(
                         event,
                         CrepEvent::RoleSpoke { .. } | CrepEvent::RoleStopped { .. }
@@ -485,6 +515,7 @@ async fn read_stdout(
                         return;
                     }
                     if is_turn_boundary {
+                        emitted_work_title_this_turn = false;
                         let _ = turn_done.send(()).await;
                     }
                 }
@@ -499,6 +530,19 @@ async fn read_stdout(
             }
         }
     }
+}
+
+fn dedupe_work_title_for_turn(
+    event: CrepEvent,
+    emitted_work_title_this_turn: &mut bool,
+) -> Option<CrepEvent> {
+    if matches!(event, CrepEvent::WorkTitle { .. }) {
+        if *emitted_work_title_this_turn {
+            return None;
+        }
+        *emitted_work_title_this_turn = true;
+    }
+    Some(event)
 }
 
 async fn drain_stderr(role: String, stderr: ChildStderr) {
