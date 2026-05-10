@@ -964,10 +964,11 @@ fn codex_event_request_id(value: &Value) -> Option<u64> {
 ///
 /// - `exec_command_begin` → [`CrepEvent::ToolCallProposed`] (Bash)
 /// - `exec_command_end`   → [`CrepEvent::ToolCallExecuted`]
+/// - `agent_message_content_delta` → [`CrepEvent::RoleOutputDelta`]
 ///
-/// Everything else (token_count, agent_message_content_delta,
-/// session_configured, …) is intentionally dropped — the activity-poke
-/// in `read_rpc_loop` still uses them to keep the idle timer fresh.
+/// Everything else (token_count, session_configured, …) is intentionally
+/// dropped — the activity-poke in `read_rpc_loop` still uses them to keep
+/// the idle timer fresh.
 fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
     let method = value.get("method").and_then(Value::as_str)?;
     if method != "codex/event" {
@@ -1037,6 +1038,24 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 tool_use_id: call_id,
                 ok,
                 output_summary: summary.chars().take(200).collect(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+            })
+        }
+        "agent_message_content_delta" => {
+            let delta = msg
+                .get("delta")
+                .or_else(|| msg.get("text"))
+                .or_else(|| msg.get("content"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if delta.is_empty() {
+                return None;
+            }
+            Some(CrepEvent::RoleOutputDelta {
+                role: role.to_owned(),
+                text_delta: delta.to_owned(),
+                sequence: msg.get("sequence").and_then(Value::as_u64).unwrap_or(0),
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             })
@@ -1725,15 +1744,44 @@ mod tests {
     }
 
     #[test]
+    fn codex_agent_message_delta_becomes_role_output_delta() {
+        let value = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "codex/event",
+            "params": {
+                "_meta": {"requestId": 1},
+                "msg": {
+                    "type": "agent_message_content_delta",
+                    "delta": "partial answer",
+                    "sequence": 7
+                }
+            }
+        });
+        let event = codex_notification_to_event("qa", &value).expect("delta event");
+        match event {
+            CrepEvent::RoleOutputDelta {
+                role,
+                text_delta,
+                sequence,
+                ..
+            } => {
+                assert_eq!(role, "qa");
+                assert_eq!(text_delta, "partial answer");
+                assert_eq!(sequence, 7);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
     fn unrelated_codex_msg_types_are_ignored() {
         // codex emits a flurry of types we don't surface yet (token_count,
-        // agent_message_content_delta, mcp_startup_update, …). They must
+        // mcp_startup_update, …). They must
         // not produce CrepEvents — the read loop only uses them as activity
         // signals for the idle timer.
         for msg_type in [
             "task_started",
             "token_count",
-            "agent_message_content_delta",
             "session_configured",
             "mcp_startup_update",
         ] {

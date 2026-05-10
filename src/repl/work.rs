@@ -142,6 +142,20 @@ impl TurnWork {
         }
     }
 
+    pub(super) fn working_card(&self, spinner_frame: usize) -> WorkCard {
+        WorkCard {
+            role: self.role.clone(),
+            role_color: self.role_color,
+            title: self.title.clone(),
+            status: WorkStatus::Working {
+                spinner_frame,
+                current_step: self.current_step.clone(),
+            },
+            steps: self.steps.clone(),
+            collapsed: false,
+        }
+    }
+
     pub(super) fn interrupted_card(&self, reason: impl Into<String>) -> WorkCard {
         WorkCard {
             role: self.role.clone(),

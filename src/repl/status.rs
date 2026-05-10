@@ -6,6 +6,8 @@ use crossterm::{style::Stylize, terminal};
 use crate::crep::CrepEvent;
 use crate::output;
 
+use super::render::summarize_tool_input;
+
 /// Frames of the standard braille spinner. ~10 frames at 100 ms gives
 /// a familiar one-second rotation that matches `cargo`, `npm`, etc.
 pub(super) const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -72,10 +74,18 @@ impl StatusRegion {
         };
         match event {
             CrepEvent::ToolCallProposed {
-                role, tool_name, ..
+                role,
+                tool_name,
+                tool_input,
+                ..
             } if role == &slot.role => {
                 slot.tools_seen = slot.tools_seen.saturating_add(1);
-                slot.current_state = Some(format!("running {tool_name}"));
+                let summary = summarize_tool_input(tool_input);
+                slot.current_state = Some(if summary.trim().is_empty() {
+                    format!("running {tool_name}")
+                } else {
+                    format!("running {tool_name} {summary}")
+                });
             }
             CrepEvent::ToolCallExecuted { role, .. } if role == &slot.role => {
                 slot.current_state = Some("thinking".to_owned());

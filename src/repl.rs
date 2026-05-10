@@ -34,6 +34,7 @@ use crate::priors;
 
 mod command;
 mod input;
+mod markdown;
 mod permission_prompt;
 mod render;
 mod show;

@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use super::render::{render_event_line, started_model_label, summarize_tool_input};
+use super::render::{
+    render_event_line, render_event_line_at_width, started_model_label, summarize_tool_input,
+};
 use super::show::{filter_show_events, normalize_show_event};
 use super::splash::{
     join_cells, load_splash_content, pick_release, plain_cell, render_home_at_width, splash_bottom,
@@ -641,6 +643,33 @@ fn multi_line_role_spoke_keeps_gutter_on_each_line() {
 }
 
 #[test]
+fn role_spoke_renders_markdown_lite_with_wrapping() {
+    let event = CrepEvent::RoleSpoke {
+        role: "security".into(),
+        text: "# Main Risk\n\n- **Bash** can run broad commands that need review.\n\n```text\n# not a heading\n**not bold**\n```".into(),
+        cost_usd: 0.0,
+        cache_read: 0,
+        mentions: vec![],
+        turn_id: String::new(),
+        thread_id: String::new(),
+    };
+    let rendered = strip_ansi(&render_event_line_at_width(&event, "host", 48));
+
+    assert!(rendered.contains("Main Risk"));
+    assert!(!rendered.contains("# Main Risk"));
+    assert!(rendered.contains("• Bash can run broad"));
+    assert!(!rendered.contains("**Bash**"));
+    assert!(rendered.contains("# not a heading"));
+    assert!(rendered.contains("**not bold**"));
+    for line in rendered.lines() {
+        assert!(
+            unicode_width::UnicodeWidthStr::width(line) <= 48,
+            "line too wide: {line:?}"
+        );
+    }
+}
+
+#[test]
 fn turn_activity_folds_tool_events() {
     let mut activity = TurnActivity::default();
     for event in [
@@ -906,6 +935,10 @@ fn status_region_tracks_tool_count_and_state_from_events() {
     assert!(
         rendered.contains("running Read"),
         "latest tool should drive state: {rendered}"
+    );
+    assert!(
+        rendered.contains("Cargo.toml"),
+        "latest tool input should be visible: {rendered}"
     );
     // Events for a different role must not move the slot.
     s.update_from_event(&CrepEvent::ToolCallProposed {

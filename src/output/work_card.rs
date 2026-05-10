@@ -98,11 +98,20 @@ impl WorkCard {
             self.title,
             self.status_summary()
         );
-        [
-            top_line(&label, width, self.border_color()),
-            bottom_line(width, self.border_color()),
-        ]
-        .join("\n")
+        let mut lines = vec![top_line(&label, width, self.border_color())];
+        for step in self.steps.iter().take(3) {
+            lines.push(content_line(&format_step(step), width, self.border_color()));
+        }
+        let hidden = self.steps.len().saturating_sub(3);
+        if hidden > 0 {
+            lines.push(content_line(
+                &format!("· +{hidden} more steps"),
+                width,
+                self.border_color(),
+            ));
+        }
+        lines.push(bottom_line(width, self.border_color()));
+        lines.join("\n")
     }
 
     fn render_working(&self, width: usize) -> String {
@@ -479,14 +488,16 @@ mod tests {
     }
 
     #[test]
-    fn done_collapsed_is_two_lines() {
+    fn done_collapsed_previews_steps() {
         let mut card = sample_card();
         card.collapsed = true;
         let rendered = strip_ansi(&card.render(80));
         let lines: Vec<&str> = rendered.lines().collect();
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 5);
         assert!(lines[0].contains("@security"));
         assert!(lines[0].contains("done in 12s"));
+        assert!(rendered.contains("Read Cargo.toml"));
+        assert!(rendered.contains("Run cargo test"));
     }
 
     #[test]
