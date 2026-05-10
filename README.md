@@ -8,7 +8,7 @@
 [![CI](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![CodeRoom boot dashboard](docs/images/boot-dashboard.png)
+![CodeRoom multi-engine approval workflow](docs/images/boot-dashboard.png)
 
 > **Status: v0.1.16 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CodeRoom
