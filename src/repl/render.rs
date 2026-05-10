@@ -5,7 +5,7 @@ use tracing::debug;
 use crate::crep::CrepEvent;
 use crate::output;
 
-use super::text::truncate_inline;
+use super::text::{one_line, truncate_inline};
 
 /// One-quarter block — thin, single-column vertical bar painted in a
 /// role's stable color and prefixed onto every event line so the user
@@ -124,7 +124,7 @@ pub(super) fn render_event_line_at_width(
             format!(
                 "{} {glyph} @{role} · {}",
                 trace_gutter(role_paint),
-                output_summary.as_str().with(output::DIM)
+                truncate_inline(&one_line(output_summary), 100).with(output::DIM)
             )
         }
         CrepEvent::PermissionDenied {
@@ -189,10 +189,10 @@ pub(super) fn summarize_tool_input(input: &serde_json::Value) -> String {
     // Best-effort one-liner: if there's a "command", show it; if there's
     // a "file_path", show it; otherwise dump the JSON keys.
     if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-        return format!("`{}`", truncate_inline(cmd, 80));
+        return format!("`{}`", truncate_inline(&one_line(cmd), 80));
     }
     if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
-        return path.to_owned();
+        return truncate_inline(&one_line(path), 80);
     }
     if let Some(obj) = input.as_object() {
         let keys: Vec<&str> = obj.keys().map(String::as_str).collect();

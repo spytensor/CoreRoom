@@ -37,6 +37,7 @@ const SUBSCRIBER_CAPACITY: usize = 1024;
 pub struct MessageBus {
     file: Mutex<File>,
     tx: broadcast::Sender<CrepEvent>,
+    live_tx: broadcast::Sender<CrepEvent>,
 }
 
 /// Result of replaying an on-disk JSONL log.
@@ -111,9 +112,11 @@ impl MessageBus {
         })?;
         let file = File::from_std(std_file);
         let (tx, _initial) = broadcast::channel(SUBSCRIBER_CAPACITY);
+        let (live_tx, _live_initial) = broadcast::channel(SUBSCRIBER_CAPACITY);
         Ok(Self {
             file: Mutex::new(file),
             tx,
+            live_tx,
         })
     }
 
@@ -135,7 +138,11 @@ impl MessageBus {
         }
         // Sending to a broadcast channel with no live receivers returns
         // `Err(SendError)`; that's expected and not a publish failure.
-        let _ = self.tx.send(event);
+        if is_durable_event(&event) {
+            let _ = self.tx.send(event);
+        } else {
+            let _ = self.live_tx.send(event);
+        }
         Ok(())
     }
 
@@ -143,6 +150,13 @@ impl MessageBus {
     /// arrive after this call.
     pub fn subscribe(&self) -> broadcast::Receiver<CrepEvent> {
         self.tx.subscribe()
+    }
+
+    /// Subscribe to live-only events such as assistant text deltas. These
+    /// events are intentionally separated from the durable stream so a
+    /// large token stream cannot evict final turn boundaries.
+    pub fn subscribe_live(&self) -> broadcast::Receiver<CrepEvent> {
+        self.live_tx.subscribe()
     }
 
     /// Stream every event currently on disk at `path`, in order, decoding
@@ -247,7 +261,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let log = tmp.path().join("messages.jsonl");
         let bus = MessageBus::open(&log).await.unwrap();
-        let mut rx = bus.subscribe();
+        let mut durable_rx = bus.subscribe();
+        let mut live_rx = bus.subscribe_live();
 
         let event = CrepEvent::RoleOutputDelta {
             role: "backend".into(),
@@ -258,7 +273,8 @@ mod tests {
         };
         bus.publish(event.clone()).await.unwrap();
 
-        assert_eq!(rx.recv().await.unwrap(), event);
+        assert_eq!(live_rx.recv().await.unwrap(), event);
+        assert!(durable_rx.try_recv().is_err());
         let content = tokio::fs::read_to_string(&log).await.unwrap_or_default();
         assert!(content.is_empty(), "delta should not be durable: {content}");
     }

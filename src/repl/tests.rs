@@ -982,6 +982,14 @@ fn summarize_tool_input_shows_bash_command() {
 }
 
 #[test]
+fn summarize_tool_input_collapses_multiline_commands() {
+    let v = serde_json::json!({"command": "cd foo\ncargo test\t--locked"});
+    let s = summarize_tool_input(&v);
+    assert!(!s.contains('\n'), "status text must stay one-line: {s:?}");
+    assert!(s.contains("cd foo cargo test --locked"), "got: {s}");
+}
+
+#[test]
 fn summarize_tool_input_shows_file_path() {
     let v = serde_json::json!({"file_path": "src/main.rs"});
     assert_eq!(summarize_tool_input(&v), "src/main.rs");

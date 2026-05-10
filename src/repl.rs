@@ -212,6 +212,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     }
 
     let mut renderer_rx = bus.subscribe();
+    let mut live_renderer_rx = bus.subscribe_live();
     let interactive_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let mut stdin = if interactive_tty {
         None
@@ -332,6 +333,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 write_journal(
                     &mut roles,
                     &mut renderer_rx,
+                    &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &coderoom_dir,
                     &role,
@@ -385,6 +387,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 send_and_drain(
                     &mut roles,
                     &mut renderer_rx,
+                    &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &role,
                     &text,
@@ -414,6 +417,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     send_and_drain(
                         &mut roles,
                         &mut renderer_rx,
+                        &mut live_renderer_rx,
                         bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                         &role,
                         &text,
@@ -428,6 +432,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 send_and_drain(
                     &mut roles,
                     &mut renderer_rx,
+                    &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &host,
                     &text,
@@ -538,18 +543,31 @@ async fn mark_welcomed(coderoom_dir: &Path) {
 /// roles, automatically forwards a brief to each (one hop only at v0.1
 /// — multi-hop + hop-depth escalation are tracked in
 /// `docs/proposed-amendments.md`).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "REPL command plumbing passes role maps, event drains, bridge, and Ctrl-C state"
+)]
 async fn send_and_drain(
     roles: &mut HashMap<String, RunningRole>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
+    live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
     role: &str,
     text: &str,
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
 ) -> Result<()> {
-    let Some(captured) =
-        drain_one_turn_handling_ctrl_c(roles, rx, bridge_rx, role, text, host_role, last_ctrl_c)
-            .await?
+    let Some(captured) = drain_one_turn_handling_ctrl_c(
+        roles,
+        rx,
+        live_rx,
+        bridge_rx,
+        role,
+        text,
+        host_role,
+        last_ctrl_c,
+    )
+    .await?
     else {
         return Ok(());
     };
@@ -607,6 +625,7 @@ async fn send_and_drain(
         if drain_one_turn_handling_ctrl_c(
             roles,
             rx,
+            live_rx,
             bridge_rx,
             mention,
             &brief,
@@ -622,9 +641,14 @@ async fn send_and_drain(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Ctrl-C wrapper needs the same drain state plus role registry"
+)]
 async fn drain_one_turn_handling_ctrl_c(
     roles: &mut HashMap<String, RunningRole>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
+    live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
     role: &str,
     text: &str,
@@ -643,6 +667,7 @@ async fn drain_one_turn_handling_ctrl_c(
     let drain = drain_one_turn(
         tx_user,
         rx,
+        live_rx,
         bridge_rx,
         role,
         text,
@@ -764,9 +789,14 @@ const CANCEL_SLO: Duration = Duration::from_secs(5);
 /// v0.1: free-form, no schema validation. The prompt asks for cited
 /// learnings explicitly so the saved markdown matches the structure
 /// `priors::compose_for` expects on next spawn.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "journal command reuses the normal role drain path"
+)]
 async fn write_journal(
     roles: &mut HashMap<String, RunningRole>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
+    live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
     coderoom_dir: &Path,
     role: &str,
@@ -789,9 +819,17 @@ async fn write_journal(
         format!("asking @{role} for a journal entry...").with(output::DIM)
     );
 
-    let Ok(Some(captured)) =
-        drain_one_turn_handling_ctrl_c(roles, rx, bridge_rx, role, prompt, host_role, last_ctrl_c)
-            .await
+    let Ok(Some(captured)) = drain_one_turn_handling_ctrl_c(
+        roles,
+        rx,
+        live_rx,
+        bridge_rx,
+        role,
+        prompt,
+        host_role,
+        last_ctrl_c,
+    )
+    .await
     else {
         output::bad(format!("@{role} did not produce a journal entry"));
         return;

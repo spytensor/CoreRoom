@@ -10,6 +10,7 @@ use crate::output::work_card::{Step, StepKind, WorkCard, WorkStatus};
 use crate::work;
 
 use super::render::summarize_tool_input;
+use super::text::one_line;
 
 const DEFAULT_CARD_WIDTH: usize = 80;
 
@@ -213,13 +214,11 @@ fn step_label(tool_name: &str, tool_input: &serde_json::Value) -> String {
 
 fn executed_label(ok: bool, output_summary: &str) -> String {
     let status = if ok { "ok" } else { "failed" };
-    if output_summary.trim().is_empty() {
+    let summary = one_line(output_summary);
+    if summary.trim().is_empty() {
         status.to_owned()
     } else {
-        format!(
-            "{status}: {}",
-            output::truncate_visible(output_summary, 120)
-        )
+        format!("{status}: {}", output::truncate_visible(&summary, 120))
     }
 }
 
