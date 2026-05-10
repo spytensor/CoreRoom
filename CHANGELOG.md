@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-10
+
+### Added
+
+- **Role output streams live for Codex and Gemini.** Codex
+  `agent_message_content_delta` and Gemini `stream-json` assistant
+  chunks now surface while the role is still working; final `RoleSpoke`
+  remains the durable transcript and auto-route source of truth.
+- **Markdown-lite terminal rendering for role replies.** Common headings,
+  bullets, bold markers, and fenced code blocks now render as terminal
+  text instead of leaking raw Markdown syntax into the chat stream.
+- **Observable tool progress while roles work.** Tool calls now append
+  compact trace lines, enrich the one-line status region with tool name
+  and input summaries, and preview recent WorkCard steps in collapsed
+  done cards.
+
+### Fixed
+
+- Split live-only `RoleOutputDelta` events from the durable message-bus
+  stream so token floods cannot evict final `RoleSpoke` /
+  `TurnInterrupted` boundaries from the active drain.
+- Filter leading `cr-task` control blocks out of streamed assistant text
+  before rendering, keeping WorkCard titles out of chat replies.
+- Keep status and tool summaries one-line even when engine tool input
+  contains multiline shell commands.
+- Preserve Codex partial text and mentions on user halt; pair Gemini
+  tool-use/result events even when the CLI omits native `tool_id`.
+
+### Changed
+
+- CI now runs clippy, build, and test with `--locked`, matching the
+  release validation path.
+- README screenshots are regenerated from the checked-in Pillow renderer
+  and now show the v0.2.1 startup / role-collaboration flow.
+
 ## [0.2.0] - 2026-05-10
 
 **v0.2 trinity — phase 1.** Trust the model (no wall-clock kill),
@@ -660,7 +695,9 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/spytensor/codeRoom/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/spytensor/codeRoom/compare/v0.1.18...v0.2.0
 [0.1.18]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.18
 [0.1.17]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.17
 [0.1.16]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.16

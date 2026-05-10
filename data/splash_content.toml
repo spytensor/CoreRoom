@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.2.1"
+items = [
+  "role replies render markdown-lite instead of raw ## / ** markers",
+  "Codex and Gemini stream assistant text while the role is writing",
+  "tool progress surfaces as trace lines, status text, and WorkCard steps",
+]
+
+[[whats_new]]
 version = "0.2.0"
 items = [
   "no wall-clock kill on long turns — trust the model",
