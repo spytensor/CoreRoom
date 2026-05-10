@@ -1,0 +1,39 @@
+# Right-column copy for the boot splash.
+#
+# `tips.items` is the static "tips for getting started" block — refresh
+# it whenever the surface area changes meaningfully.
+#
+# `whats_new` is a list ordered newest-first. The splash picks the entry
+# whose `version` matches the current `CARGO_PKG_VERSION`; if no exact
+# match exists it falls back to the head of the list. Add a new entry
+# at the top for each release.
+
+[tips]
+items = [
+  "type @role to send a task to a specific role",
+  "/patch <role> persists a correction across refreshes",
+  "/journal <role> captures today's lessons-learned",
+]
+
+[[whats_new]]
+version = "0.1.11"
+items = [
+  "OKLCH role palette: lavender host + jade/coral/rose/sky/blossom/honey/teal",
+  "borders, headings, and dashboards no longer leak yellow",
+  "TERM/COLORTERM truecolor probe printed at startup",
+]
+
+[[whats_new]]
+version = "0.1.10"
+items = [
+  "init wizard pickers no longer drift diagonally across the terminal",
+  "raw-mode renderer translates LF to CRLF",
+  "boot dashboard screenshot added to the README",
+]
+
+[[whats_new]]
+version = "0.1.9"
+items = [
+  "cr update / cr upgrade split brew-style; upgrade verifies the install",
+  "stale npm tarball cache no longer reports a false-positive update",
+]
