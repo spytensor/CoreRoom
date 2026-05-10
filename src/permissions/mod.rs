@@ -85,6 +85,20 @@ impl PermissionPolicy {
     fn denies(&self, tool: &str) -> bool {
         self.deny.contains(tool)
     }
+
+    /// Return an explicit session decision for `tool`, if one exists.
+    /// Deny wins over allow, matching the hook-side policy resolver.
+    #[must_use]
+    pub fn decision_for_tool(&self, tool: &str) -> Option<PermissionDecision> {
+        let tool = canonical_tool_name(tool);
+        if self.denies(&tool) {
+            Some(PermissionDecision::Deny)
+        } else if self.allows(&tool) {
+            Some(PermissionDecision::Allow)
+        } else {
+            None
+        }
+    }
 }
 
 /// Path to the session permission policy file under a project root.
@@ -110,6 +124,24 @@ pub fn update_policy(
     update(&mut policy);
     policy.save(path)?;
     Ok(policy)
+}
+
+/// Remember a bridge response in the session policy when the user chose
+/// session scope. Returns `Ok(None)` for once-only responses.
+pub fn update_policy_from_bridge_response(
+    path: &Path,
+    tool: &str,
+    response: &BridgeResponse,
+) -> Result<Option<PermissionPolicy>> {
+    if !matches!(response.scope, DecisionScope::Session) {
+        return Ok(None);
+    }
+
+    update_policy(path, |policy| match response.decision {
+        PermissionDecision::Allow => policy.allow_tool(tool),
+        PermissionDecision::Deny => policy.deny_tool(tool),
+    })
+    .map(Some)
 }
 
 /// Run the hidden Claude Code hook command.
@@ -171,13 +203,8 @@ fn claude_hook_output(
             &verdict.reason,
         ) {
             Ok(response) => {
-                if matches!(response.scope, DecisionScope::Session) {
-                    if let Some(path) = policy_file {
-                        let _ = update_policy(path, |p| match response.decision {
-                            PermissionDecision::Allow => p.allow_tool(&request.name),
-                            PermissionDecision::Deny => p.deny_tool(&request.name),
-                        });
-                    }
+                if let Some(path) = policy_file {
+                    let _ = update_policy_from_bridge_response(path, &request.name, &response);
                 }
                 verdict = match response.decision {
                     PermissionDecision::Allow => allow(format!(
@@ -476,5 +503,52 @@ mod tests {
         assert_eq!(saved, loaded);
         assert!(loaded.allow.contains("Read"));
         assert!(loaded.deny.contains("Bash"));
+    }
+
+    #[test]
+    fn policy_decision_canonicalizes_tool_and_denies_win() {
+        let mut policy = PermissionPolicy::default();
+        policy.allow_tool(" Bash ");
+        assert_eq!(
+            policy.decision_for_tool("Bash"),
+            Some(PermissionDecision::Allow)
+        );
+
+        policy.deny_tool("Bash");
+        assert_eq!(
+            policy.decision_for_tool(" Bash "),
+            Some(PermissionDecision::Deny)
+        );
+    }
+
+    #[test]
+    fn bridge_session_response_updates_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("policy.json");
+        let response = BridgeResponse {
+            v: 1,
+            decision: PermissionDecision::Allow,
+            scope: DecisionScope::Session,
+            reason: "ok".into(),
+        };
+
+        let updated = update_policy_from_bridge_response(&path, "Bash", &response)
+            .unwrap()
+            .expect("session decisions are persisted");
+        assert_eq!(
+            updated.decision_for_tool("Bash"),
+            Some(PermissionDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn bridge_once_response_does_not_update_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("policy.json");
+        let response = BridgeResponse::deny("no");
+
+        let updated = update_policy_from_bridge_response(&path, "Bash", &response).unwrap();
+        assert!(updated.is_none());
+        assert!(!path.exists());
     }
 }

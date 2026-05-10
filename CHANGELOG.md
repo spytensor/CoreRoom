@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex session-scoped approval choices now update CodeRoom's permission
+  policy and are reused for later Codex MCP approval requests.
+- Active-turn permission prompts now cancel their blocking key reader when the
+  role turn times out or is interrupted, so raw mode is not left behind by an
+  orphaned prompt reader.
+- README, architecture notes, and `/help` now describe the current Codex
+  approval bridge and `@role` completion keys instead of the old bypass-only
+  behavior.
+
 ## [0.1.15] - 2026-05-10
 
 ### Changed
