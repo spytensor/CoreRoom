@@ -75,14 +75,9 @@ impl Adapters {
 struct RunningRole {
     tx_user: mpsc::Sender<UserMessage>,
     stop_tx: Option<oneshot::Sender<StopReason>>,
-    /// Turn-level cancellation channel surfaced by the adapter. PR a
-    /// stores the sender on every `RunningRole`; PR b is the consumer
-    /// (the upcoming `/halt` command and Ctrl-C-1× handler). Marked
-    /// `dead_code` until then so clippy stays quiet on the parking lot.
-    #[allow(
-        dead_code,
-        reason = "wired in PR a, consumed by /halt and Ctrl-C in PR b"
-    )]
+    /// Turn-level cancellation channel surfaced by the adapter.
+    /// Consumed by `/halt`, `/halt @role`, and the Ctrl-C-while-turn
+    /// path in `drain_one_turn_handling_ctrl_c`.
     interrupt_tx: mpsc::Sender<crate::turn::TurnId>,
     /// Composed priors temp file. Held for the role's lifetime so the
     /// path passed to the engine via `--append-system-prompt-file`
@@ -273,9 +268,30 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
             InputLine::Line(line) => line,
             InputLine::Eof => break,
             InputLine::Interrupted => {
-                output::system("interrupt received; stopping roles...");
-                shutdown_all_roles(&mut roles, StopReason::Crashed);
-                anyhow::bail!("interrupted");
+                // Ctrl-C at the prompt with no turn in flight. Per
+                // spec § E, first press is just a cue; second press
+                // within 2s exits. The same `last_ctrl_c` timer that
+                // tracks Ctrl-C-during-turn carries the state across
+                // both surfaces so the user gets one uniform window
+                // regardless of where they are.
+                let now = std::time::Instant::now();
+                let was_recent = {
+                    let mut guard = last_ctrl_c.lock().expect("ctrl-c mutex poisoned");
+                    let recent = guard
+                        .is_some_and(|prev| now.duration_since(prev) < CTRL_C_DOUBLE_PRESS_WINDOW);
+                    *guard = Some(now);
+                    recent
+                };
+                if was_recent {
+                    output::system("Ctrl-C twice; stopping all roles");
+                    shutdown_all_roles(&mut roles, StopReason::Crashed);
+                    anyhow::bail!("interrupted");
+                }
+                output::system(format!(
+                    "Ctrl-C → no turn in flight. Press again within {}s to exit, or /halt to interrupt later.",
+                    CTRL_C_DOUBLE_PRESS_WINDOW.as_secs()
+                ));
+                continue;
             }
         };
         match parse_line(&line) {
@@ -531,7 +547,7 @@ async fn send_and_drain(
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
 ) -> Result<()> {
     let Some(captured) =
-        drain_one_turn_with_timeout(roles, rx, bridge_rx, role, text, host_role, last_ctrl_c)
+        drain_one_turn_handling_ctrl_c(roles, rx, bridge_rx, role, text, host_role, last_ctrl_c)
             .await?
     else {
         return Ok(());
@@ -587,7 +603,7 @@ async fn send_and_drain(
                 .with(output::DIM)
                 .italic(),
         );
-        if drain_one_turn_with_timeout(
+        if drain_one_turn_handling_ctrl_c(
             roles,
             rx,
             bridge_rx,
@@ -605,7 +621,7 @@ async fn send_and_drain(
     Ok(())
 }
 
-async fn drain_one_turn_with_timeout(
+async fn drain_one_turn_handling_ctrl_c(
     roles: &mut HashMap<String, RunningRole>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
@@ -773,7 +789,7 @@ async fn write_journal(
     );
 
     let Ok(Some(captured)) =
-        drain_one_turn_with_timeout(roles, rx, bridge_rx, role, prompt, host_role, last_ctrl_c)
+        drain_one_turn_handling_ctrl_c(roles, rx, bridge_rx, role, prompt, host_role, last_ctrl_c)
             .await
     else {
         output::bad(format!("@{role} did not produce a journal entry"));
