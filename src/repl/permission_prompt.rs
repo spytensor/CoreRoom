@@ -55,6 +55,75 @@ pub(super) async fn handle_request(sink: BridgeRequestSink, host_role: &str) -> 
     Ok(())
 }
 
+/// Synchronous variant of [`handle_request`] for callers already inside
+/// a blocking thread (the TTY input loop). Skips spawn_blocking and
+/// reads the keypress on the current thread. The terminal must already
+/// be in raw mode — both the input loop's [`super::input::RawModeGuard`]
+/// and this prompt's keypress reader share the same raw-mode session.
+pub(super) fn handle_request_blocking(sink: BridgeRequestSink, host_role: &str) {
+    let BridgeRequestSink { request, responder } = sink;
+    paint_prompt(&request, host_role);
+    let response = match read_decision_keypress_blocking_in_raw() {
+        Ok(Some(response)) => response,
+        Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
+        Err(error) => {
+            output::bad(format!("permission prompt failed: {error:#}"));
+            BridgeResponse::deny("CodeRoom prompt failed; defaulting to deny")
+        }
+    };
+    paint_outcome(&request.role, host_role, &response);
+    responder.respond(response);
+}
+
+/// Like [`read_decision_keypress_blocking`] but assumes the caller
+/// already entered raw mode. Used from the TTY input loop where the
+/// editor's RawModeGuard is still in scope.
+fn read_decision_keypress_blocking_in_raw() -> Result<Option<BridgeResponse>> {
+    loop {
+        match crossterm::event::read().context("reading permission keypress")? {
+            Event::Key(key) => {
+                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                    continue;
+                }
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c'))
+                {
+                    return Ok(None);
+                }
+                match key.code {
+                    KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Allow,
+                            DecisionScope::Once,
+                        )));
+                    }
+                    KeyCode::Char('s' | 'S') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Allow,
+                            DecisionScope::Session,
+                        )));
+                    }
+                    KeyCode::Char('d' | 'D') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Deny,
+                            DecisionScope::Once,
+                        )));
+                    }
+                    KeyCode::Char('n' | 'N') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Deny,
+                            DecisionScope::Session,
+                        )));
+                    }
+                    KeyCode::Esc => return Ok(None),
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
 fn paint_prompt(request: &BridgeRequest, host_role: &str) {
     let role_paint = output::role_color(&request.role, host_role);
     let gutter = "▎".with(role_paint);
@@ -169,55 +238,70 @@ async fn read_decision_keypress() -> Result<Option<BridgeResponse>> {
         .context("joining permission keypress reader")?
 }
 
+/// RAII guard for the brief raw-mode window the permission prompt opens
+/// to read one keystroke. Drop runs on panic AND on early return so the
+/// terminal is always restored — leaving raw mode on means the user's
+/// shell stops echoing typed characters until they `stty sane`.
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enter() -> Result<Self> {
+        terminal::enable_raw_mode().context("entering raw mode for permission prompt")?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
 fn read_decision_keypress_blocking() -> Result<Option<BridgeResponse>> {
-    terminal::enable_raw_mode().context("entering raw mode for permission prompt")?;
-    let result = (|| -> Result<Option<BridgeResponse>> {
-        loop {
-            match crossterm::event::read().context("reading permission keypress")? {
-                Event::Key(key) => {
-                    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                        continue;
-                    }
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.code, KeyCode::Char('c'))
-                    {
-                        return Ok(None);
-                    }
-                    match key.code {
-                        KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
-                            return Ok(Some(decision(
-                                PermissionDecision::Allow,
-                                DecisionScope::Once,
-                            )));
-                        }
-                        KeyCode::Char('s' | 'S') => {
-                            return Ok(Some(decision(
-                                PermissionDecision::Allow,
-                                DecisionScope::Session,
-                            )));
-                        }
-                        KeyCode::Char('d' | 'D') => {
-                            return Ok(Some(decision(
-                                PermissionDecision::Deny,
-                                DecisionScope::Once,
-                            )));
-                        }
-                        KeyCode::Char('n' | 'N') => {
-                            return Ok(Some(decision(
-                                PermissionDecision::Deny,
-                                DecisionScope::Session,
-                            )));
-                        }
-                        KeyCode::Esc => return Ok(None),
-                        _ => continue,
-                    }
+    let _raw = RawModeGuard::enter()?;
+    loop {
+        match crossterm::event::read().context("reading permission keypress")? {
+            Event::Key(key) => {
+                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                    continue;
                 }
-                _ => continue,
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c'))
+                {
+                    return Ok(None);
+                }
+                match key.code {
+                    KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Allow,
+                            DecisionScope::Once,
+                        )));
+                    }
+                    KeyCode::Char('s' | 'S') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Allow,
+                            DecisionScope::Session,
+                        )));
+                    }
+                    KeyCode::Char('d' | 'D') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Deny,
+                            DecisionScope::Once,
+                        )));
+                    }
+                    KeyCode::Char('n' | 'N') => {
+                        return Ok(Some(decision(
+                            PermissionDecision::Deny,
+                            DecisionScope::Session,
+                        )));
+                    }
+                    KeyCode::Esc => return Ok(None),
+                    _ => continue,
+                }
             }
+            _ => continue,
         }
-    })();
-    let _ = terminal::disable_raw_mode();
-    result
+    }
 }
 
 fn decision(decision: PermissionDecision, scope: DecisionScope) -> BridgeResponse {
