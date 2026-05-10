@@ -20,17 +20,22 @@ use super::status::{StatusRegion, SPINNER_TICK_MS};
 pub(super) struct CapturedTurn {
     pub(super) text: String,
     pub(super) mentions: Vec<String>,
+    /// Tool-call activity observed during this drain. Used by
+    /// `send_and_drain` to gate auto-routing — a turn whose tools were
+    /// systematically denied probably produced an ungrounded reply, and
+    /// its `@<peer>` mentions should not trigger fresh peer turns.
+    pub(super) activity: TurnActivity,
 }
 
 /// Fold noisy tool events during a live turn. Full details are still
 /// persisted in `.coderoom/messages.jsonl`; this keeps the terminal
 /// focused on the user's prompt and the role's final answer.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct TurnActivity {
-    proposed: usize,
-    completed: usize,
-    failed: usize,
-    tools: BTreeMap<String, usize>,
+    pub(super) proposed: usize,
+    pub(super) completed: usize,
+    pub(super) failed: usize,
+    pub(super) tools: BTreeMap<String, usize>,
 }
 
 impl TurnActivity {
@@ -108,6 +113,20 @@ impl TurnActivity {
             println!("{}", line.with(output::DIM));
         }
     }
+
+    /// Whether the role's turn looks ungrounded — every tool call
+    /// failed, or three-or-more failures piled up. The threshold
+    /// matches the screenshot's "host gets 4 denials, then hallucinates
+    /// a roster" failure mode: at that point any `@<peer>` mention in
+    /// the reply is more likely a guess than a routing decision.
+    pub(super) fn looks_ungrounded(&self) -> bool {
+        if self.failed >= 3 {
+            return true;
+        }
+        // proposed > 0 and zero successful executions = the role tried
+        // to use tools and was rejected on all of them.
+        self.proposed > 0 && self.completed.saturating_sub(self.failed) == 0
+    }
 }
 
 /// Send `text` to `role` and drain bus events until that role's turn
@@ -168,6 +187,7 @@ pub(super) async fn drain_one_turn(
                             captured = Some(CapturedTurn {
                                 text: text.clone(),
                                 mentions: mentions.clone(),
+                                activity: activity.clone(),
                             });
                             activity.render_summary(role);
                             render_event(&event, host_role);
