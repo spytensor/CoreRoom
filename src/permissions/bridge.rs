@@ -262,8 +262,18 @@ async fn handle_connection(
         request,
         responder: BridgeResponder(resp_tx),
     };
-    if req_tx.send(sink).await.is_err() {
-        let response = BridgeResponse::deny("CodeRoom REPL is shutting down");
+    // try_send instead of `send().await` — if the queue is full (REPL
+    // is wedged or just slow), reply deny immediately instead of
+    // blocking the listener task. The previous .await meant a 9th
+    // concurrent request stalled all later ones for up to READ_TIMEOUT.
+    if let Err(error) = req_tx.try_send(sink) {
+        let reason = match error {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                "CodeRoom permission queue is full; rejecting request"
+            }
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => "CodeRoom REPL is shutting down",
+        };
+        let response = BridgeResponse::deny(reason);
         let _ = write_response(&mut writer, &response).await;
         return;
     }

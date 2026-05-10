@@ -1,4 +1,5 @@
 use std::io::Write as _;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{MoveDown, MoveToColumn, MoveUp};
@@ -9,6 +10,14 @@ use crossterm::terminal::{self, Clear, ClearType};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::output;
+use crate::permissions::BridgeRequestSink;
+
+use super::permission_prompt;
+
+/// How often the input loop checks `bridge_rx` for pending permission
+/// requests. 100 ms is short enough that a hook subprocess opens a
+/// prompt within one frame; long enough that the loop isn't a busy-wait.
+const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InputLine {
@@ -17,13 +26,31 @@ pub(super) enum InputLine {
     Interrupted,
 }
 
-pub(super) async fn read_tty_line(roles: Vec<String>) -> Result<InputLine> {
-    tokio::task::spawn_blocking(move || read_tty_line_blocking(&roles))
+/// Read one line from the user's TTY. Ownership of the bridge receiver
+/// is moved into the blocking thread for the duration of the read so
+/// permission prompts that fire while the user is at the prompt can be
+/// surfaced inline; it's returned to the caller as part of the result.
+pub(super) async fn read_tty_line(
+    roles: Vec<String>,
+    bridge_rx: Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
+    host_role: String,
+) -> Result<(
+    InputLine,
+    Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
+)> {
+    tokio::task::spawn_blocking(move || read_tty_line_blocking(&roles, bridge_rx, &host_role))
         .await
         .context("joining tty input reader")?
 }
 
-fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
+fn read_tty_line_blocking(
+    roles: &[String],
+    mut bridge_rx: Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
+    host_role: &str,
+) -> Result<(
+    InputLine,
+    Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
+)> {
     let _raw_mode = RawModeGuard::enter()?;
     let columns = terminal::size().map_or(80, |(cols, _)| usize::from(cols));
     let mut editor = LineEditor::new(columns, roles.to_vec());
@@ -32,6 +59,24 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
     editor.redraw(&mut stdout)?;
 
     loop {
+        // Drain any pending permission prompts BEFORE the next event
+        // poll. This is what makes hooks that fire while the user is
+        // at the prompt actually surface, instead of queuing silently
+        // until the next role turn enters drain_one_turn.
+        if let Some(rx) = bridge_rx.as_mut() {
+            while let Ok(sink) = rx.try_recv() {
+                editor.suspend(&mut stdout)?;
+                permission_prompt::handle_request_blocking(sink, host_role);
+                editor.redraw(&mut stdout)?;
+            }
+        }
+
+        // Poll instead of blocking-read so the bridge check above can
+        // fire on the next iteration even when the user isn't typing.
+        if !event::poll(BRIDGE_POLL_INTERVAL).context("polling terminal input")? {
+            continue;
+        }
+
         let Event::Key(key) = event::read().context("reading terminal input")? else {
             continue;
         };
@@ -43,13 +88,13 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
                 editor.finish(&mut stdout)?;
                 writeln!(stdout, "^C")?;
                 stdout.flush()?;
-                return Ok(InputLine::Interrupted);
+                return Ok((InputLine::Interrupted, bridge_rx));
             }
             KeyCode::Char('d')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && editor.is_empty() =>
             {
                 editor.finish(&mut stdout)?;
-                return Ok(InputLine::Eof);
+                return Ok((InputLine::Eof, bridge_rx));
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 editor.clear();
@@ -57,10 +102,31 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
             }
             KeyCode::Tab => {
                 // First Tab: open the suggestion cycle. Subsequent
-                // Tabs cycle the visible ghost. The user accepts by
-                // pressing space / enter, both handled below; pressing
-                // any non-completion key invalidates the cycle.
+                // Tabs cycle the visible ghost. Right Arrow / Ctrl-F
+                // accept the visible ghost; Enter accepts then submits.
                 if editor.cycle_completion() {
+                    editor.redraw(&mut stdout)?;
+                }
+            }
+            KeyCode::Right | KeyCode::Char('f')
+                if matches!(key.code, KeyCode::Right)
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // zsh / fish convention: Right Arrow / Ctrl-F accepts
+                // the visible ghost text. If no ghost, falls through
+                // to ordinary cursor-move.
+                if editor.ghost_suffix().is_some() {
+                    editor.accept_completion();
+                    editor.redraw(&mut stdout)?;
+                } else if editor.move_right() {
+                    editor.redraw(&mut stdout)?;
+                }
+            }
+            KeyCode::Esc => {
+                // Esc clears the active completion cycle but does NOT
+                // dismiss the editor. Lets users explicitly say "no, I
+                // wanted to type @b literally."
+                if editor.dismiss_completion() {
                     editor.redraw(&mut stdout)?;
                 }
             }
@@ -69,15 +135,12 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                // Pressing space at an `@<prefix>` accepts the active
-                // suggestion (if any) and inserts the trailing space
-                // for the user — same behaviour as VSCode/Sublime
-                // accepting a completion with space.
-                if editor.ghost_suffix().is_some() {
-                    editor.accept_completion();
-                } else {
-                    editor.insert(' ');
-                }
+                // Space inserts a literal space and dismisses any
+                // active ghost. Universal "I did NOT want that
+                // completion" signal — matches zsh autosuggest, fish,
+                // and shell readline norms.
+                editor.dismiss_completion();
+                editor.insert(' ');
                 editor.redraw(&mut stdout)?;
             }
             KeyCode::Char(ch)
@@ -103,11 +166,6 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
                     editor.redraw(&mut stdout)?;
                 }
             }
-            KeyCode::Right => {
-                if editor.move_right() {
-                    editor.redraw(&mut stdout)?;
-                }
-            }
             KeyCode::Home => {
                 if editor.move_home() {
                     editor.redraw(&mut stdout)?;
@@ -119,11 +177,19 @@ fn read_tty_line_blocking(roles: &[String]) -> Result<InputLine> {
                 }
             }
             KeyCode::Enter => {
+                // Accept any visible ghost first so `@b\n` becomes
+                // `@backend\n` instead of dispatching the prefix.
+                // codex CLI external review caught this — it's the
+                // exact prefix-submission failure this PR was meant to
+                // eliminate.
+                if editor.ghost_suffix().is_some() {
+                    editor.accept_completion();
+                }
                 let line = editor.input();
                 editor.finish(&mut stdout)?;
                 writeln!(stdout)?;
                 stdout.flush()?;
-                return Ok(InputLine::Line(line));
+                return Ok((InputLine::Line(line), bridge_rx));
             }
             _ => {}
         }
@@ -266,6 +332,27 @@ impl LineEditor {
     fn invalidate_completion(&mut self) {
         self.completion_anchor = None;
         self.completion_index = 0;
+    }
+
+    /// Explicitly dismiss the active completion (e.g. on Esc / Space).
+    /// Returns `true` if the visible state changed so callers know to
+    /// trigger a redraw.
+    fn dismiss_completion(&mut self) -> bool {
+        let was_active = self.completion_anchor.is_some() || self.painted_ghost_width > 0;
+        self.invalidate_completion();
+        was_active
+    }
+
+    /// Erase the editor's painted text from the terminal so a
+    /// permission prompt can paint over it cleanly. The cursor is left
+    /// at the prompt-start position; a follow-up `redraw` repaints.
+    fn suspend(&mut self, stdout: &mut std::io::Stdout) -> Result<()> {
+        self.move_from_width_to_prompt_start(stdout, self.painted_cursor_width)?;
+        queue!(stdout, Clear(ClearType::FromCursorDown))?;
+        self.painted_cursor_width = 0;
+        self.painted_ghost_width = 0;
+        stdout.flush()?;
+        Ok(())
     }
 
     /// If the cursor is sitting at the end of an `@<prefix>` token (with

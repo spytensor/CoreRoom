@@ -174,7 +174,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     // downstream `select!` arms compile uniformly; the env var is then
     // not exported to adapters and hooks degrade to deny.
     let socket_path = coderoom_dir.join(".permission-ipc.sock");
-    let (bridge_handle, mut bridge_rx) = match crate::permissions::bridge::start(socket_path) {
+    let (bridge_handle, bridge_rx) = match crate::permissions::bridge::start(socket_path) {
         Ok((handle, rx)) => (Some(handle), rx),
         Err(error) => {
             output::warn(format!(
@@ -215,13 +215,25 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
+    // Bridge receiver is owned by the input loop while the user is at
+    // the prompt and re-borrowed by `drain_one_turn` during a turn.
+    // Held as Option so it can be moved into the blocking input thread
+    // and returned alongside the read line.
+    let mut bridge_rx_holder: Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>> =
+        Some(bridge_rx);
+
     loop {
         let input = if interactive_tty {
             // Snapshot role names per iteration so /stop and /refresh
             // additions are reflected in the next prompt's `@`-completer.
             let mut role_names: Vec<String> = roles.keys().cloned().collect();
             role_names.sort();
-            input::read_tty_line(role_names).await?
+            let host_role = cfg.host_role.clone();
+            let bridge_rx_taken = bridge_rx_holder.take();
+            let (line, bridge_rx_back) =
+                input::read_tty_line(role_names, bridge_rx_taken, host_role).await?;
+            bridge_rx_holder = bridge_rx_back;
+            line
         } else {
             prompt(&mut stdout).await?;
             let stdin = stdin.as_mut().expect("non-tty stdin reader");
@@ -285,7 +297,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 write_journal(
                     &mut roles,
                     &mut renderer_rx,
-                    &mut bridge_rx,
+                    bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &coderoom_dir,
                     &role,
                     &cfg.host_role,
@@ -336,7 +348,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 send_and_drain(
                     &mut roles,
                     &mut renderer_rx,
-                    &mut bridge_rx,
+                    bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &role,
                     &text,
                     &cfg.host_role,
@@ -364,7 +376,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     send_and_drain(
                         &mut roles,
                         &mut renderer_rx,
-                        &mut bridge_rx,
+                        bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                         &role,
                         &text,
                         &cfg.host_role,
@@ -377,7 +389,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 send_and_drain(
                     &mut roles,
                     &mut renderer_rx,
-                    &mut bridge_rx,
+                    bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
                     &host,
                     &text,
                     &cfg.host_role,
