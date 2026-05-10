@@ -157,6 +157,14 @@ impl EngineAdapter for CcAdapter {
         let (stop_tx, stop_rx) = oneshot::channel::<StopReason>();
         let (interrupt_tx, interrupt_rx) =
             mpsc::channel::<TurnId>(crate::adapter::INTERRUPT_CHANNEL_CAPACITY);
+        // Internal stop: emit_cc_interrupt_events fires this so
+        // `wait_child` can terminate the subprocess on user halt. See
+        // `docs/v0.2-trust-and-interrupt.md` § F.1: until the
+        // stream-json `{"type":"interrupt"}` verb is verified by
+        // `spike/L4-cc-interrupt.sh`, cc's cancel path is "kill +
+        // user `/refresh` to wake," which guarantees the halted
+        // prompt's late `RoleSpoke` cannot pollute the next turn.
+        let (internal_stop_tx, internal_stop_rx) = mpsc::channel::<StopReason>(1);
 
         // Stdout reader: parse stream-json → CREP.
         tokio::spawn(read_stdout(
@@ -178,16 +186,29 @@ impl EngineAdapter for CcAdapter {
             turn_done_rx,
         ));
 
-        // Turn-interrupt drain: PR a stub. cc cancellation path is gated
-        // on `spike/L4-cc-interrupt.sh` (see docs/v0.2-trust-and-interrupt.md
-        // §F.1). Until the spike confirms a stream-json `interrupt` verb,
-        // this task only logs requested cancellations so the channel is
-        // bound and unit-testable. PR b promotes it to a real cancel
-        // path or falls back to `stop_tx` + respawn.
-        tokio::spawn(drain_interrupts_stub(config.name.clone(), interrupt_rx));
+        // Turn-interrupt drain (cc's spec § F.1 fallback): emit a
+        // `TurnInterrupted` event so the REPL's drain unblocks
+        // immediately, then trigger the internal-stop channel so
+        // `wait_child` kills the subprocess. The user types
+        // `/refresh @<role>` to bring the role back. Earlier "keep
+        // subprocess alive" design caused the halted prompt's late
+        // `RoleSpoke` to bleed into the next turn's drain — this
+        // pathway sidesteps that race entirely.
+        tokio::spawn(emit_cc_interrupt_events(
+            config.name.clone(),
+            interrupt_rx,
+            tx_events.clone(),
+            internal_stop_tx,
+        ));
 
         // Process waiter: emit a final RoleStopped when the subprocess exits.
-        tokio::spawn(wait_child(config.name.clone(), child, tx_events, stop_rx));
+        tokio::spawn(wait_child(
+            config.name.clone(),
+            child,
+            tx_events,
+            stop_rx,
+            internal_stop_rx,
+        ));
 
         Ok(RoleHandle::new_with_tempfiles(
             config.name,
@@ -201,14 +222,46 @@ impl EngineAdapter for CcAdapter {
     }
 }
 
-async fn drain_interrupts_stub(role: String, mut rx: mpsc::Receiver<TurnId>) {
-    while let Some(turn_id) = rx.recv().await {
-        tracing::debug!(
-            role = %role,
-            turn_id = %turn_id,
-            "cc cancel_turn requested (stub — see PR b)"
-        );
-    }
+async fn emit_cc_interrupt_events(
+    role: String,
+    mut rx: mpsc::Receiver<TurnId>,
+    events: mpsc::Sender<CrepEvent>,
+    internal_stop: mpsc::Sender<StopReason>,
+) {
+    // Wait for the first /halt. There is at most one meaningful halt
+    // in this adapter's lifetime — once it lands we kill the cc
+    // subprocess and the role goes away.
+    let Some(turn_id) = rx.recv().await else {
+        return;
+    };
+    tracing::debug!(
+        role = %role,
+        turn_id = %turn_id,
+        "cc /halt: emit TurnInterrupted then kill subprocess (spec § F.1 fallback)"
+    );
+    let _ = events
+        .send(CrepEvent::TurnInterrupted {
+            role: role.clone(),
+            turn_id: if turn_id.is_empty() {
+                crate::turn::LEGACY_TURN_ID.to_owned()
+            } else {
+                turn_id
+            },
+            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+            source: crate::crep::InterruptSource::UserHalt,
+            partial_text: None,
+            partial_mentions: Vec::new(),
+        })
+        .await;
+    // Kill the subprocess so the halted prompt's eventual RoleSpoke
+    // cannot leak into a future turn. Idempotent — `try_send`
+    // swallows the error if `wait_child` has already taken its
+    // single-slot channel.
+    let _ = internal_stop.try_send(StopReason::Crashed);
+    // Drain any further /halt requests so the channel doesn't fill
+    // and back-pressure the REPL. The role is dying; nothing to
+    // interrupt anymore.
+    while rx.recv().await.is_some() {}
 }
 
 fn claude_hook_settings(
@@ -657,6 +710,7 @@ async fn wait_child(
     mut child: Child,
     events: mpsc::Sender<CrepEvent>,
     stop_rx: oneshot::Receiver<StopReason>,
+    mut internal_stop_rx: mpsc::Receiver<StopReason>,
 ) {
     let reason = tokio::select! {
         status = child.wait() => match status {
@@ -669,6 +723,10 @@ async fn wait_child(
         },
         requested = stop_rx => {
             let reason = requested.unwrap_or(StopReason::Crashed);
+            terminate_child(&role, &mut child).await;
+            reason
+        }
+        Some(reason) = internal_stop_rx.recv() => {
             terminate_child(&role, &mut child).await;
             reason
         }
