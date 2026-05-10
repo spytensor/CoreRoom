@@ -519,7 +519,13 @@ async fn read_stdout(
     turn_done: mpsc::Sender<()>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
-    let mut emitted_work_title_this_turn = false;
+    // WorkTitle dedup set, keyed on turn_id. v0.1 events with no
+    // turn_id share the empty-string key so the legacy "first title
+    // per turn" semantics still hold; v0.2 turns get individual keys
+    // so PR b's pipelined cc turns don't lose the second turn's title
+    // to the first turn's dedup bool. See `docs/v0.2-trust-and-interrupt.md`
+    // § F.4.
+    let mut seen_titles_by_turn: HashSet<TurnId> = HashSet::new();
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
@@ -531,21 +537,30 @@ async fn read_stdout(
                     }
                 };
                 for event in translate(&role, &priors_hash, &value) {
-                    let Some(event) =
-                        dedupe_work_title_for_turn(event, &mut emitted_work_title_this_turn)
+                    let Some(event) = dedupe_work_title_for_turn(event, &mut seen_titles_by_turn)
                     else {
                         continue;
                     };
-                    let is_turn_boundary = matches!(
-                        event,
-                        CrepEvent::RoleSpoke { .. } | CrepEvent::RoleStopped { .. }
-                    );
+                    // Pull the turn_id off the boundary event before we
+                    // hand ownership to `events.send`, so we can clear
+                    // the dedup set after the send. RoleStopped without
+                    // a turn_id (legacy logs / between-turn clean stop)
+                    // collapses to the empty-string key that legacy
+                    // WorkTitles use, so the set drains correctly in
+                    // both v0.1 and v0.2 wire shapes.
+                    let boundary_turn_id: Option<TurnId> = match &event {
+                        CrepEvent::RoleSpoke { turn_id, .. } => Some(turn_id.clone()),
+                        CrepEvent::RoleStopped { turn_id, .. } => {
+                            Some(turn_id.clone().unwrap_or_default())
+                        }
+                        _ => None,
+                    };
                     if events.send(event).await.is_err() {
                         debug!(role, "event receiver dropped; stopping reader");
                         return;
                     }
-                    if is_turn_boundary {
-                        emitted_work_title_this_turn = false;
+                    if let Some(id) = boundary_turn_id {
+                        seen_titles_by_turn.remove(&id);
                         let _ = turn_done.send(()).await;
                     }
                 }
@@ -564,13 +579,14 @@ async fn read_stdout(
 
 fn dedupe_work_title_for_turn(
     event: CrepEvent,
-    emitted_work_title_this_turn: &mut bool,
+    seen_titles_by_turn: &mut HashSet<TurnId>,
 ) -> Option<CrepEvent> {
-    if matches!(event, CrepEvent::WorkTitle { .. }) {
-        if *emitted_work_title_this_turn {
+    if let CrepEvent::WorkTitle { turn_id, .. } = &event {
+        // `insert` returns true if the key was newly added → first
+        // WorkTitle for this turn, let it through. False on duplicate.
+        if !seen_titles_by_turn.insert(turn_id.clone()) {
             return None;
         }
-        *emitted_work_title_this_turn = true;
     }
     Some(event)
 }

@@ -296,4 +296,57 @@ mod tests {
             "Debug should not expose tokio::fs::File internals"
         );
     }
+
+    #[tokio::test]
+    async fn replay_handles_v0_1_and_v0_2_events_interleaved() {
+        // Real upgrade story: a session log that started under v0.1
+        // (no turn_id / thread_id fields) and continues under v0.2
+        // (with the new fields plus a TurnDispatched / TurnInterrupted
+        // pair) must replay end-to-end without losing events.
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("messages.jsonl");
+        let body = r#"{"type":"role_started","role":"security","engine":"codex","model":"codex","session_id":"s1","priors_hash":"h"}
+{"type":"role_spoke","role":"security","text":"legacy reply","mentions":[],"cost_usd":0.0,"cache_read":0}
+{"type":"turn_dispatched","role":"security","turn_id":"tu-9","thread_id":"th-9","parent_turn_id":null,"queue_position":0}
+{"type":"role_spoke","role":"security","text":"v0.2 reply","mentions":[],"cost_usd":0.0,"cache_read":0,"turn_id":"tu-9","thread_id":"th-9"}
+{"type":"turn_interrupted","role":"security","turn_id":"tu-9","thread_id":"th-9","source":"user_halt","partial_text":null,"partial_mentions":[]}
+{"type":"role_stopped","role":"security","reason":"refreshed"}
+"#;
+        tokio::fs::write(&log, body).await.unwrap();
+
+        let replayed = MessageBus::replay(&log).await.unwrap();
+        assert_eq!(replayed.skipped_malformed, 0);
+        assert_eq!(replayed.events.len(), 6);
+
+        // Legacy role_spoke deserializes with empty turn_id; v0.2 one
+        // carries the real ids.
+        match &replayed.events[1] {
+            CrepEvent::RoleSpoke {
+                turn_id, thread_id, ..
+            } => {
+                assert!(turn_id.is_empty());
+                assert!(thread_id.is_empty());
+            }
+            other => panic!("expected legacy RoleSpoke, got {other:?}"),
+        }
+        match &replayed.events[3] {
+            CrepEvent::RoleSpoke {
+                turn_id, thread_id, ..
+            } => {
+                assert_eq!(turn_id, "tu-9");
+                assert_eq!(thread_id, "th-9");
+            }
+            other => panic!("expected v0.2 RoleSpoke, got {other:?}"),
+        }
+        // v0.2 TurnDispatched and TurnInterrupted parse cleanly.
+        assert!(matches!(
+            &replayed.events[2],
+            CrepEvent::TurnDispatched { turn_id, .. } if turn_id == "tu-9"
+        ));
+        assert!(matches!(
+            &replayed.events[4],
+            CrepEvent::TurnInterrupted { turn_id, source, .. }
+                if turn_id == "tu-9" && *source == crate::crep::InterruptSource::UserHalt
+        ));
+    }
 }

@@ -1,6 +1,8 @@
 use super::*;
+use crate::turn::TurnId;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::HashSet;
 
 #[test]
 fn fingerprint_is_stable_for_same_input() {
@@ -45,29 +47,32 @@ fn parse_mentions_ignores_emails_and_punctuation() {
 
 #[test]
 fn work_title_dedupe_keeps_first_title_per_turn() {
-    let mut seen = false;
+    let mut seen: HashSet<TurnId> = HashSet::new();
+    // First WorkTitle for turn `t-1` passes through.
     assert!(matches!(
         dedupe_work_title_for_turn(
             CrepEvent::WorkTitle {
                 role: "security".into(),
                 title: "Scan permissions".into(),
-                turn_id: String::new(),
-                thread_id: String::new(),
+                turn_id: "t-1".into(),
+                thread_id: "th-1".into(),
             },
             &mut seen,
         ),
         Some(CrepEvent::WorkTitle { .. })
     ));
+    // Second WorkTitle for the same turn id is squelched.
     assert!(dedupe_work_title_for_turn(
         CrepEvent::WorkTitle {
             role: "security".into(),
-            title: "Scan permissions".into(),
-            turn_id: String::new(),
-            thread_id: String::new(),
+            title: "Scan permissions again".into(),
+            turn_id: "t-1".into(),
+            thread_id: "th-1".into(),
         },
         &mut seen,
     )
     .is_none());
+    // Non-WorkTitle events are passed through unchanged.
     assert!(matches!(
         dedupe_work_title_for_turn(
             CrepEvent::RoleSpoke {
@@ -76,25 +81,44 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
                 mentions: vec![],
                 cost_usd: 0.0,
                 cache_read: 0,
-                turn_id: String::new(),
-                thread_id: String::new(),
+                turn_id: "t-1".into(),
+                thread_id: "th-1".into(),
             },
             &mut seen,
         ),
         Some(CrepEvent::RoleSpoke { .. })
     ));
-    seen = false;
+    // A WorkTitle for a *different* turn id is allowed even though the
+    // dedup set still remembers `t-1` — this is the v0.2 win that
+    // pipelined cc turns no longer lose their first title to the
+    // previous turn's bool.
     assert!(matches!(
         dedupe_work_title_for_turn(
             CrepEvent::WorkTitle {
                 role: "security".into(),
                 title: "Next turn".into(),
-                turn_id: String::new(),
-                thread_id: String::new(),
+                turn_id: "t-2".into(),
+                thread_id: "th-1".into(),
             },
             &mut seen,
         ),
         Some(CrepEvent::WorkTitle { title, .. }) if title == "Next turn"
+    ));
+    // After the caller drains `t-1` from the set on its turn boundary,
+    // a fresh WorkTitle for `t-1` would pass through again — locking
+    // in the contract the call site relies on.
+    seen.remove("t-1");
+    assert!(matches!(
+        dedupe_work_title_for_turn(
+            CrepEvent::WorkTitle {
+                role: "security".into(),
+                title: "Reused turn id".into(),
+                turn_id: "t-1".into(),
+                thread_id: "th-1".into(),
+            },
+            &mut seen,
+        ),
+        Some(CrepEvent::WorkTitle { .. })
     ));
 }
 

@@ -34,17 +34,22 @@ pub fn is_legacy(id: &str) -> bool {
 
 static TURN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Generate a new opaque turn id. Format is `t-<hex millis>-<hex counter>`,
+/// Generate a new opaque turn id. Format is `tu-<hex millis>-<hex counter>`,
 /// monotonic within a single `cr` process and grep-friendly in the JSONL
 /// log. Cross-process uniqueness is not required (each `cr` REPL is its
 /// own session).
+///
+/// Prefix `tu-` is deliberately distinct from `th-` (thread ids) so a
+/// pattern like `\btu-` does not match thread ids and vice versa — a
+/// `\bt-` grep would have hit both, which obscures the wire shape in
+/// logs.
 #[must_use]
 pub fn new_turn_id() -> TurnId {
-    new_id_with_prefix("t")
+    new_id_with_prefix("tu")
 }
 
 /// Generate a new opaque thread id. Same shape as a turn id but with a
-/// distinct prefix so a casual reader can tell them apart in logs.
+/// distinct prefix (`th-`). See [`new_turn_id`] for the rationale.
 #[must_use]
 pub fn new_thread_id() -> TurnId {
     new_id_with_prefix("th")
@@ -68,15 +73,21 @@ mod tests {
         let a = new_turn_id();
         let b = new_turn_id();
         assert_ne!(a, b);
-        assert!(a.starts_with("t-"));
-        assert!(b.starts_with("t-"));
+        assert!(a.starts_with("tu-"));
+        assert!(b.starts_with("tu-"));
     }
 
     #[test]
     fn thread_ids_use_distinct_prefix() {
-        let id = new_thread_id();
-        assert!(id.starts_with("th-"));
-        assert!(!id.starts_with("t-th"));
+        let turn = new_turn_id();
+        let thread = new_thread_id();
+        assert!(thread.starts_with("th-"));
+        assert!(turn.starts_with("tu-"));
+        // The two prefixes are disjoint: a grep for one cannot accidentally
+        // match the other. (`t-` would have matched both before; that's the
+        // collision the prefix change closes.)
+        assert!(!thread.starts_with("tu-"));
+        assert!(!turn.starts_with("th-"));
     }
 
     #[test]
@@ -84,5 +95,6 @@ mod tests {
         assert!(is_legacy(LEGACY_TURN_ID));
         assert!(is_legacy(""));
         assert!(!is_legacy(&new_turn_id()));
+        assert!(!is_legacy(&new_thread_id()));
     }
 }

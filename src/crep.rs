@@ -208,8 +208,14 @@ pub enum CrepEvent {
         /// Set when the role stopped while a specific turn was in
         /// flight (crash mid-turn, refresh during a turn, …); used to
         /// finalize the right WorkCard. `None` for clean
-        /// between-turn stops. Empty string for v0.1 log replay.
-        #[serde(default)]
+        /// between-turn stops. v0.1 log replay also lands here as `None`.
+        ///
+        /// Skipped on serialize when `None` so v0.1 log readers (or
+        /// any downstream tool with `deny_unknown_fields`) don't see
+        /// an unfamiliar `null` field appear out of nowhere; the v0.2
+        /// JSONL log only carries `turn_id` when it has something
+        /// real to say.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<TurnId>,
     },
 }
@@ -395,6 +401,111 @@ mod tests {
                 "variant {variant:?}"
             );
         }
+    }
+
+    #[test]
+    fn turn_interrupted_round_trips_for_each_source() {
+        // Lock down the full TurnInterrupted envelope for every source
+        // variant. Catches both serialize order and `partial_text` /
+        // `partial_mentions` defaults.
+        for source in [
+            InterruptSource::UserHalt,
+            InterruptSource::UserCtrlC,
+            InterruptSource::WatchdogIdle,
+            InterruptSource::CancelTimeout,
+        ] {
+            let event = CrepEvent::TurnInterrupted {
+                role: "security".into(),
+                turn_id: "tu-1".into(),
+                thread_id: "th-1".into(),
+                source,
+                partial_text: None,
+                partial_mentions: vec![],
+            };
+            let wire = serde_json::to_value(&event).unwrap();
+            assert_eq!(wire["type"], "turn_interrupted", "source {source:?}");
+            assert_eq!(
+                wire["source"].as_str().unwrap(),
+                match source {
+                    InterruptSource::UserHalt => "user_halt",
+                    InterruptSource::UserCtrlC => "user_ctrl_c",
+                    InterruptSource::WatchdogIdle => "watchdog_idle",
+                    InterruptSource::CancelTimeout => "cancel_timeout",
+                }
+            );
+            let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+            assert_eq!(event, parsed, "source {source:?}");
+        }
+    }
+
+    #[test]
+    fn turn_dispatched_chain_preserves_thread_id_across_hops() {
+        // Auto-routed chain T1 → T2 → T3 on one thread. parent_turn_id
+        // ancestry plus a single shared thread_id is the v0.2 contract
+        // PR c's hop-depth check relies on; lock the shape now so a
+        // future refactor doesn't quietly drop a field.
+        let chain = [
+            CrepEvent::TurnDispatched {
+                role: "host".into(),
+                turn_id: "tu-1".into(),
+                thread_id: "th-7".into(),
+                parent_turn_id: None,
+                queue_position: 0,
+            },
+            CrepEvent::TurnDispatched {
+                role: "backend".into(),
+                turn_id: "tu-2".into(),
+                thread_id: "th-7".into(),
+                parent_turn_id: Some("tu-1".into()),
+                queue_position: 0,
+            },
+            CrepEvent::TurnDispatched {
+                role: "security".into(),
+                turn_id: "tu-3".into(),
+                thread_id: "th-7".into(),
+                parent_turn_id: Some("tu-2".into()),
+                queue_position: 0,
+            },
+        ];
+
+        let wire: Vec<_> = chain
+            .iter()
+            .map(|e| serde_json::to_value(e).unwrap())
+            .collect();
+        // Shared thread_id across the chain.
+        for event in &wire {
+            assert_eq!(event["thread_id"], "th-7");
+        }
+        // Each child points to its parent.
+        assert_eq!(wire[1]["parent_turn_id"], "tu-1");
+        assert_eq!(wire[2]["parent_turn_id"], "tu-2");
+        // The root has no parent.
+        assert!(wire[0]["parent_turn_id"].is_null());
+        // Round-trip every line.
+        for (event, line) in chain.iter().zip(wire.iter()) {
+            let parsed: CrepEvent = serde_json::from_value(line.clone()).unwrap();
+            assert_eq!(event, &parsed);
+        }
+    }
+
+    #[test]
+    fn role_stopped_skips_turn_id_when_none_on_serialize() {
+        // Forward-compat: v0.1 readers must not see a `turn_id: null`
+        // field appear on every RoleStopped line. The Option is
+        // skipped on serialize when None.
+        let event = CrepEvent::RoleStopped {
+            role: "backend".into(),
+            reason: StopReason::Completed,
+            turn_id: None,
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert!(
+            wire.get("turn_id").is_none(),
+            "expected turn_id to be skipped, got: {wire}"
+        );
+        // Round-trip still works.
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
     }
 
     #[test]

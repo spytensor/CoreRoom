@@ -148,6 +148,14 @@ impl EngineAdapter for CodexAdapter {
 
         let pending: Arc<Mutex<HashMap<u64, PendingEntry>>> = Arc::new(Mutex::new(HashMap::new()));
         let writer = Arc::new(Mutex::new(stdin));
+        // Shared between `write_loop` (publisher) and
+        // `drain_codex_interrupts` (consumer): the JSON-RPC id of the
+        // in-flight `tools/call`, or `None` between turns. `write_loop`
+        // sets it before the request goes out and clears it on
+        // response/error so the cancel drainer always targets the
+        // *current* turn, not an `initialize` id or a stale id sitting
+        // in `pending` during a deferred cleanup window.
+        let current_tools_call: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
 
         // Spawn the JSON-RPC reader: parses each line, dispatches
         // responses by id to the matching pending request, and routes
@@ -199,6 +207,7 @@ impl EngineAdapter for CodexAdapter {
             config.permission_mode,
             rx_user,
             client,
+            Arc::clone(&current_tools_call),
             CodexWriteRuntime {
                 base: runtime,
                 internal_stop: internal_stop_tx,
@@ -206,15 +215,15 @@ impl EngineAdapter for CodexAdapter {
         ));
 
         // Turn-cancellation drain. On every interrupt request, look up
-        // the in-flight tools/call request id from `pending` and emit
-        // `notifications/cancelled` per MCP 2024-11-05. PR a wires the
-        // path; the REPL does not call interrupt_tx yet, so this code
-        // is dormant until PR b. Because codex is single-turn, the
-        // current request id is `pending.keys().max()` (at most one).
+        // the in-flight `tools/call` request id from `current_tools_call`
+        // (published by `write_loop` before the request is sent) and
+        // emit `notifications/cancelled` per MCP 2024-11-05. PR a wires
+        // the path; the REPL does not yet call `interrupt_tx`, so this
+        // code stays dormant until PR b lights up `/halt`.
         tokio::spawn(drain_codex_interrupts(
             config.name.clone(),
             interrupt_rx,
-            Arc::clone(&pending),
+            Arc::clone(&current_tools_call),
             Arc::clone(&writer),
         ));
 
@@ -241,11 +250,11 @@ impl EngineAdapter for CodexAdapter {
 async fn drain_codex_interrupts(
     role: String,
     mut rx: mpsc::Receiver<TurnId>,
-    pending: Arc<Mutex<HashMap<u64, PendingEntry>>>,
+    current_tools_call: Arc<Mutex<Option<u64>>>,
     writer: Arc<Mutex<ChildStdin>>,
 ) {
     while let Some(turn_id) = rx.recv().await {
-        let request_id = pending.lock().await.keys().copied().max();
+        let request_id = *current_tools_call.lock().await;
         match request_id {
             Some(id) => {
                 debug!(
@@ -262,7 +271,7 @@ async fn drain_codex_interrupts(
                 debug!(
                     role = %role,
                     turn_id = %turn_id,
-                    "codex cancel requested with no in-flight request"
+                    "codex cancel requested with no in-flight tools/call"
                 );
             }
         }
@@ -273,6 +282,16 @@ async fn send_codex_cancellation(
     writer: &Arc<Mutex<ChildStdin>>,
     request_id: u64,
 ) -> std::io::Result<()> {
+    let line = codex_cancellation_line(request_id);
+    let mut w = writer.lock().await;
+    w.write_all(line.as_bytes()).await?;
+    w.flush().await
+}
+
+/// JSON-RPC envelope CodeRoom sends to codex on `/halt`. Pulled out
+/// of the writer path so unit tests can verify the wire shape without
+/// constructing an `Arc<Mutex<ChildStdin>>`.
+fn codex_cancellation_line(request_id: u64) -> String {
     let envelope = json!({
         "jsonrpc": "2.0",
         "method": "notifications/cancelled",
@@ -281,10 +300,7 @@ async fn send_codex_cancellation(
             "reason": "CodeRoom user halted turn",
         },
     });
-    let line = format!("{envelope}\n");
-    let mut w = writer.lock().await;
-    w.write_all(line.as_bytes()).await?;
-    w.flush().await
+    format!("{envelope}\n")
 }
 
 #[derive(Clone)]
@@ -362,6 +378,19 @@ impl RpcClient {
     /// six minutes) gets cut off.
     async fn request(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         let id = self.alloc_id().await;
+        self.request_with_id(method, params, id).await
+    }
+
+    /// Same as [`Self::request`], but uses a caller-allocated `id`. Lets
+    /// `write_loop` publish the `tools/call` id into a shared tracker
+    /// before the request is in flight, so the cancel drainer can target
+    /// the exact id without inferring it from `pending`.
+    async fn request_with_id(
+        &self,
+        method: &str,
+        params: Value,
+        id: u64,
+    ) -> Result<Value, RpcError> {
         let envelope = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -1040,6 +1069,7 @@ async fn write_loop(
     permission_mode: PermissionMode,
     mut rx: mpsc::Receiver<UserMessage>,
     client: RpcClient,
+    current_tools_call: Arc<Mutex<Option<u64>>>,
     runtime: CodexWriteRuntime,
 ) {
     let approval_policy = codex_approval_policy(permission_mode);
@@ -1067,7 +1097,19 @@ async fn write_loop(
         });
         let _ = budget_usd; // wired in v0.2 with codex's --max-* config
 
-        match client.request("tools/call", params).await {
+        // Allocate the tools/call request id up front and publish it
+        // into the cancel-tracker before sending. The drainer reads
+        // this lock to know exactly which id to target with
+        // `notifications/cancelled` — no inference from `pending`,
+        // so initialize ids and stale-during-cleanup ids cannot win.
+        let request_id = client.alloc_id().await;
+        *current_tools_call.lock().await = Some(request_id);
+        let outcome = client
+            .request_with_id("tools/call", params, request_id)
+            .await;
+        *current_tools_call.lock().await = None;
+
+        match outcome {
             Ok(result) => {
                 if runtime.base.stopping.load(Ordering::SeqCst) {
                     break;
@@ -1715,5 +1757,25 @@ mod tests {
             .expect_err("nothing arrives");
         assert!(matches!(err, RpcError::Timeout));
         assert!(started.elapsed() >= Duration::from_millis(70));
+    }
+
+    #[test]
+    fn cancellation_envelope_matches_mcp_shape() {
+        // Per MCP 2024-11-05, the cancellation notification is
+        // `notifications/cancelled` with params `{ requestId, reason }`.
+        // Codex matches the camelCase requestId on its side; locking
+        // both keys + JSON-RPC version in a unit test guards the wire
+        // shape against future refactors.
+        let line = codex_cancellation_line(42);
+        let parsed: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(parsed["jsonrpc"], "2.0");
+        assert_eq!(parsed["method"], "notifications/cancelled");
+        assert_eq!(parsed["params"]["requestId"], 42);
+        assert!(parsed["params"]["reason"].is_string());
+        // No top-level `id` — this is a notification, not a request.
+        assert!(parsed.get("id").is_none());
+        // Trailing newline so codex's line-delimited reader sees a
+        // complete JSON-RPC frame.
+        assert!(line.ends_with('\n'));
     }
 }
