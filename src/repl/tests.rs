@@ -923,3 +923,58 @@ fn truncate_inline_truncates_long_strings() {
 fn truncate_inline_preserves_short_strings() {
     assert_eq!(truncate_inline("hi", 8), "hi");
 }
+
+#[test]
+fn parse_halt_no_arg() {
+    assert_eq!(parse_line("/halt"), Command::Halt(None));
+    assert_eq!(parse_line("/halt   "), Command::Halt(None));
+}
+
+#[test]
+fn parse_halt_with_role() {
+    assert_eq!(
+        parse_line("/halt backend"),
+        Command::Halt(Some("backend".into()))
+    );
+    // Tolerates `@` prefix and surrounding whitespace.
+    assert_eq!(
+        parse_line("/halt   @backend  "),
+        Command::Halt(Some("backend".into()))
+    );
+    assert_eq!(parse_line("/halt @ci"), Command::Halt(Some("ci".into())));
+}
+
+#[test]
+fn parse_halt_strips_at_only() {
+    // Bare "@" is not a meaningful target; treat as "halt all".
+    let parsed = parse_line("/halt @");
+    assert!(matches!(parsed, Command::Halt(None)));
+}
+
+#[test]
+fn turn_interrupted_finalizes_work_card() {
+    // `drain_one_turn`'s new boundary handler should flip the
+    // WorkCard to Interrupted on `CrepEvent::TurnInterrupted` for
+    // the active role. Lock the WorkCard state machine here even
+    // though the drain task itself is integration-tested only in
+    // PR c's parallel rendering.
+    use crate::repl::work::TurnWork;
+    let mut work = TurnWork::new("security", "host", "scan repo");
+    // Pre-existing tool step so the interrupted card has content.
+    work.apply_event(&CrepEvent::ToolCallProposed {
+        role: "security".into(),
+        tool_name: "Bash".into(),
+        tool_input: serde_json::json!({"command": "rg secret"}),
+        tool_use_id: "tool-1".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+    });
+    let card = work.interrupted_card("halted by user");
+    assert_eq!(card.steps.len(), 1);
+    match card.status {
+        crate::output::work_card::WorkStatus::Interrupted { reason, .. } => {
+            assert_eq!(reason, "halted by user");
+        }
+        other => panic!("expected Interrupted, got {other:?}"),
+    }
+}
