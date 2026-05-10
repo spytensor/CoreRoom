@@ -18,7 +18,10 @@ use crossterm::style::{Color, StyledContent, Stylize};
 mod palette;
 
 use palette::ROLE_PALETTE;
-pub use palette::{BAD, DIM, EM, FADE, INFO, KEY, MUTE, OK, PROMPT, RULE, TEXT, WARN};
+pub use palette::{
+    BAD, DIM, EM, FADE, INFO, KEY, MUTE, OK, PROMPT, RULE, SPLASH_ACCENT, SPLASH_FRAME,
+    SPLASH_PILL_FG, SPLASH_VERSION, TEXT, WARN,
+};
 
 // ───────────────────── role palette ────────────────────────
 
@@ -109,11 +112,17 @@ pub fn cmd(text: impl Into<String>) -> StyledContent<String> {
     text.into().with(KEY)
 }
 
-/// The `cr ›` prompt as a string. The caller controls placement and
-/// flushing — this helper just owns the styling.
+/// The `⚡ cr ›` prompt as a string. The caller controls placement and
+/// flushing — this helper just owns the styling. The lightning bolt
+/// matches the splash accent so the prompt feels of a piece with the
+/// boot frame.
 #[must_use]
 pub fn prompt() -> String {
-    format!("\n{} ", "cr ›".with(PROMPT).bold())
+    format!(
+        "\n{} {} ",
+        "⚡".with(SPLASH_ACCENT),
+        "cr ›".with(PROMPT).bold()
+    )
 }
 
 // ───────────────────── typography helpers ─────────────────

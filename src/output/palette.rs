@@ -77,6 +77,30 @@ pub const RULE: Color = Color::Rgb {
     g: 0x6a,
     b: 0x6a,
 };
+/// Boot splash frame stroke and the "codeRoom" wordmark — Tailwind teal-300.
+pub const SPLASH_FRAME: Color = Color::Rgb {
+    r: 0x5e,
+    g: 0xea,
+    b: 0xd4,
+};
+/// Boot splash version tag — Tailwind zinc-500.
+pub const SPLASH_VERSION: Color = Color::Rgb {
+    r: 0x71,
+    g: 0x71,
+    b: 0x7a,
+};
+/// Boot splash section accent (right-column headings) — Tailwind amber-400.
+pub const SPLASH_ACCENT: Color = Color::Rgb {
+    r: 0xfb,
+    g: 0xbf,
+    b: 0x24,
+};
+/// Foreground used inside the teal capsule so the digits stay legible.
+pub const SPLASH_PILL_FG: Color = Color::Rgb {
+    r: 0x0a,
+    g: 0x0a,
+    b: 0x0a,
+};
 
 pub(crate) const ROLE_PALETTE: [Color; 8] = [
     // 0: lavender — host is pinned here.

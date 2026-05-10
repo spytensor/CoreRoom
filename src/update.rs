@@ -24,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
@@ -37,6 +38,7 @@ const NPM_PACKAGE: &str = "@spytensor/coderoom";
 /// Compile-time version of the running binary. We compare against this
 /// to detect whether `npm install -g` produced any real change.
 const RUNNING_VERSION: &str = env!("CARGO_PKG_VERSION");
+const UPDATE_CHECK_THROTTLE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// How the `cr` binary appears to have been installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +99,72 @@ pub fn check() -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Best-effort once-per-day update notifier used by `cr start`.
+///
+/// The check runs on a background thread and never fails startup. It is
+/// disabled by `CODEROOM_NO_UPDATE_CHECK=1` or user config
+/// `[updates] check_on_start = false`.
+pub fn maybe_notify_on_start() {
+    if std::env::var("CODEROOM_NO_UPDATE_CHECK").is_ok() || !user_allows_update_check() {
+        return;
+    }
+    let Some(cache_path) = update_cache_path() else {
+        return;
+    };
+    if cache_is_fresh(&cache_path) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let latest = match query_npm_latest() {
+            Ok(latest) => latest,
+            Err(error) => {
+                tracing::debug!(%error, "background update check failed");
+                return;
+            }
+        };
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&cache_path, format!("latest={latest}\n"));
+        if latest != RUNNING_VERSION {
+            println!("→ v{latest} available. update with: npm install -g {NPM_PACKAGE}@latest");
+        }
+    });
+}
+
+fn user_allows_update_check() -> bool {
+    let Some(path) = crate::config_layered::user_config_path() else {
+        return true;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return true;
+    };
+    let Ok(value) = text.parse::<toml::Value>() else {
+        return true;
+    };
+    value
+        .get("updates")
+        .and_then(|u| u.get("check_on_start"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn update_cache_path() -> Option<PathBuf> {
+    dirs::cache_dir().map(|dir| dir.join("coderoom").join("update-check.txt"))
+}
+
+fn cache_is_fresh(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    SystemTime::now()
+        .duration_since(modified)
+        .is_ok_and(|age| age < UPDATE_CHECK_THROTTLE)
 }
 
 /// `cr upgrade` — actually install the latest version, with verification.
