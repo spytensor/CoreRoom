@@ -500,6 +500,26 @@ async fn send_and_drain(
         return Ok(());
     };
 
+    // Grounding gate: if the role's tool calls were systematically
+    // denied, don't auto-route its `@<peer>` mentions. The reply was
+    // almost certainly an ungrounded guess (memory + git log instead
+    // of source), so dispatching that guess as a brief just spreads
+    // the hallucination across the team. The user still sees the
+    // role's reply; they can re-issue manually after granting access.
+    if captured.activity.looks_ungrounded() && !captured.mentions.is_empty() {
+        println!(
+            "  {} {}",
+            "↳".with(output::FADE),
+            format!(
+                "skipping auto-route: @{role} had {} tool failures this turn",
+                captured.activity.failed
+            )
+            .with(output::DIM)
+            .italic(),
+        );
+        return Ok(());
+    }
+
     // One-hop auto-routing: forward to each mentioned running role.
     // Self-references and unknown roles are skipped silently.
     for mention in &captured.mentions {

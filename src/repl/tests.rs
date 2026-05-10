@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::render::{render_event_line, started_model_label, summarize_tool_input};
 use super::show::filter_show_events;
 use super::splash::{
@@ -637,6 +639,56 @@ fn turn_activity_ignores_other_roles() {
     };
 
     assert!(TurnActivity::from_foldable_event(&event, "host").is_none());
+}
+
+#[test]
+fn turn_activity_grounding_gate_fires_on_three_failures() {
+    let mut activity = TurnActivity {
+        proposed: 5,
+        completed: 5,
+        failed: 3,
+        tools: BTreeMap::new(),
+    };
+    assert!(activity.looks_ungrounded());
+    activity.failed = 2;
+    assert!(!activity.looks_ungrounded());
+}
+
+#[test]
+fn turn_activity_grounding_gate_fires_when_all_proposed_tools_failed() {
+    let activity = TurnActivity {
+        proposed: 2,
+        completed: 2,
+        failed: 2,
+        tools: BTreeMap::new(),
+    };
+    assert!(activity.looks_ungrounded());
+}
+
+#[test]
+fn turn_activity_grounding_gate_quiet_when_no_tools_proposed() {
+    // Pure prose reply with no tool calls is valid grounding (the role
+    // already had context from priors); never gate it.
+    let activity = TurnActivity {
+        proposed: 0,
+        completed: 0,
+        failed: 0,
+        tools: BTreeMap::new(),
+    };
+    assert!(!activity.looks_ungrounded());
+}
+
+#[test]
+fn turn_activity_grounding_gate_quiet_on_partial_success() {
+    // 1 tool succeeded, 1 failed — the role had at least some grounded
+    // information. The auto-route may still be valuable; don't gate.
+    let activity = TurnActivity {
+        proposed: 2,
+        completed: 2,
+        failed: 1,
+        tools: BTreeMap::new(),
+    };
+    assert!(!activity.looks_ungrounded());
 }
 
 #[test]
