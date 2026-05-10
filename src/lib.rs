@@ -18,6 +18,7 @@ pub mod detect;
 pub mod engines;
 pub mod init;
 pub mod output;
+pub mod permissions;
 pub mod priors;
 pub mod repl;
 pub mod role;
