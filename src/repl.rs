@@ -41,6 +41,7 @@ mod splash;
 mod status;
 mod text;
 mod turn;
+mod work;
 
 pub use command::{parse_line, Command};
 use input::InputLine;
@@ -48,6 +49,7 @@ use render::render_event;
 pub use show::{show_log, ShowOptions};
 use splash::{print_help, print_home};
 use turn::{drain_one_turn, CapturedTurn};
+use work::{render_card, TurnWork};
 
 /// Bundle of every available engine adapter, constructed once per
 /// `cr start` invocation. Bundled so REPL helpers don't have to
@@ -601,6 +603,10 @@ async fn drain_one_turn_with_timeout(
     if let Ok(result) = result {
         result
     } else {
+        let work = TurnWork::new(role, host_role, text);
+        let card =
+            work.interrupted_card(format!("timed out after {}s", PER_TURN_TIMEOUT.as_secs()));
+        render_card(&card);
         output::bad(format!(
             "@{role} timed out after {}s; stopping role",
             PER_TURN_TIMEOUT.as_secs()

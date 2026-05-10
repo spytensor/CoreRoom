@@ -48,6 +48,14 @@ pub const PATCHES_DIR: &str = "patches";
 /// Section separator inserted between priors sources.
 const SECTION_FENCE: &str = "\n\n---\n\n";
 
+/// Engine-neutral instruction used by the REPL to name WorkCards.
+pub const WORK_REPORTING_PROTOCOL: &str = "## CodeRoom work reporting protocol\n\n\
+Before starting any task, output a one-line summary of what you're about to do, in this exact format:\n\n\
+```cr-task\n\
+{your one-line summary, max 20 words}\n\
+```\n\n\
+This will be displayed to the user as the work card title.";
+
 /// Compose the full system prompt for `role_name` from `coderoom_dir`.
 ///
 /// Returns an error if the role's base priors file is missing. Optional
@@ -110,6 +118,8 @@ pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
         }
     }
 
+    out.push_str(SECTION_FENCE);
+    out.push_str(WORK_REPORTING_PROTOCOL);
     out.push('\n');
     Ok(out)
 }

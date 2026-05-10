@@ -1,6 +1,6 @@
 use std::io::{IsTerminal, Write as _};
 
-use crossterm::style::Stylize;
+use crossterm::{style::Stylize, terminal};
 
 use crate::output;
 
@@ -51,7 +51,8 @@ impl StatusRegion {
         // \r returns cursor to col 0; \x1b[2K clears the whole line.
         // The role color is dropped on intentionally so the line is
         // unambiguously "status" and not confused with a RoleSpoke.
-        print!("\r\x1b[2K{}", self.render_line());
+        let columns = terminal::size().map_or(80, |(cols, _)| usize::from(cols));
+        print!("\r\x1b[2K{}", self.render_line_at_width(columns));
         let _ = std::io::stdout().flush();
         self.is_painted = true;
     }
@@ -79,17 +80,23 @@ impl StatusRegion {
         self.is_painted = false;
     }
 
-    pub(super) fn render_line(&self) -> String {
+    pub(super) fn render_line_at_width(&self, width: usize) -> String {
         let slots = self
             .slots
             .iter()
             .map(|slot| {
                 let frame = SPINNER_FRAMES[slot.frame % SPINNER_FRAMES.len()];
-                format!("@{} thinking {}", slot.role, frame)
+                format!("@{} {frame}", slot.role)
             })
             .collect::<Vec<_>>()
             .join("  ");
-        format!("  {slots}").with(output::DIM).to_string()
+        let count = self.slots.len();
+        let noun = if count == 1 { "role" } else { "roles" };
+        let line =
+            format!("│ {count} {noun} working · chat stream paused until they report · {slots}");
+        output::truncate_visible(&line, width)
+            .with(output::DIM)
+            .to_string()
     }
 }
 

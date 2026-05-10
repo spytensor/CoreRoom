@@ -790,6 +790,23 @@ fn status_region_skips_paint_when_non_tty() {
 }
 
 #[test]
+fn status_region_reports_paused_chat_stream() {
+    let s = StatusRegion {
+        slots: vec![StatusSlot {
+            role: "security".into(),
+            frame: 0,
+        }],
+        is_painted: false,
+        is_tty: false,
+    };
+    let rendered = strip_ansi(&s.render_line_at_width(80));
+    assert_eq!(
+        rendered,
+        "│ 1 role working · chat stream paused until they report · @security ⠋"
+    );
+}
+
+#[test]
 fn spinner_frames_are_all_single_glyphs() {
     // Visual stability: every frame should be exactly one display
     // column wide so the trailing `›` (or end-of-line) doesn't jump

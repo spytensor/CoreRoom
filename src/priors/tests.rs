@@ -25,8 +25,10 @@ fn coderoom_of(tmp: &TempDir) -> PathBuf {
 fn role_only_no_optional_pieces() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
     let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
-    // No shared.md present, no patches → just the role body (with trailing newline).
-    assert_eq!(composed.trim(), "BACKEND_PRIORS");
+    // No shared.md present, no patches → role body plus the built-in
+    // WorkCard reporting protocol.
+    assert!(composed.starts_with("BACKEND_PRIORS\n\n---\n\n## CodeRoom work reporting protocol"));
+    assert!(composed.contains("```cr-task"));
 }
 
 #[test]
@@ -69,8 +71,8 @@ fn empty_shared_md_is_skipped() {
     fs::write(coderoom_of(&tmp).join(SHARED_FILE), "   \n").unwrap();
     let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
     assert!(
-        !composed.contains("---"),
-        "composed should have no fence: {composed:?}"
+        !composed.contains("SHARED_PRIORS"),
+        "empty shared priors should not be included: {composed:?}"
     );
 }
 
