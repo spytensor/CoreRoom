@@ -11,8 +11,8 @@
 //!   the CC adapter's long-lived session, but functionally correct.
 //! - Codex exec lifecycle notifications are translated into best-effort
 //!   CREP tool events when the installed CLI emits them.
-//! - Approval policy is set to `untrusted` so the engine can surface
-//!   approval requests instead of silently bypassing them.
+//! - Approval policy remains `never` until CodeRoom can answer Codex
+//!   approval requests without hanging the MCP call.
 //!
 //! Multi-turn (resume / `codex-reply`), tool-call event mapping, and
 //! approval-policy delegation are scheduled for `feat/adapter-codex-v2`.

@@ -112,7 +112,7 @@ Document a capability matrix and render unsupported values as `—`:
 | ------ | ---------------- | ----------- | --------------- | ---- |
 | cc | system-prompt file | proposed/executed | wrapper hook target | per turn |
 | codex | MCP base instructions | exec notifications when emitted | `—` until approval bridge exists | not reliable yet |
-| gemini | `--system-instruction-file` required | not reliable yet | bypass-only until hook bridge | not reliable yet |
+| gemini | `--system-instruction-file` required | stream-json `tool_use` / `tool_result` | bypass-only until hook bridge | not reliable yet |
 
 Permission modes become explicit:
 
@@ -134,7 +134,7 @@ Accepted in #67 and implemented in v0.1.12.
 
 ## A-003: Concurrent REPL rendering requires a StatusRegion contract
 
-- **Status:** proposed
+- **Status:** N=1 StatusRegion implemented after v0.1.12
 - **Filed:** 2026-05-10
 - **Touches:** REPL rendering, cross-role routing
 
@@ -159,7 +159,7 @@ Introduce a `StatusRegion` primitive before enabling parallel role turns:
 - Cross-role dispatch announcements print at dispatch time.
 - Unsupported counters render as `—`.
 
-`ThinkingSpinner` remains the N=1 view until the concurrent renderer lands.
+`StatusRegion` remains the N=1 view until the concurrent renderer lands.
 
 ### Migration impact
 
@@ -167,11 +167,12 @@ No user-visible change until concurrent rendering is enabled.
 
 ### Decision
 
-Pending review.
+Accepted for the N=1 contract and implemented after v0.1.12. Full parallel
+role dispatch still lands with the concurrent renderer.
 
 ## A-004: `cr show` filtering is part of the public CLI surface
 
-- **Status:** proposed
+- **Status:** implemented after v0.1.12
 - **Filed:** 2026-05-10
 - **Touches:** CLI, CREP replay
 
@@ -201,7 +202,7 @@ Additive CLI flags only.
 
 ### Decision
 
-Pending review.
+Accepted and implemented after v0.1.12.
 
 ## Implemented amendments
 

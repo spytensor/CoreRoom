@@ -213,10 +213,14 @@ PermissionDenied, RoleStopped).
 
 ### Gemini adapter
 
-- Spawn: `gemini -p "<initial>" -o stream-json -y` (yolo skips approvals)
-- Hooks: configured via `gemini hooks` subsystem. Hook payload format is
-  CC-compatible (Gemini ships `gemini hooks migrate` to import CC configs).
-- Otherwise structurally identical to the CC adapter. Same CREP shape.
+- Spawn: `gemini -p "<prompt>" --output-format stream-json -y`.
+- Prompt isolation: CodeRoom requires a Gemini CLI that advertises
+  `--system-instruction-file`. The unsafe inline-priors fallback is gated
+  behind `CODEROOM_GEMINI_UNTRUSTED_PRIORS=1`.
+- Output: `message` events become `RoleSpoke`; `tool_use` and `tool_result`
+  become CREP `ToolCallProposed` / `ToolCallExecuted`.
+- Permission: Gemini remains bypass-only in CodeRoom until a hook or approval
+  protocol can be supervised by the wrapper.
 
 ### Adapter contract
 

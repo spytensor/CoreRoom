@@ -1036,11 +1036,24 @@ async fn drain_one_turn_with_timeout(
     text: &str,
     host_role: &str,
 ) -> Result<Option<CapturedTurn>> {
-    let result = tokio::time::timeout(
+    let Some(tx_user) = roles.get(role).map(|running| running.tx_user.clone()) else {
+        output::bad(format!("no such role: @{role}"));
+        return Ok(None);
+    };
+
+    let result = tokio::select! {
+        biased;
+        signal = tokio::signal::ctrl_c() => {
+            signal.context("installing Ctrl-C handler")?;
+            output::system("interrupt received; stopping roles...");
+            shutdown_all_roles(roles, StopReason::Crashed);
+            anyhow::bail!("interrupted");
+        }
+        result = tokio::time::timeout(
         PER_TURN_TIMEOUT,
-        drain_one_turn(&*roles, rx, role, text, host_role),
-    )
-    .await;
+            drain_one_turn(tx_user, rx, role, text, host_role),
+        ) => result,
+    };
     if let Ok(result) = result {
         result
     } else {
@@ -1067,50 +1080,54 @@ const SPINNER_TICK_MS: u64 = 100;
 /// returning control to the user and terminating the wedged role.
 const PER_TURN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-/// Inline "@<role> thinking <spinner>" line that lives below the user's
-/// last input while we wait for the role to respond. Repaints in place
-/// via carriage-return + clear-line so it stays on a single screen row,
-/// then erases itself before any real event is rendered.
+/// Status line region that lives below the user's last input while we wait
+/// for role activity. Today it owns one role slot; the type boundary is the
+/// future contract for concurrent multi-role rendering.
 ///
 /// Skips all output when stdout is not a TTY (`cr ... | tee log.txt`)
 /// to keep redirected output free of ANSI escapes.
-struct ThinkingSpinner {
-    role: String,
-    frame: usize,
+struct StatusRegion {
+    slots: Vec<StatusSlot>,
     is_painted: bool,
     is_tty: bool,
 }
 
-impl ThinkingSpinner {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StatusSlot {
+    role: String,
+    frame: usize,
+}
+
+impl StatusRegion {
     fn start(role: &str) -> Self {
-        let mut spinner = Self {
-            role: role.to_owned(),
-            frame: 0,
+        let mut region = Self {
+            slots: vec![StatusSlot {
+                role: role.to_owned(),
+                frame: 0,
+            }],
             is_painted: false,
             is_tty: std::io::stdout().is_terminal(),
         };
-        spinner.repaint();
-        spinner
+        region.repaint();
+        region
     }
 
     fn paint(&mut self) {
         if !self.is_tty {
             return;
         }
-        let frame = SPINNER_FRAMES[self.frame % SPINNER_FRAMES.len()];
         // \r returns cursor to col 0; \x1b[2K clears the whole line.
         // The role color is dropped on intentionally so the line is
         // unambiguously "status" and not confused with a RoleSpoke.
-        print!(
-            "\r\x1b[2K{}",
-            format!("  @{} thinking {}", self.role, frame).with(output::DIM)
-        );
+        print!("\r\x1b[2K{}", self.render_line());
         let _ = std::io::stdout().flush();
         self.is_painted = true;
     }
 
     fn advance(&mut self) {
-        self.frame = (self.frame + 1) % SPINNER_FRAMES.len();
+        for slot in &mut self.slots {
+            slot.frame = (slot.frame + 1) % SPINNER_FRAMES.len();
+        }
         if self.is_painted {
             self.paint();
         }
@@ -1129,11 +1146,24 @@ impl ThinkingSpinner {
         let _ = std::io::stdout().flush();
         self.is_painted = false;
     }
+
+    fn render_line(&self) -> String {
+        let slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let frame = SPINNER_FRAMES[slot.frame % SPINNER_FRAMES.len()];
+                format!("@{} thinking {}", slot.role, frame)
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        format!("  {slots}").with(output::DIM).to_string()
+    }
 }
 
-impl Drop for ThinkingSpinner {
+impl Drop for StatusRegion {
     fn drop(&mut self) {
-        // Defensive: never leave a spinner painted on the screen if a
+        // Defensive: never leave status text painted on the screen if a
         // panic or early return ate the explicit clear() call.
         self.clear();
     }
@@ -1242,29 +1272,20 @@ impl TurnActivity {
 /// still persisted in the JSONL log. This only returns to the caller
 /// once the role's turn boundary is observed.
 async fn drain_one_turn(
-    roles: &HashMap<String, RunningRole>,
+    tx_user: mpsc::Sender<UserMessage>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     role: &str,
     text: &str,
     host_role: &str,
 ) -> Result<Option<CapturedTurn>> {
-    let Some(running) = roles.get(role) else {
-        output::bad(format!("no such role: @{role}"));
-        return Ok(None);
-    };
-
-    if let Err(error) = running
-        .tx_user
-        .send(UserMessage::Prompt(text.to_owned()))
-        .await
-    {
+    if let Err(error) = tx_user.send(UserMessage::Prompt(text.to_owned())).await {
         warn!(role, %error, "user-message channel for role closed");
         return Ok(None);
     }
 
     let mut captured: Option<CapturedTurn> = None;
     let mut activity = TurnActivity::default();
-    let mut spinner = ThinkingSpinner::start(role);
+    let mut status = StatusRegion::start(role);
     let mut ticker = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
     // Skip the immediate fire so the spinner doesn't double-redraw on entry.
     ticker.tick().await;
@@ -1278,7 +1299,7 @@ async fn drain_one_turn(
                         continue;
                     }
 
-                    spinner.clear();
+                    status.clear();
                     let done = match &event {
                         CrepEvent::RoleSpoke {
                             role: spoken,
@@ -1307,32 +1328,54 @@ async fn drain_one_turn(
                     if done {
                         break;
                     }
-                    spinner.repaint();
+                    status.repaint();
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    spinner.clear();
+                    status.clear();
                     output::system(format!(
                         "renderer fell behind, skipped {skipped} event(s)"
                     ));
-                    spinner.repaint();
+                    status.repaint();
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
-            _ = ticker.tick() => spinner.advance(),
+            _ = ticker.tick() => status.advance(),
         }
     }
-    spinner.clear();
+    status.clear();
     Ok(captured)
 }
 
-/// Replay every event in `.coderoom/messages.jsonl` through the same
-/// renderer the live REPL uses. Used by `cr show`.
-pub async fn show_log(project_root: &Path) -> Result<()> {
+/// Filters applied by `cr show` while replaying `.coderoom/messages.jsonl`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShowOptions {
+    /// Role name to render. Stored without a leading `@`.
+    pub role: Option<String>,
+    /// Skip the log entirely if its filesystem mtime is older than this date.
+    ///
+    /// CREP v0.1 events do not carry per-event timestamps, so this mirrors
+    /// `cr cost --since` until timestamped events land.
+    pub since: Option<chrono::NaiveDate>,
+    /// Render only the last N matching events.
+    pub tail: Option<usize>,
+}
+
+/// Replay events in `.coderoom/messages.jsonl` through the same renderer
+/// the live REPL uses. Used by `cr show`.
+pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> {
     let coderoom_dir = project_root.join(CODEROOM_DIR);
     let log_path = coderoom_dir.join("messages.jsonl");
     if !log_path.is_file() {
         println!("(no messages — has `cr start` ever run in this project?)");
         return Ok(());
+    }
+    if let Some(since) = options.since {
+        let modified = tokio::fs::metadata(&log_path).await?.modified()?;
+        let modified: chrono::DateTime<chrono::Local> = modified.into();
+        if modified.date_naive() < since {
+            println!("(message log is older than {since})");
+            return Ok(());
+        }
     }
     // Loading config gives us the host role for stable lavender rendering.
     // If the config can't load (e.g. malformed), fall back to the default
@@ -1353,10 +1396,43 @@ pub async fn show_log(project_root: &Path) -> Result<()> {
         println!("(message log is empty)");
         return Ok(());
     }
-    for event in &replay.events {
+    let events = filter_show_events(&replay.events, options);
+    if events.is_empty() {
+        println!("(no matching events)");
+        return Ok(());
+    }
+    for event in events {
         render_event(event, &host_role);
     }
     Ok(())
+}
+
+fn filter_show_events<'a>(events: &'a [CrepEvent], options: &ShowOptions) -> Vec<&'a CrepEvent> {
+    let mut filtered = events
+        .iter()
+        .filter(|event| match options.role.as_deref() {
+            Some(role) => event_role(event) == role,
+            None => true,
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(tail) = options.tail {
+        let keep_from = filtered.len().saturating_sub(tail);
+        filtered = filtered.split_off(keep_from);
+    }
+
+    filtered
+}
+
+fn event_role(event: &CrepEvent) -> &str {
+    match event {
+        CrepEvent::RoleStarted { role, .. }
+        | CrepEvent::RoleSpoke { role, .. }
+        | CrepEvent::ToolCallProposed { role, .. }
+        | CrepEvent::ToolCallExecuted { role, .. }
+        | CrepEvent::PermissionDenied { role, .. }
+        | CrepEvent::RoleStopped { role, .. } => role,
+    }
 }
 
 /// Prompt the named role to write a journal entry, capture the reply,
@@ -1735,6 +1811,64 @@ mod tests {
             Command::Broadcast(text) => assert_eq!(text, "summarize blockers"),
             other => panic!("expected Broadcast, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn show_filter_keeps_role_events_and_applies_tail() {
+        let events = vec![
+            CrepEvent::RoleStarted {
+                role: "backend".into(),
+                engine: "cc".into(),
+                model: "claude".into(),
+                session_id: "s1".into(),
+                priors_hash: "p".into(),
+            },
+            CrepEvent::RoleSpoke {
+                role: "security".into(),
+                text: "not this role".into(),
+                mentions: vec![],
+                cost_usd: 0.0,
+                cache_read: 0,
+            },
+            CrepEvent::ToolCallProposed {
+                role: "backend".into(),
+                tool_name: "Read".into(),
+                tool_input: serde_json::json!({"file_path": "README.md"}),
+                tool_use_id: "tool-1".into(),
+            },
+            CrepEvent::ToolCallExecuted {
+                role: "backend".into(),
+                tool_use_id: "tool-1".into(),
+                ok: true,
+                output_summary: "README.md".into(),
+            },
+        ];
+        let options = ShowOptions {
+            role: Some("backend".into()),
+            since: None,
+            tail: Some(2),
+        };
+
+        let filtered = filter_show_events(&events, &options);
+
+        assert_eq!(filtered.len(), 2);
+        assert!(matches!(filtered[0], CrepEvent::ToolCallProposed { .. }));
+        assert!(matches!(filtered[1], CrepEvent::ToolCallExecuted { .. }));
+    }
+
+    #[test]
+    fn show_filter_tail_zero_renders_no_events() {
+        let events = vec![CrepEvent::RoleStopped {
+            role: "backend".into(),
+            reason: StopReason::Completed,
+        }];
+        let options = ShowOptions {
+            role: None,
+            since: None,
+            tail: Some(0),
+        };
+
+        assert!(filter_show_events(&events, &options).is_empty());
     }
 
     #[test]
@@ -2231,26 +2365,30 @@ mod tests {
     }
 
     #[test]
-    fn spinner_advances_through_all_frames() {
+    fn status_region_advances_through_all_frames() {
         // Non-TTY mode prevents writes, so we can drive `advance()` purely
         // for state-machine coverage without polluting test output.
-        let mut s = ThinkingSpinner {
-            role: "backend".into(),
-            frame: 0,
+        let mut s = StatusRegion {
+            slots: vec![StatusSlot {
+                role: "backend".into(),
+                frame: 0,
+            }],
             is_painted: false,
             is_tty: false,
         };
         for expected in 1..=SPINNER_FRAMES.len() {
             s.advance();
-            assert_eq!(s.frame, expected % SPINNER_FRAMES.len());
+            assert_eq!(s.slots[0].frame, expected % SPINNER_FRAMES.len());
         }
     }
 
     #[test]
-    fn spinner_clear_is_idempotent_and_marks_unpainted() {
-        let mut s = ThinkingSpinner {
-            role: "backend".into(),
-            frame: 0,
+    fn status_region_clear_is_idempotent_and_marks_unpainted() {
+        let mut s = StatusRegion {
+            slots: vec![StatusSlot {
+                role: "backend".into(),
+                frame: 0,
+            }],
             is_painted: true,
             is_tty: false,
         };
@@ -2262,10 +2400,12 @@ mod tests {
     }
 
     #[test]
-    fn spinner_skips_paint_when_non_tty() {
-        let mut s = ThinkingSpinner {
-            role: "backend".into(),
-            frame: 0,
+    fn status_region_skips_paint_when_non_tty() {
+        let mut s = StatusRegion {
+            slots: vec![StatusSlot {
+                role: "backend".into(),
+                frame: 0,
+            }],
             is_painted: false,
             is_tty: false,
         };
