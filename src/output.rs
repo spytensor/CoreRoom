@@ -117,12 +117,24 @@ pub fn cmd(text: impl Into<String>) -> StyledContent<String> {
 /// matches the splash accent so the prompt feels of a piece with the
 /// boot frame.
 #[must_use]
-pub fn prompt() -> String {
+pub fn prompt_inline() -> String {
     format!(
-        "\n{} {} ",
+        "{} {} ",
         "⚡".with(SPLASH_ACCENT),
         "cr ›".with(PROMPT).bold()
     )
+}
+
+/// Plain prompt text, used only for terminal-cell width calculations.
+#[must_use]
+pub const fn prompt_plain() -> &'static str {
+    "⚡ cr › "
+}
+
+/// The `⚡ cr ›` prompt as a string with a leading newline.
+#[must_use]
+pub fn prompt() -> String {
+    format!("\n{}", prompt_inline())
 }
 
 // ───────────────────── typography helpers ─────────────────
