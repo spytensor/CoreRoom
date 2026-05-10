@@ -10,6 +10,7 @@ use crate::output::work_card::{Step, StepKind, WorkCard, WorkStatus};
 use crate::work;
 
 use super::render::summarize_tool_input;
+use super::text::one_line;
 
 const DEFAULT_CARD_WIDTH: usize = 80;
 
@@ -142,6 +143,20 @@ impl TurnWork {
         }
     }
 
+    pub(super) fn working_card(&self, spinner_frame: usize) -> WorkCard {
+        WorkCard {
+            role: self.role.clone(),
+            role_color: self.role_color,
+            title: self.title.clone(),
+            status: WorkStatus::Working {
+                spinner_frame,
+                current_step: self.current_step.clone(),
+            },
+            steps: self.steps.clone(),
+            collapsed: false,
+        }
+    }
+
     pub(super) fn interrupted_card(&self, reason: impl Into<String>) -> WorkCard {
         WorkCard {
             role: self.role.clone(),
@@ -199,13 +214,11 @@ fn step_label(tool_name: &str, tool_input: &serde_json::Value) -> String {
 
 fn executed_label(ok: bool, output_summary: &str) -> String {
     let status = if ok { "ok" } else { "failed" };
-    if output_summary.trim().is_empty() {
+    let summary = one_line(output_summary);
+    if summary.trim().is_empty() {
         status.to_owned()
     } else {
-        format!(
-            "{status}: {}",
-            output::truncate_visible(output_summary, 120)
-        )
+        format!("{status}: {}", output::truncate_visible(&summary, 120))
     }
 }
 

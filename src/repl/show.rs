@@ -97,6 +97,7 @@ fn event_role(event: &CrepEvent) -> &str {
         | CrepEvent::TurnDispatched { role, .. }
         | CrepEvent::WorkTitle { role, .. }
         | CrepEvent::RoleSpoke { role, .. }
+        | CrepEvent::RoleOutputDelta { role, .. }
         | CrepEvent::TurnInterrupted { role, .. }
         | CrepEvent::ToolCallProposed { role, .. }
         | CrepEvent::ToolCallExecuted { role, .. }

@@ -1,12 +1,15 @@
 //! Append-only message bus.
 //!
 //! [`MessageBus`] is the single source of truth for events emitted by every
-//! role in a session. Every [`CrepEvent`] is:
+//! role in a session. Durable [`CrepEvent`]s are:
 //!
 //! 1. Serialized to one line of JSON.
 //! 2. Appended to the on-disk log at `.coderoom/messages.jsonl`.
 //! 3. Broadcast to all live subscribers (the REPL renderer, future patch
 //!    detectors, transcript writers, etc.).
+//!
+//! Live-only events, such as assistant text deltas, are broadcast without
+//! being appended; the final `RoleSpoke` remains the durable transcript.
 //!
 //! Late subscribers do not see historical events; that's the job of
 //! [`MessageBus::replay`] (and ultimately `cr show`), which streams the
@@ -34,6 +37,7 @@ const SUBSCRIBER_CAPACITY: usize = 1024;
 pub struct MessageBus {
     file: Mutex<File>,
     tx: broadcast::Sender<CrepEvent>,
+    live_tx: broadcast::Sender<CrepEvent>,
 }
 
 /// Result of replaying an on-disk JSONL log.
@@ -108,29 +112,37 @@ impl MessageBus {
         })?;
         let file = File::from_std(std_file);
         let (tx, _initial) = broadcast::channel(SUBSCRIBER_CAPACITY);
+        let (live_tx, _live_initial) = broadcast::channel(SUBSCRIBER_CAPACITY);
         Ok(Self {
             file: Mutex::new(file),
             tx,
+            live_tx,
         })
     }
 
     /// Append the event to the log AND notify subscribers.
     ///
-    /// Disk write happens first; if it fails the event is dropped and the
-    /// error is returned. Subscribers see only events that successfully
-    /// landed on disk, so the on-disk log and the broadcast stream agree.
+    /// Disk write happens first for durable events; if it fails the event
+    /// is dropped and the error is returned. Live-only events skip disk
+    /// and only hit subscribers.
     pub async fn publish(&self, event: CrepEvent) -> std::io::Result<()> {
-        let serialized = serde_json::to_string(&event).map_err(std::io::Error::other)?;
-        let mut line = serialized.into_bytes();
-        line.push(b'\n');
-        {
-            let mut file = self.file.lock().await;
-            file.write_all(&line).await?;
-            file.flush().await?;
+        if is_durable_event(&event) {
+            let serialized = serde_json::to_string(&event).map_err(std::io::Error::other)?;
+            let mut line = serialized.into_bytes();
+            line.push(b'\n');
+            {
+                let mut file = self.file.lock().await;
+                file.write_all(&line).await?;
+                file.flush().await?;
+            }
         }
         // Sending to a broadcast channel with no live receivers returns
         // `Err(SendError)`; that's expected and not a publish failure.
-        let _ = self.tx.send(event);
+        if is_durable_event(&event) {
+            let _ = self.tx.send(event);
+        } else {
+            let _ = self.live_tx.send(event);
+        }
         Ok(())
     }
 
@@ -138,6 +150,13 @@ impl MessageBus {
     /// arrive after this call.
     pub fn subscribe(&self) -> broadcast::Receiver<CrepEvent> {
         self.tx.subscribe()
+    }
+
+    /// Subscribe to live-only events such as assistant text deltas. These
+    /// events are intentionally separated from the durable stream so a
+    /// large token stream cannot evict final turn boundaries.
+    pub fn subscribe_live(&self) -> broadcast::Receiver<CrepEvent> {
+        self.live_tx.subscribe()
     }
 
     /// Stream every event currently on disk at `path`, in order, decoding
@@ -178,6 +197,10 @@ impl MessageBus {
     pub fn subscriber_count(&self) -> usize {
         self.tx.receiver_count()
     }
+}
+
+fn is_durable_event(event: &CrepEvent) -> bool {
+    !matches!(event, CrepEvent::RoleOutputDelta { .. })
 }
 
 #[cfg(test)]
@@ -231,6 +254,29 @@ mod tests {
         let recv_b = rx_b.recv().await.expect("subscriber B receives");
         assert_eq!(recv_a, event);
         assert_eq!(recv_b, event);
+    }
+
+    #[tokio::test]
+    async fn role_output_delta_is_broadcast_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("messages.jsonl");
+        let bus = MessageBus::open(&log).await.unwrap();
+        let mut durable_rx = bus.subscribe();
+        let mut live_rx = bus.subscribe_live();
+
+        let event = CrepEvent::RoleOutputDelta {
+            role: "backend".into(),
+            text_delta: "partial".into(),
+            sequence: 1,
+            turn_id: String::new(),
+            thread_id: String::new(),
+        };
+        bus.publish(event.clone()).await.unwrap();
+
+        assert_eq!(live_rx.recv().await.unwrap(), event);
+        assert!(durable_rx.try_recv().is_err());
+        let content = tokio::fs::read_to_string(&log).await.unwrap_or_default();
+        assert!(content.is_empty(), "delta should not be durable: {content}");
     }
 
     #[tokio::test]

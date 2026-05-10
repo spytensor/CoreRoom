@@ -1,38 +1,17 @@
 use crossterm::style::{Color, Stylize};
+use crossterm::terminal;
 use tracing::debug;
 
 use crate::crep::CrepEvent;
 use crate::output;
 
-use super::text::truncate_inline;
+use super::text::{one_line, truncate_inline};
 
 /// One-quarter block — thin, single-column vertical bar painted in a
 /// role's stable color and prefixed onto every event line so the user
 /// can tell at a glance which role is speaking, even on dense streams
 /// where many `@`-tokens are visible at once.
-const GUTTER: &str = "▎";
-
-/// Render `body` with the role-color gutter on every line. Empty
-/// trailing lines (a final `\n` in the body) are preserved without an
-/// extra gutter so we don't paint a stray bar in a blank row.
-fn with_gutter(role_paint: Color, body: &str) -> String {
-    let mut out = String::with_capacity(body.len() + 8);
-    let mut iter = body.split_inclusive('\n').peekable();
-    while let Some(line) = iter.next() {
-        let (line_text, newline) = if let Some(stripped) = line.strip_suffix('\n') {
-            (stripped, "\n")
-        } else {
-            (line, "")
-        };
-        if line_text.is_empty() && iter.peek().is_none() {
-            // Trailing empty line — keep the newline but skip the gutter.
-            out.push_str(newline);
-        } else {
-            out.push_str(&format!("{} {line_text}{newline}", GUTTER.with(role_paint)));
-        }
-    }
-    out
-}
+pub(super) const GUTTER: &str = "▎";
 
 /// Trace-style gutter: same color as the role's main gutter but dimmer
 /// so tool-call lines visually nest under their role's spoke without
@@ -66,6 +45,18 @@ pub(super) fn render_event(event: &CrepEvent, host_role: &str) {
 }
 
 pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
+    render_event_line_at_width(
+        event,
+        host_role,
+        terminal::size().map_or(80, |(cols, _)| cols.into()),
+    )
+}
+
+pub(super) fn render_event_line_at_width(
+    event: &CrepEvent,
+    host_role: &str,
+    width: usize,
+) -> String {
     match event {
         CrepEvent::RoleStarted {
             role,
@@ -98,30 +89,11 @@ pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
             ..
         } => {
             let _ = cost_usd;
-            let role_paint = output::role_color(role, host_role);
-            // First line carries the role token; subsequent lines just
-            // get the gutter so the role is visually attributed even
-            // for multi-paragraph replies.
-            let mut lines = text.split_inclusive('\n');
-            let first = lines.next().unwrap_or("");
-            let head = format!(
-                "{} {} {}",
-                GUTTER.with(role_paint),
-                output::role_token(role, host_role),
-                first.strip_suffix('\n').unwrap_or(first),
-            );
-            let head = if first.ends_with('\n') {
-                format!("{head}\n")
-            } else {
-                head
-            };
-            let rest: String = lines.collect();
-            if rest.is_empty() {
-                head
-            } else {
-                format!("{head}{}", with_gutter(role_paint, &rest))
-            }
+            super::markdown::render_role_markdown(role, host_role, text, width)
         }
+        CrepEvent::RoleOutputDelta {
+            role, text_delta, ..
+        } => super::markdown::render_role_markdown(role, host_role, text_delta, width),
         CrepEvent::ToolCallProposed {
             role,
             tool_name,
@@ -152,7 +124,7 @@ pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
             format!(
                 "{} {glyph} @{role} · {}",
                 trace_gutter(role_paint),
-                output_summary.as_str().with(output::DIM)
+                truncate_inline(&one_line(output_summary), 100).with(output::DIM)
             )
         }
         CrepEvent::PermissionDenied {
@@ -181,10 +153,8 @@ pub(super) fn render_event_line(event: &CrepEvent, host_role: &str) -> String {
                     .italic()
             )
         }
-        // PR a CREP additions. The REPL doesn't yet emit these
-        // (PR b is the producer); for now they render as a one-line
-        // dim trace so any future test fixtures or replay logs that
-        // include them don't surprise the renderer with a panic.
+        // Turn lifecycle traces stay intentionally terse; WorkCards and
+        // status lines carry the richer activity state.
         CrepEvent::TurnDispatched {
             role,
             queue_position,
@@ -219,10 +189,10 @@ pub(super) fn summarize_tool_input(input: &serde_json::Value) -> String {
     // Best-effort one-liner: if there's a "command", show it; if there's
     // a "file_path", show it; otherwise dump the JSON keys.
     if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-        return format!("`{}`", truncate_inline(cmd, 80));
+        return format!("`{}`", truncate_inline(&one_line(cmd), 80));
     }
     if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
-        return path.to_owned();
+        return truncate_inline(&one_line(path), 80);
     }
     if let Some(obj) = input.as_object() {
         let keys: Vec<&str> = obj.keys().map(String::as_str).collect();

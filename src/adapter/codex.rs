@@ -366,6 +366,7 @@ struct JsonRpcResponse {
 struct PendingEntry {
     responder: oneshot::Sender<JsonRpcResponse>,
     activity: Arc<Notify>,
+    partial_text: Arc<Mutex<String>>,
 }
 
 #[derive(Clone)]
@@ -416,6 +417,15 @@ impl RpcClient {
         params: Value,
         id: u64,
     ) -> Result<Value, RpcError> {
+        self.request_with_id_capture(method, params, id).await.0
+    }
+
+    async fn request_with_id_capture(
+        &self,
+        method: &str,
+        params: Value,
+        id: u64,
+    ) -> (Result<Value, RpcError>, String) {
         let envelope = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -424,11 +434,13 @@ impl RpcClient {
         });
         let (tx, rx) = oneshot::channel();
         let activity = Arc::new(Notify::new());
+        let partial_text = Arc::new(Mutex::new(String::new()));
         self.pending.lock().await.insert(
             id,
             PendingEntry {
                 responder: tx,
                 activity: Arc::clone(&activity),
+                partial_text: Arc::clone(&partial_text),
             },
         );
         let _guard = PendingRequestGuard {
@@ -441,15 +453,22 @@ impl RpcClient {
             let mut w = self.writer.lock().await;
             if w.write_all(line.as_bytes()).await.is_err() || w.flush().await.is_err() {
                 self.pending.lock().await.remove(&id);
-                return Err(RpcError::Closed);
+                return (Err(RpcError::Closed), String::new());
             }
         }
 
-        let response = wait_with_idle_timeout(rx, &activity, RPC_IDLE_TIMEOUT).await?;
+        let response = match wait_with_idle_timeout(rx, &activity, RPC_IDLE_TIMEOUT).await {
+            Ok(response) => response,
+            Err(error) => {
+                let partial = partial_text.lock().await.clone();
+                return (Err(error), partial);
+            }
+        };
+        let partial = partial_text.lock().await.clone();
         if let Some(err) = response.error {
-            return Err(RpcError::Server(err.to_string()));
+            return (Err(RpcError::Server(err.to_string())), partial);
         }
-        Ok(response.result.unwrap_or(Value::Null))
+        (Ok(response.result.unwrap_or(Value::Null)), partial)
     }
 
     /// Send a JSON-RPC notification (no response expected).
@@ -557,6 +576,7 @@ async fn read_rpc_loop(
     permission_policy_path: Option<PathBuf>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
+    let mut fallback_delta_sequence = 0u64;
     while let Ok(Some(line)) = lines.next_line().await {
         let value: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
@@ -626,14 +646,37 @@ async fn read_rpc_loop(
                 // at the in-flight tools/call. Poke the matching pending
                 // entry's activity Notify so the request's idle timer
                 // resets and a long, busy turn doesn't get cut off.
-                if let Some(req_id) = codex_event_request_id(&value) {
+                let request_state = if let Some(req_id) = codex_event_request_id(&value) {
                     let pending = pending.lock().await;
-                    if let Some(entry) = pending.get(&req_id) {
-                        entry.activity.notify_one();
-                    }
+                    pending
+                        .get(&req_id)
+                        .map(|entry| (Arc::clone(&entry.activity), Arc::clone(&entry.partial_text)))
+                } else {
+                    None
+                };
+                if let Some((activity, _)) = &request_state {
+                    activity.notify_one();
                 }
-                if let Some(event) = codex_notification_to_event(&runtime.role, &value) {
-                    let _ = runtime.events.send(event).await;
+                if let Some(mut event) = codex_notification_to_event(&runtime.role, &value) {
+                    if let CrepEvent::RoleOutputDelta {
+                        text_delta,
+                        sequence,
+                        ..
+                    } = &mut event
+                    {
+                        if *sequence == 0 {
+                            fallback_delta_sequence = fallback_delta_sequence.saturating_add(1);
+                            *sequence = fallback_delta_sequence;
+                        } else {
+                            fallback_delta_sequence = fallback_delta_sequence.max(*sequence);
+                        }
+                        if let Some((_, partial_text)) = &request_state {
+                            partial_text.lock().await.push_str(text_delta);
+                        }
+                        let _ = runtime.events.try_send(event);
+                    } else {
+                        let _ = runtime.events.send(event).await;
+                    }
                 } else {
                     debug!(role = %runtime.role, line = %line, "codex notification ignored");
                 }
@@ -964,10 +1007,11 @@ fn codex_event_request_id(value: &Value) -> Option<u64> {
 ///
 /// - `exec_command_begin` → [`CrepEvent::ToolCallProposed`] (Bash)
 /// - `exec_command_end`   → [`CrepEvent::ToolCallExecuted`]
+/// - `agent_message_content_delta` → [`CrepEvent::RoleOutputDelta`]
 ///
-/// Everything else (token_count, agent_message_content_delta,
-/// session_configured, …) is intentionally dropped — the activity-poke
-/// in `read_rpc_loop` still uses them to keep the idle timer fresh.
+/// Everything else (token_count, session_configured, …) is intentionally
+/// dropped — the activity-poke in `read_rpc_loop` still uses them to keep
+/// the idle timer fresh.
 fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
     let method = value.get("method").and_then(Value::as_str)?;
     if method != "codex/event" {
@@ -1037,6 +1081,24 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 tool_use_id: call_id,
                 ok,
                 output_summary: summary.chars().take(200).collect(),
+                turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+            })
+        }
+        "agent_message_content_delta" => {
+            let delta = msg
+                .get("delta")
+                .or_else(|| msg.get("text"))
+                .or_else(|| msg.get("content"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if delta.is_empty() {
+                return None;
+            }
+            Some(CrepEvent::RoleOutputDelta {
+                role: role.to_owned(),
+                text_delta: delta.to_owned(),
+                sequence: msg.get("sequence").and_then(Value::as_u64).unwrap_or(0),
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
             })
@@ -1134,8 +1196,8 @@ async fn write_loop(
         // so initialize ids and stale-during-cleanup ids cannot win.
         let request_id = client.alloc_id().await;
         *current_tools_call.lock().await = Some(request_id);
-        let outcome = client
-            .request_with_id("tools/call", params, request_id)
+        let (outcome, partial_text) = client
+            .request_with_id_capture("tools/call", params, request_id)
             .await;
         *current_tools_call.lock().await = None;
 
@@ -1169,14 +1231,7 @@ async fn write_loop(
                     let _ = runtime
                         .base
                         .events
-                        .send(CrepEvent::TurnInterrupted {
-                            role: runtime.base.role.clone(),
-                            turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
-                            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
-                            source: crate::crep::InterruptSource::UserHalt,
-                            partial_text: None,
-                            partial_mentions: Vec::new(),
-                        })
+                        .send(turn_interrupted_event(&runtime.base.role, &partial_text))
                         .await;
                     continue;
                 }
@@ -1207,14 +1262,7 @@ async fn write_loop(
                     let _ = runtime
                         .base
                         .events
-                        .send(CrepEvent::TurnInterrupted {
-                            role: runtime.base.role.clone(),
-                            turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
-                            thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
-                            source: crate::crep::InterruptSource::UserHalt,
-                            partial_text: None,
-                            partial_mentions: Vec::new(),
-                        })
+                        .send(turn_interrupted_event(&runtime.base.role, &partial_text))
                         .await;
                     continue;
                 }
@@ -1236,6 +1284,27 @@ async fn write_loop(
         }
     }
     debug!(role = %runtime.base.role, "codex write loop exiting");
+}
+
+fn turn_interrupted_event(role: &str, partial_text: &str) -> CrepEvent {
+    let trimmed = partial_text.trim().to_owned();
+    let partial_mentions = if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        crate::adapter::cc::parse_mentions(&trimmed)
+    };
+    CrepEvent::TurnInterrupted {
+        role: role.to_owned(),
+        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        source: crate::crep::InterruptSource::UserHalt,
+        partial_text: if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        },
+        partial_mentions,
+    }
 }
 
 fn extract_text_from_tool_result(result: &Value) -> String {
@@ -1725,15 +1794,62 @@ mod tests {
     }
 
     #[test]
+    fn codex_agent_message_delta_becomes_role_output_delta() {
+        let value = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "codex/event",
+            "params": {
+                "_meta": {"requestId": 1},
+                "msg": {
+                    "type": "agent_message_content_delta",
+                    "delta": "partial answer",
+                    "sequence": 7
+                }
+            }
+        });
+        let event = codex_notification_to_event("qa", &value).expect("delta event");
+        match event {
+            CrepEvent::RoleOutputDelta {
+                role,
+                text_delta,
+                sequence,
+                ..
+            } => {
+                assert_eq!(role, "qa");
+                assert_eq!(text_delta, "partial answer");
+                assert_eq!(sequence, 7);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interrupted_event_carries_partial_text_and_mentions() {
+        let event = turn_interrupted_event("security", "partial reply for @backend\n");
+        match event {
+            CrepEvent::TurnInterrupted {
+                role,
+                partial_text,
+                partial_mentions,
+                ..
+            } => {
+                assert_eq!(role, "security");
+                assert_eq!(partial_text.as_deref(), Some("partial reply for @backend"));
+                assert_eq!(partial_mentions, vec!["backend"]);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
     fn unrelated_codex_msg_types_are_ignored() {
         // codex emits a flurry of types we don't surface yet (token_count,
-        // agent_message_content_delta, mcp_startup_update, …). They must
+        // mcp_startup_update, …). They must
         // not produce CrepEvents — the read loop only uses them as activity
         // signals for the idle timer.
         for msg_type in [
             "task_started",
             "token_count",
-            "agent_message_content_delta",
             "session_configured",
             "mcp_startup_update",
         ] {

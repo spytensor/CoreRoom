@@ -206,7 +206,7 @@ def status_line(draw: ImageDraw.ImageDraw, y: int, role: str) -> None:
     draw_text(
         draw,
         (86, y),
-        f"│ 1 role working · chat stream paused until it reports · {role} -",
+        f"│ 1 role working · {role} · 33s · 4 tools · running Read Cargo.toml",
         MUTED,
         FONT,
     )
@@ -240,7 +240,8 @@ def chat_line(
 ) -> None:
     draw.line((80, y - 3, 80, y + 29), fill=color, width=4)
     draw_text(draw, (111, y), role, color, BOLD)
-    draw_text(draw, (111 + text_width(draw, role, BOLD) + 18, y), text, WHITE, FONT)
+    text_x = 111 + text_width(draw, role, BOLD) + 18
+    draw_text(draw, (text_x, y), fit_text(draw, text, 1130 - text_x, FONT), WHITE, FONT)
 
 
 def right_rail(draw: ImageDraw.ImageDraw) -> None:
@@ -251,34 +252,34 @@ def right_rail(draw: ImageDraw.ImageDraw) -> None:
     draw_text(draw, (x + 26, 230), "live tools", WHITE, FONT)
     draw_text(draw, (x + 26, 264), "cr-task + assistant text", MUTED, SMALL)
     draw_text(draw, (x, 309), "@codex", SECURITY, BOLD)
-    draw_text(draw, (x + 26, 342), "partial live", WHITE, FONT)
-    draw_text(draw, (x + 26, 376), "MCP notifications when emitted", MUTED, SMALL)
+    draw_text(draw, (x + 26, 342), "streaming text", WHITE, FONT)
+    draw_text(draw, (x + 26, 376), "MCP deltas + tool progress", MUTED, SMALL)
     draw_text(draw, (x, 421), "@gemini", PURPLE, BOLD)
-    draw_text(draw, (x + 26, 454), "buffered", WHITE, FONT)
-    draw_text(draw, (x + 26, 488), "stream parsed after turn", MUTED, SMALL)
+    draw_text(draw, (x + 26, 454), "streaming json", WHITE, FONT)
+    draw_text(draw, (x + 26, 488), "assistant text + tool events", MUTED, SMALL)
 
     draw_text(draw, (x, 566), "visual rule", YELLOW, TITLE)
     draw_text(draw, (x, 613), "work is framed", WHITE, FONT)
-    draw_text(draw, (x, 648), "chat stays unframed", MUTED, FONT)
-    draw_text(draw, (x, 699), "handoffs stay serial", WHITE, FONT)
-    draw_text(draw, (x, 734), "until concurrent roles land", MUTED, FONT)
+    draw_text(draw, (x, 648), "chat is markdown-lite", MUTED, FONT)
+    draw_text(draw, (x, 699), "deltas are live-only", WHITE, FONT)
+    draw_text(draw, (x, 734), "history keeps final replies", MUTED, FONT)
 
 
 def render_work_cards() -> None:
     image, draw = new_canvas()
-    prompt(draw, 82, 84, "@security review work-card protocol and timeout behavior")
+    prompt(draw, 82, 84, "@security scan project security and explain findings")
     status_line(draw, 134, "@security")
-    work_card(draw, 208, "@security", "Audit adapter timeout semantics", "24s", 4, (10, 118, 108))
-    chat_line(draw, 291, "@security", "REPL owns timeouts; stale engine replies are suppressed.", SECURITY)
+    work_card(draw, 208, "@security", "Audit permission boundaries", "4m49s", 33, (10, 118, 108))
+    chat_line(draw, 291, "@security", "Findings: bypass defaults, role paths, session scope.", SECURITY)
     draw_text(draw, (112, 344), "→ auto-routing to @backend", MUTED, SMALL)
 
     status_line(draw, 392, "@backend")
-    work_card(draw, 466, "@backend", "Wire WorkTitle across engines", "31s", 3, (30, 110, 178))
-    chat_line(draw, 550, "@backend", "Work titles are extracted before role chat is rendered.", BLUE)
+    work_card(draw, 466, "@backend", "Implement observable role output", "52s", 7, (30, 110, 178))
+    chat_line(draw, 550, "@backend", "Done: markdown replies, live deltas, WorkCard previews.", BLUE)
 
     prompt(draw, 82, 633, "@ci run focused regression tests")
     status_line(draw, 683, "@ci")
-    work_card(draw, 752, "@ci", "Run focused regression tests", "18s", 2, (30, 142, 107))
+    work_card(draw, 752, "@ci", "Run focused regression tests", "21s", 5, (30, 142, 107))
     right_rail(draw)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

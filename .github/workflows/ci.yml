@@ -40,7 +40,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -57,16 +57,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.os }}
-      # NOTE: --locked is intentionally omitted until Cargo.lock lands with
-      # the first vertical slice (CC adapter). Re-enable once Cargo.lock is
-      # committed so dependency resolution becomes reproducible across CI runs.
       - name: Build
-        run: cargo build --all-targets
+        run: cargo build --all-targets --locked
       - name: Test
         # Ignored tests touch real CLI engines; CI runs only fast unit/integration
         # tests by default. A separate workflow_dispatch job will run real-engine
         # tests when explicitly requested (added once tests exist).
-        run: cargo test --all-features
+        run: cargo test --all-features --locked
 
   shellcheck:
     name: shellcheck (spike scripts)

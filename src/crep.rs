@@ -6,7 +6,8 @@
 //!
 //! Wire format is JSON: each event serializes to a single object with a
 //! `"type"` discriminator and snake_case field names. The append-only
-//! `.coderoom/messages.jsonl` log stores events in this exact shape.
+//! `.coderoom/messages.jsonl` log stores durable events in this exact
+//! shape; live-only deltas may be broadcast without being appended.
 //!
 //! ### v0.2 turn-id and thread-id
 //!
@@ -110,6 +111,24 @@ pub enum CrepEvent {
         #[serde(default)]
         turn_id: TurnId,
         /// Opaque conversation-thread id. Empty string for v0.1 log replay.
+        #[serde(default)]
+        thread_id: TurnId,
+    },
+    /// Streaming assistant text for the current role turn. This is a
+    /// broadcast-only live UI event, not a turn boundary, and must not
+    /// drive auto-routing; `RoleSpoke` remains the authoritative final
+    /// text.
+    RoleOutputDelta {
+        /// Configured name of the role that emitted text.
+        role: String,
+        /// Append-only text chunk emitted by the engine.
+        text_delta: String,
+        /// Monotonic sequence number within the role adapter's current turn.
+        sequence: u64,
+        /// Opaque turn id this delta belongs to. Empty string for legacy paths.
+        #[serde(default)]
+        turn_id: TurnId,
+        /// Opaque conversation-thread id. Empty string for legacy paths.
         #[serde(default)]
         thread_id: TurnId,
     },
@@ -587,7 +606,7 @@ mod tests {
 
     #[test]
     fn type_tag_is_snake_case_for_all_variants() {
-        let cases: [(CrepEvent, &str); 9] = [
+        let cases: [(CrepEvent, &str); 10] = [
             (
                 CrepEvent::RoleStarted {
                     role: "r".into(),
@@ -628,6 +647,16 @@ mod tests {
                     thread_id: "th-1".into(),
                 },
                 "role_spoke",
+            ),
+            (
+                CrepEvent::RoleOutputDelta {
+                    role: "r".into(),
+                    text_delta: "chunk".into(),
+                    sequence: 1,
+                    turn_id: "t-1".into(),
+                    thread_id: "th-1".into(),
+                },
+                "role_output_delta",
             ),
             (
                 CrepEvent::TurnInterrupted {

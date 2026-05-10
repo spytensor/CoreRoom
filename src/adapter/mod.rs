@@ -58,13 +58,10 @@ impl Engine {
                     | WorkTraceCapability::EARLY_WORK_TITLES
                     | WorkTraceCapability::LIVE_TOOL_STEPS,
             ),
-            Self::Codex => WorkTraceCapability::from_bits(
+            Self::Codex | Self::Gemini => WorkTraceCapability::from_bits(
                 WorkTraceCapability::CR_TASK_TITLES
                     | WorkTraceCapability::LIVE_TOOL_STEPS
                     | WorkTraceCapability::PARTIAL_TRACE,
-            ),
-            Self::Gemini => WorkTraceCapability::from_bits(
-                WorkTraceCapability::CR_TASK_TITLES | WorkTraceCapability::PARTIAL_TRACE,
             ),
         }
     }
@@ -481,8 +478,12 @@ mod tests {
         assert!(!codex.early_work_titles());
         assert!(codex.live_tool_steps());
         assert!(Engine::Codex.work_trace().partial_trace());
-        assert!(!Engine::Gemini.work_trace().early_work_titles());
-        assert!(!Engine::Gemini.work_trace().live_tool_steps());
+
+        let gemini = Engine::Gemini.work_trace();
+        assert!(gemini.cr_task_titles());
+        assert!(!gemini.early_work_titles());
+        assert!(gemini.live_tool_steps());
+        assert!(gemini.partial_trace());
     }
 
     #[test]

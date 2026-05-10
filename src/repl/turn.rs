@@ -185,12 +185,18 @@ impl TurnActivity {
 /// ends. Returns the captured `RoleSpoke` info, or `None` if the role
 /// stopped before producing a `RoleSpoke` (e.g., immediate crash).
 ///
-/// Tool chatter is folded into a one-line live summary; full events are
-/// still persisted in the JSONL log. This only returns to the caller
-/// once the role's turn boundary is observed.
+/// Tool activity updates the live status, prints compact work-card
+/// snapshots, and appends terse trace lines. This only returns to the
+/// caller once the role's turn boundary is observed.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "turn drain owns user, durable, live, permission, role, and work-state channels"
+)]
 pub(super) async fn drain_one_turn(
     tx_user: mpsc::Sender<UserMessage>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
+    live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
     role: &str,
     text: &str,
@@ -206,6 +212,10 @@ pub(super) async fn drain_one_turn(
     let mut activity = TurnActivity::default();
     let turn_started = Instant::now();
     let mut status = StatusRegion::start(role);
+    let mut printed_working_card = false;
+    let mut stream_filter = StreamFilter::default();
+    let mut streamed_rendered_text = String::new();
+    let mut pending_delta = String::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
     // Skip the immediate fire so the spinner doesn't double-redraw on entry.
     ticker.tick().await;
@@ -223,6 +233,39 @@ pub(super) async fn drain_one_turn(
                 }
                 status.repaint();
             }
+            recv = live_rx.recv() => match recv {
+                Ok(event) => {
+                    let CrepEvent::RoleOutputDelta {
+                        role: delta_role,
+                        text_delta,
+                        ..
+                    } = event
+                    else {
+                        continue;
+                    };
+                    if delta_role != role {
+                        continue;
+                    }
+                    if let Some(visible_delta) = stream_filter.push(&text_delta) {
+                        pending_delta.push_str(&visible_delta);
+                    }
+                    if pending_delta.contains('\n') || pending_delta.chars().count() >= 180 {
+                        status.clear();
+                        if let Some(rendered) =
+                            render_stream_delta(role, host_role, &mut pending_delta)
+                        {
+                            streamed_rendered_text.push_str(&rendered);
+                        }
+                        status.repaint();
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_skipped)) => {
+                    // Live text deltas are lossy by design. The durable
+                    // final RoleSpoke still arrives through `rx`, so no
+                    // user-visible warning is needed here.
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+            },
             recv = rx.recv() => match recv {
                 Ok(event) => {
                     if matches!(&event, CrepEvent::WorkTitle { role: titled, .. } if titled == role)
@@ -233,20 +276,33 @@ pub(super) async fn drain_one_turn(
                         continue;
                     }
                     if let Some(hidden) = TurnActivity::from_foldable_event(&event, role) {
-                        work.lock()
-                            .expect("turn work mutex poisoned")
-                            .apply_event(&event);
+                        let maybe_card = {
+                            let mut work = work.lock().expect("turn work mutex poisoned");
+                            work.apply_event(&event);
+                            if !printed_working_card
+                                && matches!(event, CrepEvent::ToolCallProposed { .. })
+                            {
+                                printed_working_card = true;
+                                let frame = status.slots.first().map_or(0, |slot| slot.frame);
+                                Some(work.working_card(frame))
+                            } else {
+                                None
+                            }
+                        };
                         hidden.merge_into(&mut activity);
-                        // Bubble the same event into the status line
-                        // so its tool count + state stay current
-                        // even though we're hiding the verbose
-                        // per-tool render from the terminal.
+                        // Bubble the same event into the status line so
+                        // its tool count + state stay current while the
+                        // terminal also gets compact trace lines.
+                        status.clear();
+                        if let Some(card) = maybe_card {
+                            work::render_card(&card);
+                        }
+                        render_event(&event, host_role);
                         status.update_from_event(&event);
                         status.repaint();
                         continue;
                     }
 
-                    status.clear();
                     let done = match &event {
                         CrepEvent::RoleSpoke {
                             role: spoken,
@@ -268,8 +324,16 @@ pub(super) async fn drain_one_turn(
                                 mentions: cleaned.mentions.clone(),
                                 activity: activity.clone(),
                             });
+                            status.clear();
+                            if let Some(rendered) =
+                                render_stream_delta(role, host_role, &mut pending_delta)
+                            {
+                                streamed_rendered_text.push_str(&rendered);
+                            }
                             work::render_card(&card);
-                            if !cleaned.text.trim().is_empty() {
+                            let already_streamed = !streamed_rendered_text.trim().is_empty()
+                                && same_streamed_text(&streamed_rendered_text, &cleaned.text);
+                            if !already_streamed && !cleaned.text.trim().is_empty() {
                                 let rendered = CrepEvent::RoleSpoke {
                                     role: spoken.clone(),
                                     text: cleaned.text,
@@ -284,6 +348,7 @@ pub(super) async fn drain_one_turn(
                             true
                         }
                         CrepEvent::RoleStopped { role: stopped, .. } if stopped == role => {
+                            status.clear();
                             if captured.is_none() {
                                 let card = work
                                     .lock()
@@ -307,6 +372,7 @@ pub(super) async fn drain_one_turn(
                             partial_mentions,
                             ..
                         } if interrupted == role => {
+                            status.clear();
                             let card = work
                                 .lock()
                                 .expect("turn work mutex poisoned")
@@ -326,6 +392,7 @@ pub(super) async fn drain_one_turn(
                             true
                         }
                         _ => {
+                            status.clear();
                             render_event(&event, host_role);
                             false
                         }
@@ -349,4 +416,105 @@ pub(super) async fn drain_one_turn(
     }
     status.clear();
     Ok(captured)
+}
+
+fn render_stream_delta(role: &str, host_role: &str, pending: &mut String) -> Option<String> {
+    if pending.trim().is_empty() {
+        pending.clear();
+        return None;
+    }
+    let text_delta = pending.clone();
+    let event = CrepEvent::RoleOutputDelta {
+        role: role.to_owned(),
+        text_delta: text_delta.clone(),
+        sequence: 0,
+        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+    };
+    render_event(&event, host_role);
+    pending.clear();
+    Some(text_delta)
+}
+
+fn same_streamed_text(streamed: &str, final_text: &str) -> bool {
+    streamed.trim() == final_text.trim()
+}
+
+#[derive(Default)]
+struct StreamFilter {
+    raw: String,
+    visible: String,
+}
+
+impl StreamFilter {
+    fn push(&mut self, delta: &str) -> Option<String> {
+        self.raw.push_str(delta);
+        let visible = visible_stream_text(&self.raw)?;
+        if visible == self.visible {
+            return None;
+        }
+        let suffix = visible
+            .strip_prefix(&self.visible)
+            .map_or_else(|| visible.clone(), ToOwned::to_owned);
+        self.visible = visible;
+        Some(suffix)
+    }
+}
+
+fn visible_stream_text(raw: &str) -> Option<String> {
+    const MARKER: &str = "```cr-task";
+    let leading_ws = raw.len() - raw.trim_start().len();
+    let after_ws = &raw[leading_ws..];
+
+    if MARKER.starts_with(after_ws) {
+        return None;
+    }
+    if !after_ws.starts_with(MARKER) {
+        return Some(raw.to_owned());
+    }
+
+    let opening_newline = after_ws.find('\n')?;
+    let after_opening = &after_ws[opening_newline + 1..];
+    let closing_end = closing_fence_end(after_opening)?;
+    let visible = &after_opening[closing_end..];
+    Some(visible.trim_start_matches(['\r', '\n']).to_owned())
+}
+
+fn closing_fence_end(text: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\r', '\n']).trim();
+        if content == "```" {
+            return Some(offset + line.len());
+        }
+        offset += line.len();
+    }
+    (text.trim() == "```").then_some(text.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_filter_hides_cr_task_until_body() {
+        let mut filter = StreamFilter::default();
+        assert_eq!(filter.push("```cr"), None);
+        assert_eq!(filter.push("-task\nReview permissions\n"), None);
+        assert_eq!(
+            filter.push("```\n\nFinding one."),
+            Some("Finding one.".to_owned())
+        );
+        assert_eq!(
+            filter.push("\nFinding two."),
+            Some("\nFinding two.".to_owned())
+        );
+    }
+
+    #[test]
+    fn stream_filter_passes_normal_text() {
+        let mut filter = StreamFilter::default();
+        assert_eq!(filter.push("Hello"), Some("Hello".to_owned()));
+        assert_eq!(filter.push(" world"), Some(" world".to_owned()));
+    }
 }

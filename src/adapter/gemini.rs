@@ -1,9 +1,9 @@
 //! Gemini engine adapter.
 //!
-//! v0.1 implementation is intentionally one-shot per turn: for each user
-//! message we spawn `gemini -p`, parse its `stream-json` stdout, emit any
-//! tool lifecycle events, then finish with a single [`CrepEvent::RoleSpoke`].
-//! There is no long-lived subprocess.
+//! The implementation is intentionally one-shot per turn: for each user
+//! message we spawn `gemini -p`, parse its `stream-json` stdout, stream
+//! assistant text and tool lifecycle events, then finish with a final
+//! [`CrepEvent::RoleSpoke`]. There is no long-lived subprocess.
 //!
 //! Why so simple at v0.1:
 //!
@@ -22,6 +22,7 @@
 //! `priors_hash` reuses [`crate::adapter::cc::fingerprint`] so the value
 //! is comparable across engines.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -216,11 +217,10 @@ struct GeminiLoop {
     events: mpsc::Sender<CrepEvent>,
     rx: mpsc::Receiver<UserMessage>,
     stop_rx: oneshot::Receiver<StopReason>,
-    /// Turn-level cancellation. PR a wires the channel; the REPL does
-    /// not yet send TurnIds through it (PR b is the consumer). When
-    /// PR b lands, an arriving TurnId aborts the in-flight `gemini -p`
-    /// child and the loop emits a `TurnInterrupted` event with the
-    /// partial bytes captured by the streaming accumulator.
+    /// Turn-level cancellation. An arriving TurnId aborts the
+    /// in-flight `gemini -p` child and the loop emits a
+    /// `TurnInterrupted` event with the partial bytes captured by the
+    /// streaming accumulator.
     interrupt_rx: mpsc::Receiver<TurnId>,
 }
 
@@ -254,6 +254,7 @@ impl GeminiLoop {
                     prompt_mode: self.prompt_mode,
                     user_prompt: &prompt,
                     role: &self.role,
+                    events: self.events.clone(),
                 },
                 &mut self.stop_rx,
                 &mut self.interrupt_rx,
@@ -291,9 +292,6 @@ impl GeminiLoop {
                         .await;
                 }
                 GeminiTurnOutcome::Completed(Ok(turn)) => {
-                    for event in turn.events {
-                        let _ = self.events.send(event).await;
-                    }
                     for event in
                         crate::adapter::role_spoke_events_from_text(&self.role, &turn.text, 0.0, 0)
                     {
@@ -336,14 +334,7 @@ enum GeminiTurnOutcome {
     /// Turn-level halt requested via `interrupt_rx`. Loop continues
     /// for the next dispatch; `partial_text` is whatever the
     /// streaming accumulator captured before the child was killed.
-    /// PR b will plumb this into `CrepEvent::TurnInterrupted`; PR a
-    /// only proves the capture path works, so the field is held
-    /// without being emitted yet.
     Interrupted {
-        #[allow(
-            dead_code,
-            reason = "fed into CrepEvent::TurnInterrupted by PR b once UserMessage carries turn_id"
-        )]
         partial_text: String,
     },
 }
@@ -351,7 +342,6 @@ enum GeminiTurnOutcome {
 #[derive(Debug, Clone, PartialEq)]
 struct GeminiTurn {
     text: String,
-    events: Vec<CrepEvent>,
 }
 
 struct GeminiTurnRequest<'a> {
@@ -362,6 +352,7 @@ struct GeminiTurnRequest<'a> {
     prompt_mode: GeminiPromptMode,
     user_prompt: &'a str,
     role: &'a str,
+    events: mpsc::Sender<CrepEvent>,
 }
 
 /// Run a single `gemini -p` invocation and translate its stream-json stdout.
@@ -418,7 +409,14 @@ async fn run_one_turn(
     // cancellations produced empty WorkCards.
     let stdout_accum: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let stderr_accum: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let stdout_task = tokio::spawn(read_pipe_streaming(stdout, Arc::clone(&stdout_accum)));
+    let assistant_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let stdout_task = tokio::spawn(read_stdout_streaming(
+        request.role.to_owned(),
+        stdout,
+        Arc::clone(&stdout_accum),
+        Arc::clone(&assistant_text),
+        request.events.clone(),
+    ));
     let stderr_task = tokio::spawn(read_pipe_streaming(stderr, Arc::clone(&stderr_accum)));
 
     let status = tokio::select! {
@@ -436,7 +434,12 @@ async fn run_one_turn(
             stdout_task.abort();
             stderr_task.abort();
             let partial = stdout_accum.lock().await.clone();
-            let partial_text = String::from_utf8_lossy(&partial).into_owned();
+            let parsed_partial = assistant_text.lock().await.clone();
+            let partial_text = if parsed_partial.trim().is_empty() {
+                String::from_utf8_lossy(&partial).into_owned()
+            } else {
+                parsed_partial
+            };
             return GeminiTurnOutcome::Interrupted { partial_text };
         }
         status = child.wait() => status,
@@ -453,7 +456,7 @@ async fn run_one_turn(
         .await
         .map_err(|error| std::io::Error::other(format!("joining stderr reader: {error}")))
         .and_then(|result| result);
-    let (stdout, stderr) = match (stdout, stderr) {
+    let (turn, stderr) = match (stdout, stderr) {
         (Ok(stdout), Ok(stderr)) => (stdout, stderr),
         (Err(error), _) | (_, Err(error)) => return GeminiTurnOutcome::Completed(Err(error)),
     };
@@ -463,10 +466,144 @@ async fn run_one_turn(
             "gemini exited with {status}: {stderr}",
         ))));
     }
-    GeminiTurnOutcome::Completed(Ok(parse_stream_json_turn(
-        request.role,
-        &String::from_utf8_lossy(&stdout),
-    )))
+    GeminiTurnOutcome::Completed(Ok(turn))
+}
+
+async fn read_stdout_streaming(
+    role: String,
+    mut stdout: impl tokio::io::AsyncRead + Unpin,
+    raw_accum: Arc<Mutex<Vec<u8>>>,
+    assistant_text: Arc<Mutex<String>>,
+    events: mpsc::Sender<CrepEvent>,
+) -> std::io::Result<GeminiTurn> {
+    let mut fallback_lines = Vec::new();
+    let mut tool_ids = GeminiSyntheticToolIds::default();
+    let mut delta_sequence = 0u64;
+    let mut pending = Vec::<u8>::new();
+    let mut buf = vec![0u8; 4096];
+    loop {
+        let n = stdout.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        raw_accum.lock().await.extend_from_slice(&buf[..n]);
+        pending.extend_from_slice(&buf[..n]);
+        while let Some(pos) = pending.iter().position(|byte| *byte == b'\n') {
+            let mut line = pending.drain(..=pos).collect::<Vec<_>>();
+            if line.last() == Some(&b'\n') {
+                line.pop();
+            }
+            process_gemini_stream_line(
+                &role,
+                &line,
+                &assistant_text,
+                &events,
+                &mut fallback_lines,
+                &mut tool_ids,
+                &mut delta_sequence,
+            )
+            .await;
+        }
+    }
+    if !pending.is_empty() {
+        process_gemini_stream_line(
+            &role,
+            &pending,
+            &assistant_text,
+            &events,
+            &mut fallback_lines,
+            &mut tool_ids,
+            &mut delta_sequence,
+        )
+        .await;
+    }
+    let mut text = assistant_text.lock().await.clone();
+    if text.is_empty() && !fallback_lines.is_empty() {
+        text = fallback_lines.join("\n");
+    }
+    Ok(GeminiTurn {
+        text: text.trim().to_owned(),
+    })
+}
+
+async fn process_gemini_stream_line(
+    role: &str,
+    line: &[u8],
+    assistant_text: &Arc<Mutex<String>>,
+    events: &mpsc::Sender<CrepEvent>,
+    fallback_lines: &mut Vec<String>,
+    tool_ids: &mut GeminiSyntheticToolIds,
+    delta_sequence: &mut u64,
+) {
+    let line = String::from_utf8_lossy(line);
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        fallback_lines.push(line.to_owned());
+        return;
+    };
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("message") => {
+            if value.get("role").and_then(serde_json::Value::as_str) == Some("assistant") {
+                if let Some(content) = value.get("content").and_then(serde_json::Value::as_str) {
+                    assistant_text.lock().await.push_str(content);
+                    *delta_sequence = value
+                        .get("sequence")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or_else(|| (*delta_sequence).saturating_add(1));
+                    let _ = events.try_send(CrepEvent::RoleOutputDelta {
+                        role: role.to_owned(),
+                        text_delta: content.to_owned(),
+                        sequence: *delta_sequence,
+                        turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                        thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                    });
+                }
+            }
+        }
+        Some("tool_use") => {
+            let tool_use_id = tool_ids.for_use(&value);
+            let _ = events
+                .send(gemini_tool_use_to_event(role, &value, tool_use_id))
+                .await;
+        }
+        Some("tool_result") => {
+            let tool_use_id = tool_ids.for_result(&value);
+            let _ = events
+                .send(gemini_tool_result_to_event(role, &value, tool_use_id))
+                .await;
+        }
+        _ => {}
+    }
+}
+
+#[derive(Default)]
+struct GeminiSyntheticToolIds {
+    next: usize,
+    pending: VecDeque<String>,
+}
+
+impl GeminiSyntheticToolIds {
+    fn for_use(&mut self, value: &serde_json::Value) -> String {
+        if let Some(id) = native_gemini_tool_id(value) {
+            return id;
+        }
+        self.next = self.next.saturating_add(1);
+        let id = format!("gemini-tool-{}", self.next);
+        self.pending.push_back(id.clone());
+        id
+    }
+
+    fn for_result(&mut self, value: &serde_json::Value) -> String {
+        native_gemini_tool_id(value).unwrap_or_else(|| {
+            self.pending.pop_front().unwrap_or_else(|| {
+                self.next = self.next.saturating_add(1);
+                format!("gemini-tool-{}", self.next)
+            })
+        })
+    }
 }
 
 /// Read a pipe to EOF, appending each chunk into `accum` so partial
@@ -554,11 +691,10 @@ fn signal_process_group(_role: &str, _child: &Child, _signal: SignalKind) -> boo
     false
 }
 
-fn parse_stream_json_turn(role: &str, stdout: &str) -> GeminiTurn {
+#[cfg(test)]
+fn parse_stream_json_turn(_role: &str, stdout: &str) -> GeminiTurn {
     let mut text = String::new();
-    let mut events = Vec::new();
     let mut fallback_lines = Vec::new();
-    let mut synthetic_tool_id = 0usize;
 
     for line in stdout.lines() {
         let line = line.trim();
@@ -569,24 +705,12 @@ fn parse_stream_json_turn(role: &str, stdout: &str) -> GeminiTurn {
             fallback_lines.push(line.to_owned());
             continue;
         };
-        match value.get("type").and_then(serde_json::Value::as_str) {
-            Some("message") => {
-                if value.get("role").and_then(serde_json::Value::as_str) == Some("assistant") {
-                    if let Some(content) = value.get("content").and_then(serde_json::Value::as_str)
-                    {
-                        text.push_str(content);
-                    }
-                }
+        if value.get("type").and_then(serde_json::Value::as_str) == Some("message")
+            && value.get("role").and_then(serde_json::Value::as_str) == Some("assistant")
+        {
+            if let Some(content) = value.get("content").and_then(serde_json::Value::as_str) {
+                text.push_str(content);
             }
-            Some("tool_use") => {
-                synthetic_tool_id += 1;
-                events.push(gemini_tool_use_to_event(role, &value, synthetic_tool_id));
-            }
-            Some("tool_result") => {
-                synthetic_tool_id += 1;
-                events.push(gemini_tool_result_to_event(role, &value, synthetic_tool_id));
-            }
-            _ => {}
         }
     }
 
@@ -596,14 +720,13 @@ fn parse_stream_json_turn(role: &str, stdout: &str) -> GeminiTurn {
 
     GeminiTurn {
         text: text.trim().to_owned(),
-        events,
     }
 }
 
 fn gemini_tool_use_to_event(
     role: &str,
     value: &serde_json::Value,
-    synthetic_tool_id: usize,
+    tool_use_id: String,
 ) -> CrepEvent {
     CrepEvent::ToolCallProposed {
         role: role.to_owned(),
@@ -616,7 +739,7 @@ fn gemini_tool_use_to_event(
             .get("parameters")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
-        tool_use_id: gemini_tool_id(value, synthetic_tool_id),
+        tool_use_id,
         turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
         thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
     }
@@ -625,7 +748,7 @@ fn gemini_tool_use_to_event(
 fn gemini_tool_result_to_event(
     role: &str,
     value: &serde_json::Value,
-    synthetic_tool_id: usize,
+    tool_use_id: String,
 ) -> CrepEvent {
     let ok = value
         .get("status")
@@ -643,7 +766,7 @@ fn gemini_tool_result_to_event(
         .unwrap_or("gemini tool completed");
     CrepEvent::ToolCallExecuted {
         role: role.to_owned(),
-        tool_use_id: gemini_tool_id(value, synthetic_tool_id),
+        tool_use_id,
         ok,
         output_summary: truncate(summary, TOOL_OUTPUT_SUMMARY_MAX_CHARS),
         turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
@@ -651,14 +774,11 @@ fn gemini_tool_result_to_event(
     }
 }
 
-fn gemini_tool_id(value: &serde_json::Value, synthetic_tool_id: usize) -> String {
+fn native_gemini_tool_id(value: &serde_json::Value) -> Option<String> {
     value
         .get("tool_id")
         .and_then(serde_json::Value::as_str)
-        .map_or_else(
-            || format!("gemini-tool-{synthetic_tool_id}"),
-            ToOwned::to_owned,
-        )
+        .map(ToOwned::to_owned)
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -688,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_json_turn_accumulates_assistant_text_and_tool_events() {
+    fn stream_json_turn_accumulates_assistant_text() {
         let stdout = r#"{"type":"init","timestamp":"2026-05-10T00:00:00Z","session_id":"s","model":"gemini"}
 {"type":"message","timestamp":"2026-05-10T00:00:00Z","role":"user","content":"read"}
 {"type":"tool_use","timestamp":"2026-05-10T00:00:00Z","tool_name":"Read","tool_id":"read-1","parameters":{"file_path":"README.md"}}
@@ -699,8 +819,31 @@ mod tests {
         let turn = parse_stream_json_turn("backend", stdout);
 
         assert_eq!(turn.text, "Done");
+    }
+
+    #[tokio::test]
+    async fn stdout_streaming_emits_assistant_delta_and_tool_events() {
+        let stdout = r#"{"type":"tool_use","timestamp":"2026-05-10T00:00:00Z","tool_name":"Read","tool_id":"read-1","parameters":{"file_path":"README.md"}}
+{"type":"tool_result","timestamp":"2026-05-10T00:00:01Z","tool_id":"read-1","status":"success","output":"hello"}
+{"type":"message","timestamp":"2026-05-10T00:00:02Z","role":"assistant","content":"Done","delta":true}"#;
+        let (tx, mut rx) = mpsc::channel(8);
+        let turn = read_stdout_streaming(
+            "backend".to_owned(),
+            stdout.as_bytes(),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(String::new())),
+            tx,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(turn.text, "Done");
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
         assert_eq!(
-            turn.events,
+            events,
             vec![
                 CrepEvent::ToolCallProposed {
                     role: "backend".into(),
@@ -718,27 +861,78 @@ mod tests {
                     turn_id: String::new(),
                     thread_id: String::new(),
                 },
+                CrepEvent::RoleOutputDelta {
+                    role: "backend".into(),
+                    text_delta: "Done".into(),
+                    sequence: 1,
+                    turn_id: String::new(),
+                    thread_id: String::new(),
+                },
             ]
         );
     }
 
-    #[test]
-    fn stream_json_tool_result_uses_error_message() {
+    #[tokio::test]
+    async fn stdout_streaming_pairs_missing_tool_ids() {
+        let stdout = r#"{"type":"tool_use","tool_name":"Read","parameters":{"file_path":"README.md"}}
+{"type":"tool_result","status":"success","output":"hello"}"#;
+        let (tx, mut rx) = mpsc::channel(8);
+        let turn = read_stdout_streaming(
+            "backend".to_owned(),
+            stdout.as_bytes(),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(String::new())),
+            tx,
+        )
+        .await
+        .unwrap();
+
+        assert!(turn.text.is_empty());
+        let proposed = rx.try_recv().expect("tool use");
+        let executed = rx.try_recv().expect("tool result");
+        match (proposed, executed) {
+            (
+                CrepEvent::ToolCallProposed {
+                    tool_use_id: proposed,
+                    ..
+                },
+                CrepEvent::ToolCallExecuted {
+                    tool_use_id: executed,
+                    ..
+                },
+            ) => assert_eq!(proposed, executed),
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn stdout_streaming_tool_result_uses_error_message() {
         let stdout = r#"{"type":"tool_result","timestamp":"2026-05-10T00:00:01Z","tool_id":"bad-1","status":"error","error":{"type":"X","message":"failed"}}
 {"type":"message","timestamp":"2026-05-10T00:00:02Z","role":"assistant","content":"Nope","delta":true}"#;
+        let (tx, mut rx) = mpsc::channel(8);
+        let turn = read_stdout_streaming(
+            "backend".to_owned(),
+            stdout.as_bytes(),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(String::new())),
+            tx,
+        )
+        .await
+        .unwrap();
 
-        let turn = parse_stream_json_turn("backend", stdout);
-
-        assert_eq!(
-            turn.events,
-            vec![CrepEvent::ToolCallExecuted {
-                role: "backend".into(),
-                tool_use_id: "bad-1".into(),
-                ok: false,
-                output_summary: "failed".into(),
-                turn_id: String::new(),
-                thread_id: String::new(),
-            }]
-        );
+        assert_eq!(turn.text, "Nope");
+        match rx.try_recv().expect("tool result event") {
+            CrepEvent::ToolCallExecuted {
+                tool_use_id,
+                ok,
+                output_summary,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "bad-1");
+                assert!(!ok);
+                assert_eq!(output_summary, "failed");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }
