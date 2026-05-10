@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- `cr show` now supports `--role`, `--tail`, and `--since` filters for
+  focused event-log replay.
+- Gemini `stream-json` `tool_use` / `tool_result` events now map into
+  CREP `ToolCallProposed` / `ToolCallExecuted` events.
+
+### Fixed
+
+- Ctrl-C now stops running roles during active turns, and the raw-mode init
+  wizard restores the terminal before exiting on SIGINT/SIGTERM.
 
 ## [0.1.12] - 2026-05-10
 

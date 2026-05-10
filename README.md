@@ -45,8 +45,9 @@ reply.
   role picks it up on next refresh. v0.2 promotes high-signal patches into
   base priors.
 - **Explicit engine capabilities.** Claude Code currently has the richest
-  wrapper-visible event stream. Codex and Gemini run, but unsupported cost,
-  permission, and tool-trace fields are shown as `—` instead of fake zeroes.
+  wrapper-visible event stream. Codex and Gemini expose tool traces where
+  their CLIs emit them, and unsupported cost / permission fields are shown
+  as `—` instead of fake zeroes.
 
 ## Status / Roadmap
 
@@ -156,9 +157,10 @@ Useful commands:
 - `@all <text>` broadcasts one prompt to every running role.
 - `/patch <role> <text>`, `/refresh <role>`, `/transcript <role>`, and
   `/journal <role>` are available inside the REPL.
-- `cr show`, `cr cost`, `cr compact <role>`, `cr config get/set`, and
-  `cr update` handle inspection, spend tracking, priors compaction,
-  layered config, and package upgrades.
+- `cr show [--role backend] [--tail 20] [--since YYYY-MM-DD]`, `cr cost`,
+  `cr compact <role>`, `cr config get/set`, and `cr update` handle
+  inspection, spend tracking, priors compaction, layered config, and package
+  upgrades.
 - Live turns fold internal tool traces into one activity summary; `cr show`
   replays the full event log when you need to audit what happened.
 
@@ -167,7 +169,7 @@ Useful commands:
 | Capability | Claude Code (`cc`) | Codex | Gemini |
 | ---------- | ------------------ | ----- | ------ |
 | Prompt isolation | system-prompt file | MCP base instructions | requires `--system-instruction-file` |
-| Tool trace events | proposed + executed | exec notifications when emitted | not reliable yet |
+| Tool trace events | proposed + executed | exec notifications when emitted | stream-json tool_use/tool_result |
 | Cost reporting | per turn | — | — |
 | Budget enforcement | native cap | — | — |
 | Permission gating | hook target | — | bypass-only until hook bridge |

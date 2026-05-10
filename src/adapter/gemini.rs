@@ -1,8 +1,9 @@
 //! Gemini engine adapter.
 //!
-//! v0.1 implementation is intentionally the simplest of the three: per
-//! user message we spawn `gemini -p` once, capture its stdout, and emit
-//! a single [`CrepEvent::RoleSpoke`]. There is no long-lived subprocess.
+//! v0.1 implementation is intentionally one-shot per turn: for each user
+//! message we spawn `gemini -p`, parse its `stream-json` stdout, emit any
+//! tool lifecycle events, then finish with a single [`CrepEvent::RoleSpoke`].
+//! There is no long-lived subprocess.
 //!
 //! Why so simple at v0.1:
 //!
@@ -14,9 +15,9 @@
 //!   tool calls lands once we plumb its hook system (Gemini ships
 //!   `gemini hooks migrate` that imports CC hook configs — same payload
 //!   format).
-//! - No streaming, no tool-call lifecycle, no multi-turn cache reuse.
-//!   All three arrive in a follow-up PR (`feat/adapter-gemini-v2`)
-//!   either via `gemini -o stream-json` (CC-shape) or `--experimental-acp`.
+//! - No wrapper-side permission gate or multi-turn cache reuse. Gemini
+//!   exposes tool events in `stream-json`, but not a hook protocol that lets
+//!   CodeRoom approve or deny them before execution.
 //!
 //! `priors_hash` reuses [`crate::adapter::cc::fingerprint`] so the value
 //! is comparable across engines.
@@ -37,6 +38,7 @@ use crate::crep::{CrepEvent, StopReason};
 const CHANNEL_CAPACITY: usize = 32;
 const GEMINI_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const GEMINI_UNTRUSTED_PRIORS_ENV: &str = "CODEROOM_GEMINI_UNTRUSTED_PRIORS";
+const TOOL_OUTPUT_SUMMARY_MAX_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GeminiPromptMode {
@@ -158,6 +160,13 @@ async fn probe_gemini(gemini_path: &PathBuf) -> Result<GeminiPromptMode, String>
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    if !help.contains("stream-json") {
+        return Err(
+            "installed gemini CLI does not advertise --output-format stream-json; \
+             tool-event replay requires Gemini CLI stream-json support"
+                .to_owned(),
+        );
+    }
     if !help.contains("--system-instruction-file") {
         if std::env::var(GEMINI_UNTRUSTED_PRIORS_ENV).as_deref() == Ok("1") {
             return Ok(GeminiPromptMode::InlineUntrusted);
@@ -205,16 +214,20 @@ impl GeminiLoop {
                 &self.priors_text,
                 self.prompt_mode,
                 &prompt,
+                &self.role,
             )
             .await
             {
-                Ok(text) => {
-                    let mentions = crate::adapter::cc::parse_mentions(&text);
+                Ok(turn) => {
+                    for event in turn.events {
+                        let _ = self.events.send(event).await;
+                    }
+                    let mentions = crate::adapter::cc::parse_mentions(&turn.text);
                     let _ = self
                         .events
                         .send(CrepEvent::RoleSpoke {
                             role: self.role.clone(),
-                            text,
+                            text: turn.text,
                             mentions,
                             cost_usd: 0.0,
                             cache_read: 0,
@@ -247,8 +260,13 @@ impl GeminiLoop {
     }
 }
 
-/// Run a single `gemini -p` invocation with priors prepended and return
-/// its stdout (text mode).
+#[derive(Debug, Clone, PartialEq)]
+struct GeminiTurn {
+    text: String,
+    events: Vec<CrepEvent>,
+}
+
+/// Run a single `gemini -p` invocation and translate its stream-json stdout.
 async fn run_one_turn(
     gemini_path: &PathBuf,
     model: Option<&str>,
@@ -256,7 +274,8 @@ async fn run_one_turn(
     priors_text: &str,
     prompt_mode: GeminiPromptMode,
     user_prompt: &str,
-) -> std::io::Result<String> {
+    role: &str,
+) -> std::io::Result<GeminiTurn> {
     let mut cmd = Command::new(gemini_path);
     cmd.arg("-p")
         .arg(match prompt_mode {
@@ -266,7 +285,7 @@ async fn run_one_turn(
             }
         })
         .arg("--output-format")
-        .arg("text")
+        .arg("stream-json")
         .arg("-y")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -286,7 +305,122 @@ async fn run_one_turn(
             output.status
         )));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(parse_stream_json_turn(
+        role,
+        &String::from_utf8_lossy(&output.stdout),
+    ))
+}
+
+fn parse_stream_json_turn(role: &str, stdout: &str) -> GeminiTurn {
+    let mut text = String::new();
+    let mut events = Vec::new();
+    let mut fallback_lines = Vec::new();
+    let mut synthetic_tool_id = 0usize;
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            fallback_lines.push(line.to_owned());
+            continue;
+        };
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("message") => {
+                if value.get("role").and_then(serde_json::Value::as_str) == Some("assistant") {
+                    if let Some(content) = value.get("content").and_then(serde_json::Value::as_str)
+                    {
+                        text.push_str(content);
+                    }
+                }
+            }
+            Some("tool_use") => {
+                synthetic_tool_id += 1;
+                events.push(gemini_tool_use_to_event(role, &value, synthetic_tool_id));
+            }
+            Some("tool_result") => {
+                synthetic_tool_id += 1;
+                events.push(gemini_tool_result_to_event(role, &value, synthetic_tool_id));
+            }
+            _ => {}
+        }
+    }
+
+    if text.is_empty() && !fallback_lines.is_empty() {
+        text = fallback_lines.join("\n");
+    }
+
+    GeminiTurn {
+        text: text.trim().to_owned(),
+        events,
+    }
+}
+
+fn gemini_tool_use_to_event(
+    role: &str,
+    value: &serde_json::Value,
+    synthetic_tool_id: usize,
+) -> CrepEvent {
+    CrepEvent::ToolCallProposed {
+        role: role.to_owned(),
+        tool_name: value
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned(),
+        tool_input: value
+            .get("parameters")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        tool_use_id: gemini_tool_id(value, synthetic_tool_id),
+    }
+}
+
+fn gemini_tool_result_to_event(
+    role: &str,
+    value: &serde_json::Value,
+    synthetic_tool_id: usize,
+) -> CrepEvent {
+    let ok = value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|status| status != "error");
+    let summary = value
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .unwrap_or("gemini tool completed");
+    CrepEvent::ToolCallExecuted {
+        role: role.to_owned(),
+        tool_use_id: gemini_tool_id(value, synthetic_tool_id),
+        ok,
+        output_summary: truncate(summary, TOOL_OUTPUT_SUMMARY_MAX_CHARS),
+    }
+}
+
+fn gemini_tool_id(value: &serde_json::Value, synthetic_tool_id: usize) -> String {
+    value
+        .get("tool_id")
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || format!("gemini-tool-{synthetic_tool_id}"),
+            ToOwned::to_owned,
+        )
+}
+
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_owned();
+    }
+    let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
@@ -304,5 +438,54 @@ mod tests {
     fn with_path_overrides_default() {
         let adapter = GeminiAdapter::with_path(PathBuf::from("/opt/gemini"));
         assert_eq!(adapter.gemini_path, PathBuf::from("/opt/gemini"));
+    }
+
+    #[test]
+    fn stream_json_turn_accumulates_assistant_text_and_tool_events() {
+        let stdout = r#"{"type":"init","timestamp":"2026-05-10T00:00:00Z","session_id":"s","model":"gemini"}
+{"type":"message","timestamp":"2026-05-10T00:00:00Z","role":"user","content":"read"}
+{"type":"tool_use","timestamp":"2026-05-10T00:00:00Z","tool_name":"Read","tool_id":"read-1","parameters":{"file_path":"README.md"}}
+{"type":"tool_result","timestamp":"2026-05-10T00:00:01Z","tool_id":"read-1","status":"success","output":"hello"}
+{"type":"message","timestamp":"2026-05-10T00:00:02Z","role":"assistant","content":"Done","delta":true}
+{"type":"result","timestamp":"2026-05-10T00:00:03Z","status":"success","stats":{"tool_calls":1}}"#;
+
+        let turn = parse_stream_json_turn("backend", stdout);
+
+        assert_eq!(turn.text, "Done");
+        assert_eq!(
+            turn.events,
+            vec![
+                CrepEvent::ToolCallProposed {
+                    role: "backend".into(),
+                    tool_name: "Read".into(),
+                    tool_input: serde_json::json!({"file_path": "README.md"}),
+                    tool_use_id: "read-1".into(),
+                },
+                CrepEvent::ToolCallExecuted {
+                    role: "backend".into(),
+                    tool_use_id: "read-1".into(),
+                    ok: true,
+                    output_summary: "hello".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_json_tool_result_uses_error_message() {
+        let stdout = r#"{"type":"tool_result","timestamp":"2026-05-10T00:00:01Z","tool_id":"bad-1","status":"error","error":{"type":"X","message":"failed"}}
+{"type":"message","timestamp":"2026-05-10T00:00:02Z","role":"assistant","content":"Nope","delta":true}"#;
+
+        let turn = parse_stream_json_turn("backend", stdout);
+
+        assert_eq!(
+            turn.events,
+            vec![CrepEvent::ToolCallExecuted {
+                role: "backend".into(),
+                tool_use_id: "bad-1".into(),
+                ok: false,
+                output_summary: "failed".into(),
+            }]
+        );
     }
 }

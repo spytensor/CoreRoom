@@ -7,9 +7,8 @@
 //! - `cr role list`              — list configured roles
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH]` — enter the interactive REPL
-//!
-//! Future subcommands (`cr show`, `cr cost`) land in their own PRs per the
-//! v0.1 sequence in `docs/architecture.md`.
+//! - `cr show [--role ROLE] [--since YYYY-MM-DD] [--tail N]` — replay events
+//! - `cr cost [--since YYYY-MM-DD]` — summarize reported engine spend
 
 use std::path::PathBuf;
 
@@ -61,6 +60,17 @@ enum Cmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
+        /// Only replay events for this role. A leading `@` is accepted.
+        #[arg(long)]
+        role: Option<String>,
+        /// Skip the log entirely if its mtime is older than this date
+        /// (`YYYY-MM-DD`). v0.1 limitation — proper per-event timestamps
+        /// land in v0.2.
+        #[arg(long, value_parser = parse_date)]
+        since: Option<chrono::NaiveDate>,
+        /// Render only the last N matching events.
+        #[arg(long)]
+        tail: Option<usize>,
     },
     /// Per-role cost summary aggregated from `.coderoom/messages.jsonl`.
     Cost {
@@ -70,8 +80,8 @@ enum Cmd {
         /// Skip the log entirely if its mtime is older than this date
         /// (`YYYY-MM-DD`). v0.1 limitation — proper per-event timestamps
         /// land in v0.2.
-        #[arg(long)]
-        since: Option<String>,
+        #[arg(long, value_parser = parse_date)]
+        since: Option<chrono::NaiveDate>,
     },
     /// Compact archived patches and old journals into a role's priors.
     Compact {
@@ -222,6 +232,10 @@ fn parse_engine(s: &str) -> Result<Engine, String> {
     }
 }
 
+fn parse_date(s: &str) -> std::result::Result<chrono::NaiveDate, String> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| format!("must be YYYY-MM-DD: {e}"))
+}
+
 fn project_root_or_cwd(arg: Option<PathBuf>) -> std::io::Result<PathBuf> {
     match arg {
         Some(p) => Ok(p),
@@ -265,13 +279,23 @@ fn main() -> Result<()> {
         }
         Some(Cmd::Role { command }) => run_role_cmd(command),
         Some(Cmd::Start { project }) => run_start(project),
-        Some(Cmd::Show { project }) => {
+        Some(Cmd::Show {
+            project,
+            role,
+            since,
+            tail,
+        }) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
             runtime.block_on(async move {
                 let project_root = project_root_or_cwd(project)?;
-                coderoom::repl::show_log(&project_root).await
+                let options = coderoom::repl::ShowOptions {
+                    role: role.map(|role| role.strip_prefix('@').unwrap_or(&role).to_owned()),
+                    since,
+                    tail,
+                };
+                coderoom::repl::show_log(&project_root, &options).await
             })
         }
         Some(Cmd::Config { command }) => run_config_cmd(command),
@@ -286,19 +310,12 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some(Cmd::Cost { project, since }) => {
-            let since_date = match since {
-                Some(s) => Some(
-                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
-                        .map_err(|e| anyhow::anyhow!("--since must be YYYY-MM-DD: {e}"))?,
-                ),
-                None => None,
-            };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
             runtime.block_on(async move {
                 let project_root = project_root_or_cwd(project)?;
-                coderoom::cost::run(&project_root, since_date).await
+                coderoom::cost::run(&project_root, since).await
             })
         }
     }

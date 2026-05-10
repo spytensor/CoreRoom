@@ -15,6 +15,11 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread::{self, JoinHandle};
 
 use anyhow::{bail, Context, Result};
 use crossterm::cursor::{Hide, MoveTo, Show};
@@ -22,6 +27,8 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::style::{Color, Stylize};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::{execute, queue};
+use signal_hook::consts::signal::{SIGINT, SIGTERM};
+use signal_hook::iterator::{Handle as SignalHandle, Signals};
 
 use crate::adapter::Engine;
 use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
@@ -711,14 +718,43 @@ fn run_wizard(
 #[derive(Debug)]
 struct WizardTerminal {
     stdout: std::io::Stdout,
+    raw_active: Arc<AtomicBool>,
+    signal_handle: Option<SignalHandle>,
+    signal_thread: Option<JoinHandle<()>>,
 }
 
 impl WizardTerminal {
     fn enter() -> Result<Self> {
+        let raw_active = Arc::new(AtomicBool::new(true));
+        let mut signals = Signals::new([SIGINT, SIGTERM])?;
+        let signal_handle = signals.handle();
         terminal::enable_raw_mode()?;
+        let signal_active = Arc::clone(&raw_active);
+        let signal_thread = thread::spawn(move || {
+            for signal in signals.forever() {
+                if !signal_active.swap(false, Ordering::SeqCst) {
+                    continue;
+                }
+                let _ = terminal::disable_raw_mode();
+                let mut stdout = std::io::stdout();
+                let _ = execute!(stdout, Show);
+                std::process::exit(signal_exit_code(signal));
+            }
+        });
         let mut stdout = std::io::stdout();
-        execute!(stdout, Hide)?;
-        Ok(Self { stdout })
+        if let Err(error) = execute!(stdout, Hide) {
+            raw_active.store(false, Ordering::SeqCst);
+            let _ = terminal::disable_raw_mode();
+            signal_handle.close();
+            let _ = signal_thread.join();
+            return Err(error.into());
+        }
+        Ok(Self {
+            stdout,
+            raw_active,
+            signal_handle: Some(signal_handle),
+            signal_thread: Some(signal_thread),
+        })
     }
 
     fn render(&mut self, body: &str) -> Result<()> {
@@ -738,9 +774,20 @@ impl WizardTerminal {
 
 impl Drop for WizardTerminal {
     fn drop(&mut self) {
+        self.raw_active.store(false, Ordering::SeqCst);
         let _ = terminal::disable_raw_mode();
         let _ = execute!(self.stdout, Show);
+        if let Some(handle) = self.signal_handle.take() {
+            handle.close();
+        }
+        if let Some(thread) = self.signal_thread.take() {
+            let _ = thread.join();
+        }
     }
+}
+
+fn signal_exit_code(signal: i32) -> i32 {
+    128 + signal
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -757,30 +804,38 @@ enum WizardKey {
 
 fn read_key() -> Result<WizardKey> {
     loop {
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                match key.code {
-                    KeyCode::Char('c') => return Ok(WizardKey::Abort),
-                    KeyCode::Char('j' | 'm') => return Ok(WizardKey::Enter),
-                    _ => {}
-                }
-            }
-            return Ok(match key.code {
-                KeyCode::Up | KeyCode::Char('k') => WizardKey::Up,
-                KeyCode::Down | KeyCode::Char('j') => WizardKey::Down,
-                KeyCode::Left | KeyCode::Char('h') => WizardKey::Left,
-                KeyCode::Right | KeyCode::Char('l') => WizardKey::Right,
-                KeyCode::Char(' ') => WizardKey::Toggle,
-                KeyCode::Enter | KeyCode::Char('\n' | '\r') => WizardKey::Enter,
-                KeyCode::Esc => WizardKey::Back,
-                KeyCode::Char('q') => WizardKey::Abort,
-                _ => continue,
-            });
+        let event = event::read()?;
+        if let Some(key) = wizard_key_from_event(&event) {
+            return Ok(key);
         }
     }
+}
+
+fn wizard_key_from_event(event: &Event) -> Option<WizardKey> {
+    let Event::Key(key) = event else {
+        return None;
+    };
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('c') => return Some(WizardKey::Abort),
+            KeyCode::Char('j' | 'm') => return Some(WizardKey::Enter),
+            _ => {}
+        }
+    }
+    Some(match key.code {
+        KeyCode::Up | KeyCode::Char('k') => WizardKey::Up,
+        KeyCode::Down | KeyCode::Char('j') => WizardKey::Down,
+        KeyCode::Left | KeyCode::Char('h') => WizardKey::Left,
+        KeyCode::Right | KeyCode::Char('l') => WizardKey::Right,
+        KeyCode::Char(' ') => WizardKey::Toggle,
+        KeyCode::Enter | KeyCode::Char('\n' | '\r') => WizardKey::Enter,
+        KeyCode::Esc => WizardKey::Back,
+        KeyCode::Char('q') => WizardKey::Abort,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1446,6 +1501,16 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn ctrl_c_key_aborts_raw_mode_wizard() {
+        let event = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ));
+
+        assert_eq!(wizard_key_from_event(&event), Some(WizardKey::Abort));
     }
 
     fn snapshot_scan() -> detect::ProjectScan {
