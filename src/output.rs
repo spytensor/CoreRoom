@@ -16,6 +16,7 @@ use std::io::IsTerminal;
 use crossterm::style::{Color, StyledContent, Stylize};
 
 mod palette;
+pub mod work_card;
 
 use palette::ROLE_PALETTE;
 pub use palette::{

@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::style::Stylize;
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -14,6 +13,7 @@ use crate::permissions::BridgeRequestSink;
 use super::permission_prompt;
 use super::render::render_event;
 use super::status::{StatusRegion, SPINNER_TICK_MS};
+use super::work::{self, TurnWork};
 
 /// Final assistant-turn fields captured during a single role's drain.
 #[derive(Debug, Clone)]
@@ -100,6 +100,7 @@ impl TurnActivity {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn summary_line(&self, role: &str) -> Option<String> {
         if self.proposed == 0 && self.completed == 0 {
             return None;
@@ -136,12 +137,6 @@ impl TurnActivity {
             )
         };
         Some(format!("  @{role} tools folded · {tools} · {status}"))
-    }
-
-    fn render_summary(&self, role: &str) {
-        if let Some(line) = self.summary_line(role) {
-            println!("{}", line.with(output::DIM));
-        }
     }
 
     /// Whether the role's turn looks ungrounded enough that its
@@ -207,6 +202,8 @@ pub(super) async fn drain_one_turn(
 
     let mut captured: Option<CapturedTurn> = None;
     let mut activity = TurnActivity::default();
+    let mut work = TurnWork::new(role, host_role, text);
+    let turn_started = Instant::now();
     let mut status = StatusRegion::start(role);
     let mut ticker = tokio::time::interval(Duration::from_millis(SPINNER_TICK_MS));
     // Skip the immediate fire so the spinner doesn't double-redraw on entry.
@@ -228,6 +225,7 @@ pub(super) async fn drain_one_turn(
             recv = rx.recv() => match recv {
                 Ok(event) => {
                     if let Some(hidden) = TurnActivity::from_foldable_event(&event, role) {
+                        work.apply_event(&event);
                         hidden.merge_into(&mut activity);
                         continue;
                     }
@@ -237,20 +235,35 @@ pub(super) async fn drain_one_turn(
                         CrepEvent::RoleSpoke {
                             role: spoken,
                             text,
-                            mentions,
-                            ..
+                            cost_usd,
+                            cache_read,
+                            mentions: _,
                         } if spoken == role => {
+                            let cleaned = work.clean_role_text(text);
                             captured = Some(CapturedTurn {
-                                text: text.clone(),
-                                mentions: mentions.clone(),
+                                text: cleaned.text.clone(),
+                                mentions: cleaned.mentions.clone(),
                                 activity: activity.clone(),
                             });
-                            activity.render_summary(role);
-                            render_event(&event, host_role);
+                            let card = work.done_card(turn_started.elapsed());
+                            work::render_card(&card);
+                            if !cleaned.text.trim().is_empty() {
+                                let rendered = CrepEvent::RoleSpoke {
+                                    role: spoken.clone(),
+                                    text: cleaned.text,
+                                    mentions: cleaned.mentions,
+                                    cost_usd: *cost_usd,
+                                    cache_read: *cache_read,
+                                };
+                                render_event(&rendered, host_role);
+                            }
                             true
                         }
                         CrepEvent::RoleStopped { role: stopped, .. } if stopped == role => {
-                            activity.render_summary(role);
+                            if captured.is_none() {
+                                let card = work.interrupted_card("role stopped before replying");
+                                work::render_card(&card);
+                            }
                             render_event(&event, host_role);
                             true
                         }
