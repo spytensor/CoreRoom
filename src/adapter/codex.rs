@@ -173,6 +173,7 @@ impl EngineAdapter for CodexAdapter {
             config.name.clone(),
             priors_text,
             config.budget_usd,
+            config.permission_mode,
             rx_user,
             client,
             tx_events.clone(),
@@ -359,19 +360,33 @@ async fn read_rpc_loop(
         //   id +  method  → server-initiated request (e.g. approval)
         //   id  – method  → response to one of our pending requests
         //  –id  + method  → notification (lifecycle, exec_command_*, …)
-        let id = value.get("id").and_then(Value::as_u64);
+        //
+        // Per JSON-RPC 2.0 §4.2 ids may be strings OR numbers; codex
+        // happens to use numbers today but we keep the original Value
+        // so a future string-id rev can't deadlock us.
+        let id_value = value.get("id").cloned();
         let has_method = value.get("method").is_some();
-        match (id, has_method) {
-            (Some(id), true) => {
+        let id_present = id_value.as_ref().is_some_and(|v| !v.is_null());
+
+        match (id_present, has_method) {
+            (true, true) => {
                 let writer = Arc::clone(&writer);
                 let role_name = role.clone();
                 let socket = permission_socket.clone();
                 let request = value.clone();
+                let id = RpcId(id_value.unwrap_or(Value::Null));
                 tokio::spawn(async move {
                     handle_server_request(role_name, id, request, socket, writer).await;
                 });
             }
-            (Some(id), false) => {
+            (true, false) => {
+                // Only numeric ids are used by our outbound request()
+                // path; if codex echoes back a non-numeric id here it
+                // doesn't match any of our pending senders so drop it.
+                let Some(id) = id_value.as_ref().and_then(Value::as_u64) else {
+                    debug!(role, line = %line, "non-numeric response id, dropping");
+                    continue;
+                };
                 let response = JsonRpcResponse {
                     result: value.get("result").cloned(),
                     error: value.get("error").cloned(),
@@ -380,14 +395,14 @@ async fn read_rpc_loop(
                     let _ = tx.send(response);
                 }
             }
-            (None, true) => {
+            (false, true) => {
                 if let Some(event) = codex_notification_to_event(&role, &value) {
                     let _ = events.send(event).await;
                 } else {
                     debug!(role, line = %line, "codex notification ignored");
                 }
             }
-            (None, false) => {
+            (false, false) => {
                 debug!(role, line = %line, "malformed codex stdout line");
             }
         }
@@ -402,24 +417,38 @@ async fn read_rpc_loop(
     debug!(role, "codex rpc loop exiting");
 }
 
-/// Method names codex uses for "wrapper, please approve this tool"
-/// requests. Listed broadly because the codex CLI rev'd the namespace
-/// twice in v0.1xx. Anything matching here goes through the permission
-/// bridge; anything else gets a generic "method not supported" reply
-/// so codex doesn't hang waiting for a verdict it'll never get.
-const APPROVAL_METHODS: &[&str] = &[
-    "notifications/exec_approval_request",
-    "exec_approval_request",
-    "permission/request",
-    "permission_request",
-    "approval/request",
-];
+/// Map CodeRoom's permission_mode to codex's `approval-policy`.
+/// `ask` becomes `untrusted` (codex asks for ~everything that isn't
+/// trivially safe), `auto` becomes `on-request` (codex asks only for
+/// genuinely risky calls), `bypass` becomes `never` (codex never asks
+/// — equivalent to claude's `--dangerously-skip-permissions`).
+fn codex_approval_policy(mode: PermissionMode) -> &'static str {
+    match mode {
+        PermissionMode::Ask => "untrusted",
+        PermissionMode::Auto => "on-request",
+        PermissionMode::Bypass => "never",
+    }
+}
 
-/// Handle one server-initiated JSON-RPC request: route approval
-/// requests through the permission bridge, return a JSON-RPC response.
+/// Codex approval method names per
+/// <https://github.com/openai/codex/blob/main/codex-rs/docs/codex_mcp_interface.md#approvals-server---client>
+/// (verified 2026-05-10). Anything else codex sends as a server-initiated
+/// request gets a `-32601` reply so codex doesn't hang on an unanswered id.
+const EXEC_APPROVAL_METHOD: &str = "execCommandApproval";
+const PATCH_APPROVAL_METHOD: &str = "applyPatchApproval";
+
+/// One codex JSON-RPC id. Codex echoes ids verbatim in responses, and
+/// per the JSON-RPC 2.0 spec ids may be numbers OR strings, so we keep
+/// the original `Value` rather than coercing to `u64`.
+#[derive(Debug, Clone)]
+struct RpcId(Value);
+
+/// Handle one server-initiated JSON-RPC request. Approval methods route
+/// through the permission bridge; everything else gets a Method-Not-Found
+/// reply so codex doesn't deadlock on an outstanding id.
 async fn handle_server_request(
     role: String,
-    id: u64,
+    id: RpcId,
     request: Value,
     permission_socket: Option<PathBuf>,
     writer: Arc<Mutex<tokio::process::ChildStdin>>,
@@ -433,72 +462,18 @@ async fn handle_server_request(
         .to_owned();
     let params = request.get("params").cloned().unwrap_or(Value::Null);
 
-    let response_value = if APPROVAL_METHODS.contains(&method.as_str()) {
-        match permission_socket {
-            None => {
-                // Defensive: should be unreachable thanks to the
-                // start-time check, but if a caller wires us without a
-                // socket we still must answer the RPC or codex hangs.
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {"approved": false, "reason": "no permission bridge available"},
-                })
-            }
-            Some(socket) => {
-                let summary = approval_request_summary(&params);
-                let tool = approval_request_tool(&params);
-                let reason = format!(
-                    "{tool} requires approval (codex {})",
-                    method.split('/').next_back().unwrap_or(&method),
-                );
-                match crate::permissions::bridge::request_decision_async(
-                    &socket, &role, &tool, &summary, &reason,
-                )
-                .await
-                {
-                    Ok(verdict) => {
-                        let approved = matches!(
-                            verdict.decision,
-                            crate::permissions::PermissionDecision::Allow
-                        );
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "approved": approved,
-                                "reason": verdict.reason,
-                            },
-                        })
-                    }
-                    Err(error) => {
-                        warn!(role, %error, "permission bridge failed for codex approval");
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "approved": false,
-                                "reason": format!(
-                                    "CodeRoom permission bridge failed: {error}"
-                                ),
-                            },
-                        })
-                    }
-                }
-            }
+    let response_value = match method.as_str() {
+        EXEC_APPROVAL_METHOD | PATCH_APPROVAL_METHOD => {
+            handle_approval_request(&role, &id, &method, &params, permission_socket).await
         }
-    } else {
-        // Codex shouldn't be sending us other server-initiated requests
-        // today, but if a future MCP rev does we must respond so the
-        // far end isn't left hanging on the id.
-        json!({
+        other => json!({
             "jsonrpc": "2.0",
-            "id": id,
+            "id": id.0,
             "error": {
                 "code": -32601,
-                "message": format!("method not supported by CodeRoom wrapper: {method}"),
+                "message": format!("method not supported by CodeRoom wrapper: {other}"),
             },
-        })
+        }),
     };
 
     let mut bytes = match serde_json::to_vec(&response_value) {
@@ -519,25 +494,94 @@ async fn handle_server_request(
     }
 }
 
-fn approval_request_summary(params: &Value) -> Value {
-    // Best-effort: most codex MCP revs put a `command`/`tool_input`
-    // shape in here. Pass through whatever is there; the bridge prompt
-    // renders a concise preview from common keys.
-    if let Some(input) = params.get("input").cloned() {
-        return input;
+async fn handle_approval_request(
+    role: &str,
+    id: &RpcId,
+    method: &str,
+    params: &Value,
+    permission_socket: Option<PathBuf>,
+) -> Value {
+    let Some(socket) = permission_socket else {
+        // Defensive: should be unreachable thanks to start()'s
+        // socket-required check, but a caller wiring us without one
+        // must still get a deny instead of a hang.
+        return approval_response(id, false, "no permission bridge available");
+    };
+
+    let (tool, summary) = approval_request_preview(method, params);
+    let bridge_reason = match method {
+        PATCH_APPROVAL_METHOD => format!("{tool} requires approval (codex applyPatchApproval)"),
+        _ => format!("{tool} requires approval (codex execCommandApproval)"),
+    };
+
+    match crate::permissions::bridge::request_decision_async(
+        &socket,
+        role,
+        &tool,
+        &summary,
+        &bridge_reason,
+    )
+    .await
+    {
+        Ok(verdict) => approval_response(
+            id,
+            matches!(
+                verdict.decision,
+                crate::permissions::PermissionDecision::Allow
+            ),
+            &verdict.reason,
+        ),
+        Err(error) => {
+            warn!(role, %error, "permission bridge failed for codex approval");
+            approval_response(
+                id,
+                false,
+                &format!("CodeRoom permission bridge failed: {error}"),
+            )
+        }
     }
-    if let Some(cmd) = params.get("command") {
-        return json!({"command": cmd});
-    }
-    params.clone()
 }
 
-fn approval_request_tool(params: &Value) -> String {
-    params
-        .get("tool")
-        .and_then(Value::as_str)
-        .or_else(|| params.get("tool_name").and_then(Value::as_str))
-        .map_or_else(|| "Bash".to_owned(), ToOwned::to_owned)
+/// Build the JSON-RPC response in codex's documented shape:
+///
+/// ```text
+/// {"jsonrpc":"2.0","id":<echo>,"result":{"decision":"allow"|"deny"}}
+/// ```
+///
+/// `reason` is logged on our side but not part of the on-the-wire
+/// response — codex doesn't read it back.
+fn approval_response(id: &RpcId, allow: bool, _reason: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id.0,
+        "result": {
+            "decision": if allow { "allow" } else { "deny" },
+        },
+    })
+}
+
+/// Pull the user-facing tool name and a JSON summary out of a codex
+/// approval request, per the documented shapes:
+///
+/// - `execCommandApproval { conversationId, callId, approvalId?, command, cwd, reason? }`
+/// - `applyPatchApproval { conversationId, callId, fileChanges, reason?, grantRoot? }`
+fn approval_request_preview(method: &str, params: &Value) -> (String, Value) {
+    if method == PATCH_APPROVAL_METHOD {
+        let summary = params
+            .get("fileChanges")
+            .cloned()
+            .unwrap_or_else(|| params.clone());
+        return ("Apply patch".to_owned(), summary);
+    }
+    // execCommandApproval
+    let command_value = params.get("command").cloned();
+    let working_dir = params.get("cwd").cloned();
+    let summary = match (command_value, working_dir) {
+        (Some(command), Some(directory)) => json!({"command": command, "cwd": directory}),
+        (Some(command), None) => json!({"command": command}),
+        _ => params.clone(),
+    };
+    ("Bash".to_owned(), summary)
 }
 
 fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
@@ -609,10 +653,12 @@ async fn write_loop(
     role: String,
     priors_text: String,
     budget_usd: f64,
+    permission_mode: PermissionMode,
     mut rx: mpsc::Receiver<UserMessage>,
     client: RpcClient,
     events: mpsc::Sender<CrepEvent>,
 ) {
+    let approval_policy = codex_approval_policy(permission_mode);
     while let Some(msg) = rx.recv().await {
         let UserMessage::Prompt(prompt) = msg else {
             continue;
@@ -622,7 +668,12 @@ async fn write_loop(
             "arguments": {
                 "prompt": prompt,
                 "base-instructions": priors_text,
-                "approval-policy": "never",
+                // Wire the requested mode through to codex so its server
+                // actually emits applyPatchApproval / execCommandApproval
+                // requests our bridge can answer. Earlier code hardcoded
+                // "never" here, which made the entire approval pipe
+                // unreachable regardless of permission_mode.
+                "approval-policy": approval_policy,
                 "sandbox": "workspace-write",
             },
         });
@@ -784,6 +835,61 @@ mod tests {
             assert!(text.contains("permission_mode=\"bypass\""), "{text}");
             assert!(text.contains(permission_mode.as_str()), "{text}");
         }
+    }
+
+    #[test]
+    fn permission_mode_maps_to_codex_approval_policy() {
+        assert_eq!(codex_approval_policy(PermissionMode::Bypass), "never");
+        assert_eq!(codex_approval_policy(PermissionMode::Ask), "untrusted");
+        assert_eq!(codex_approval_policy(PermissionMode::Auto), "on-request");
+    }
+
+    #[test]
+    fn approval_response_shape_matches_codex_docs() {
+        // Per codex_mcp_interface.md: result must be {"decision":"allow"|"deny"}.
+        let id = RpcId(json!(42));
+        let allow = approval_response(&id, true, "user said yes");
+        assert_eq!(allow["jsonrpc"], "2.0");
+        assert_eq!(allow["id"], 42);
+        assert_eq!(allow["result"]["decision"], "allow");
+
+        let deny = approval_response(&id, false, "user said no");
+        assert_eq!(deny["result"]["decision"], "deny");
+    }
+
+    #[test]
+    fn approval_response_echoes_string_id() {
+        // JSON-RPC ids may be strings; codex doesn't currently use this
+        // but the wrapper must echo whatever it received.
+        let id = RpcId(json!("call-7"));
+        let response = approval_response(&id, true, "");
+        assert_eq!(response["id"], "call-7");
+    }
+
+    #[test]
+    fn approval_request_preview_extracts_exec_command() {
+        let params = json!({
+            "conversationId": "conv-1",
+            "callId": "call-1",
+            "command": ["bash", "-c", "ls"],
+            "cwd": "/tmp",
+        });
+        let (tool, summary) = approval_request_preview("execCommandApproval", &params);
+        assert_eq!(tool, "Bash");
+        assert_eq!(summary["command"], json!(["bash", "-c", "ls"]));
+        assert_eq!(summary["cwd"], "/tmp");
+    }
+
+    #[test]
+    fn approval_request_preview_extracts_patch_changes() {
+        let params = json!({
+            "conversationId": "conv-1",
+            "callId": "call-1",
+            "fileChanges": [{"path": "src/foo.rs", "kind": "modify"}],
+        });
+        let (tool, summary) = approval_request_preview("applyPatchApproval", &params);
+        assert_eq!(tool, "Apply patch");
+        assert_eq!(summary, json!([{"path": "src/foo.rs", "kind": "modify"}]));
     }
 
     #[test]
