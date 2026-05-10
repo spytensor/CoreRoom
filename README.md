@@ -81,6 +81,17 @@ matching [GitHub Release](https://github.com/spytensor/codeRoom/releases)
 and verifies its SHA-256. Supported platforms: linux + macOS, x86_64 and
 aarch64.
 
+### Update
+
+```bash
+cr update   # check the npm registry for a newer version
+cr upgrade  # install and verify the latest npm package
+```
+
+`cr start` also checks for updates in the background at most once per day.
+Disable that with `CODEROOM_NO_UPDATE_CHECK=1` or
+`[updates] check_on_start = false` in user config.
+
 <details>
 <summary>Don't have npm? Direct binary install.</summary>
 
