@@ -822,6 +822,44 @@ mod tests {
         assert!(translate("r", "h", &line).is_empty());
     }
 
+    #[tokio::test]
+    async fn write_stdin_waits_for_turn_boundary_before_next_prompt() {
+        let (client, server) = tokio::io::duplex(4096);
+        let mut lines = BufReader::new(client).lines();
+        let (tx_user, rx_user) = mpsc::channel(4);
+        let (turn_done_tx, turn_done_rx) = mpsc::channel(4);
+
+        tokio::spawn(write_stdin(
+            "backend".to_owned(),
+            rx_user,
+            server,
+            turn_done_rx,
+        ));
+
+        tx_user
+            .send(UserMessage::Prompt("first".into()))
+            .await
+            .unwrap();
+        tx_user
+            .send(UserMessage::Prompt("second".into()))
+            .await
+            .unwrap();
+
+        let first = lines.next_line().await.unwrap().unwrap();
+        assert!(first.contains("first"));
+
+        let second_before_boundary =
+            tokio::time::timeout(Duration::from_millis(50), lines.next_line()).await;
+        assert!(
+            second_before_boundary.is_err(),
+            "second prompt was written before a turn boundary"
+        );
+
+        turn_done_tx.send(()).await.unwrap();
+        let second = lines.next_line().await.unwrap().unwrap();
+        assert!(second.contains("second"));
+    }
+
     #[test]
     fn translate_missing_type_yields_nothing() {
         let line = json!({"some": "noise"});
