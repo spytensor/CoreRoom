@@ -247,6 +247,8 @@ pub(super) async fn drain_one_turn(
                             text,
                             cost_usd,
                             cache_read,
+                            turn_id,
+                            thread_id,
                             mentions: _,
                         } if spoken == role => {
                             let (cleaned, card) = {
@@ -268,6 +270,8 @@ pub(super) async fn drain_one_turn(
                                     mentions: cleaned.mentions,
                                     cost_usd: *cost_usd,
                                     cache_read: *cache_read,
+                                    turn_id: turn_id.clone(),
+                                    thread_id: thread_id.clone(),
                                 };
                                 render_event(&rendered, host_role);
                             }

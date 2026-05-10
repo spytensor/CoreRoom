@@ -45,7 +45,7 @@ impl TurnWork {
 
     pub(super) fn apply_event(&mut self, event: &CrepEvent) {
         match event {
-            CrepEvent::WorkTitle { role, title } if role == &self.role => {
+            CrepEvent::WorkTitle { role, title, .. } if role == &self.role => {
                 self.title.clone_from(title);
                 self.title_from_task_block = true;
             }
@@ -54,6 +54,7 @@ impl TurnWork {
                 tool_name,
                 tool_input,
                 tool_use_id,
+                ..
             } if role == &self.role => {
                 let text = step_label(tool_name, tool_input);
                 let idx = self.steps.len();
@@ -70,6 +71,7 @@ impl TurnWork {
                 tool_use_id,
                 ok,
                 output_summary,
+                ..
             } if role == &self.role => {
                 let text = executed_label(*ok, output_summary);
                 if let Some(idx) = self.pending_steps.remove(tool_use_id) {
@@ -260,12 +262,16 @@ mod tests {
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "tool-1".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         });
         work.apply_event(&CrepEvent::ToolCallExecuted {
             role: "security".into(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "README.md".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         });
 
         let card = work.done_card(Duration::from_secs(1));
@@ -283,12 +289,16 @@ mod tests {
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             tool_use_id: "tool-1".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         });
         work.apply_event(&CrepEvent::PermissionDenied {
             role: "security".into(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             reason: "requires review".into(),
+            turn_id: String::new(),
+            thread_id: String::new(),
         });
 
         let card = work.done_card(Duration::from_secs(1));

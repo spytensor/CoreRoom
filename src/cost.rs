@@ -170,6 +170,8 @@ mod tests {
             mentions: Vec::new(),
             cost_usd: cost,
             cache_read: cache,
+            turn_id: String::new(),
+            thread_id: String::new(),
         }
     }
 
@@ -199,6 +201,7 @@ mod tests {
                 CrepEvent::RoleStopped {
                     role: "backend".into(),
                     reason: StopReason::Completed,
+                    turn_id: None,
                 },
             ],
         );
@@ -259,6 +262,7 @@ mod tests {
                 CrepEvent::RoleStopped {
                     role: "backend".into(),
                     reason: StopReason::Completed,
+                    turn_id: None,
                 },
             ],
         );

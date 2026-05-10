@@ -94,8 +94,10 @@ pub(super) fn filter_show_events<'a>(
 fn event_role(event: &CrepEvent) -> &str {
     match event {
         CrepEvent::RoleStarted { role, .. }
+        | CrepEvent::TurnDispatched { role, .. }
         | CrepEvent::WorkTitle { role, .. }
         | CrepEvent::RoleSpoke { role, .. }
+        | CrepEvent::TurnInterrupted { role, .. }
         | CrepEvent::ToolCallProposed { role, .. }
         | CrepEvent::ToolCallExecuted { role, .. }
         | CrepEvent::PermissionDenied { role, .. }
@@ -116,6 +118,8 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
         mentions,
         cost_usd,
         cache_read,
+        turn_id,
+        thread_id,
     } = event
     else {
         return vec![event.clone()];
@@ -127,6 +131,8 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
         events.push(CrepEvent::WorkTitle {
             role: role.clone(),
             title,
+            turn_id: turn_id.clone(),
+            thread_id: thread_id.clone(),
         });
     }
     let body = extracted.body.trim().to_owned();
@@ -137,6 +143,8 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
             mentions: mentions.clone(),
             cost_usd: *cost_usd,
             cache_read: *cache_read,
+            turn_id: turn_id.clone(),
+            thread_id: thread_id.clone(),
         });
     }
     events
