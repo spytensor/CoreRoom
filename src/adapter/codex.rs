@@ -11,16 +11,15 @@
 //!   the CC adapter's long-lived session, but functionally correct.
 //! - Codex exec lifecycle notifications are translated into best-effort
 //!   CREP tool events when the installed CLI emits them.
-//! - Codex runs only with `permission_mode="bypass"` until CodeRoom can
-//!   answer Codex approval requests over MCP. `ask` / `auto` fail fast
-//!   instead of hanging inside a pending approval request.
+//! - Codex `permission_mode="ask"` / `"auto"` is supported only when the
+//!   live REPL provides a permission bridge. Headless callers still need
+//!   `permission_mode="bypass"` so approval requests cannot hang.
 //!
-//! Multi-turn (resume / `codex-reply`), tool-call event mapping, and
-//! wrapper-side approval request responses are scheduled for
+//! Multi-turn (resume / `codex-reply`) is scheduled for
 //! `feat/adapter-codex-v2`.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -141,6 +140,7 @@ impl EngineAdapter for CodexAdapter {
             config.name.clone(),
             tx_events.clone(),
             config.permission_socket_path.clone(),
+            config.permission_policy_path.clone(),
         ));
         tokio::spawn(drain_stderr(config.name.clone(), stderr));
 
@@ -346,6 +346,7 @@ async fn read_rpc_loop(
     role: String,
     events: mpsc::Sender<CrepEvent>,
     permission_socket: Option<PathBuf>,
+    permission_policy_path: Option<PathBuf>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -373,10 +374,21 @@ async fn read_rpc_loop(
                 let writer = Arc::clone(&writer);
                 let role_name = role.clone();
                 let socket = permission_socket.clone();
+                let policy_path = permission_policy_path.clone();
+                let events = events.clone();
                 let request = value.clone();
                 let id = RpcId(id_value.unwrap_or(Value::Null));
                 tokio::spawn(async move {
-                    handle_server_request(role_name, id, request, socket, writer).await;
+                    handle_server_request(
+                        role_name,
+                        id,
+                        request,
+                        socket,
+                        policy_path,
+                        events,
+                        writer,
+                    )
+                    .await;
                 });
             }
             (true, false) => {
@@ -451,6 +463,8 @@ async fn handle_server_request(
     id: RpcId,
     request: Value,
     permission_socket: Option<PathBuf>,
+    permission_policy_path: Option<PathBuf>,
+    events: mpsc::Sender<CrepEvent>,
     writer: Arc<Mutex<tokio::process::ChildStdin>>,
 ) {
     use tokio::io::AsyncWriteExt;
@@ -464,7 +478,16 @@ async fn handle_server_request(
 
     let response_value = match method.as_str() {
         EXEC_APPROVAL_METHOD | PATCH_APPROVAL_METHOD => {
-            handle_approval_request(&role, &id, &method, &params, permission_socket).await
+            handle_approval_request(
+                &role,
+                &id,
+                &method,
+                &params,
+                permission_socket,
+                permission_policy_path,
+                &events,
+            )
+            .await
         }
         other => json!({
             "jsonrpc": "2.0",
@@ -500,15 +523,43 @@ async fn handle_approval_request(
     method: &str,
     params: &Value,
     permission_socket: Option<PathBuf>,
+    permission_policy_path: Option<PathBuf>,
+    events: &mpsc::Sender<CrepEvent>,
 ) -> Value {
+    let (tool, summary) = approval_request_preview(method, params);
+
+    if let Some(decision) =
+        codex_session_policy_decision(role, permission_policy_path.as_deref(), &tool)
+    {
+        return approval_response_with_event(
+            role,
+            id,
+            matches!(decision, crate::permissions::PermissionDecision::Allow),
+            "CodeRoom session policy",
+            &tool,
+            &summary,
+            events,
+        )
+        .await;
+    }
+
+    let deny_without_socket = "no permission bridge available";
     let Some(socket) = permission_socket else {
         // Defensive: should be unreachable thanks to start()'s
         // socket-required check, but a caller wiring us without one
         // must still get a deny instead of a hang.
-        return approval_response(id, false, "no permission bridge available");
+        return approval_response_with_event(
+            role,
+            id,
+            false,
+            deny_without_socket,
+            &tool,
+            &summary,
+            events,
+        )
+        .await;
     };
 
-    let (tool, summary) = approval_request_preview(method, params);
     let bridge_reason = match method {
         PATCH_APPROVAL_METHOD => format!("{tool} requires approval (codex applyPatchApproval)"),
         _ => format!("{tool} requires approval (codex execCommandApproval)"),
@@ -523,21 +574,87 @@ async fn handle_approval_request(
     )
     .await
     {
-        Ok(verdict) => approval_response(
-            id,
-            matches!(
-                verdict.decision,
-                crate::permissions::PermissionDecision::Allow
-            ),
-            &verdict.reason,
-        ),
+        Ok(verdict) => {
+            if let Some(path) = permission_policy_path.as_deref() {
+                if let Err(error) =
+                    crate::permissions::update_policy_from_bridge_response(path, &tool, &verdict)
+                {
+                    warn!(
+                        role,
+                        path = %path.display(),
+                        %error,
+                        "persisting codex permission decision"
+                    );
+                }
+            }
+            approval_response_with_event(
+                role,
+                id,
+                matches!(
+                    verdict.decision,
+                    crate::permissions::PermissionDecision::Allow
+                ),
+                &verdict.reason,
+                &tool,
+                &summary,
+                events,
+            )
+            .await
+        }
         Err(error) => {
             warn!(role, %error, "permission bridge failed for codex approval");
-            approval_response(
+            approval_response_with_event(
+                role,
                 id,
                 false,
                 &format!("CodeRoom permission bridge failed: {error}"),
+                &tool,
+                &summary,
+                events,
             )
+            .await
+        }
+    }
+}
+
+async fn approval_response_with_event(
+    role: &str,
+    id: &RpcId,
+    allow: bool,
+    reason: &str,
+    tool: &str,
+    input: &Value,
+    events: &mpsc::Sender<CrepEvent>,
+) -> Value {
+    if !allow {
+        let _ = events
+            .send(CrepEvent::PermissionDenied {
+                role: role.to_owned(),
+                tool_name: tool.to_owned(),
+                tool_input: input.clone(),
+                reason: reason.to_owned(),
+            })
+            .await;
+    }
+    approval_response(id, allow, reason)
+}
+
+fn codex_session_policy_decision(
+    role: &str,
+    policy_path: Option<&Path>,
+    tool: &str,
+) -> Option<crate::permissions::PermissionDecision> {
+    let path = policy_path?;
+    match crate::permissions::PermissionPolicy::load(path) {
+        Ok(policy) => policy.decision_for_tool(tool),
+        Err(error) => {
+            warn!(
+                role,
+                path = %path.display(),
+                %error,
+                "loading codex permission policy"
+            );
+            None
         }
     }
 }
@@ -890,6 +1007,131 @@ mod tests {
         let (tool, summary) = approval_request_preview("applyPatchApproval", &params);
         assert_eq!(tool, "Apply patch");
         assert_eq!(summary, json!([{"path": "src/foo.rs", "kind": "modify"}]));
+    }
+
+    #[tokio::test]
+    async fn approval_request_uses_session_policy_before_bridge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let policy_path = tmp.path().join("policy.json");
+        crate::permissions::update_policy(&policy_path, |policy| {
+            policy.allow_tool("Bash");
+        })
+        .unwrap();
+
+        let id = RpcId(json!("call-1"));
+        let (events, _rx_events) = tokio::sync::mpsc::channel(1);
+        let params = json!({
+            "conversationId": "conv-1",
+            "callId": "call-1",
+            "command": ["bash", "-c", "ls"],
+            "cwd": "/tmp",
+        });
+        let response = handle_approval_request(
+            "qa",
+            &id,
+            EXEC_APPROVAL_METHOD,
+            &params,
+            None,
+            Some(policy_path),
+            &events,
+        )
+        .await;
+
+        assert_eq!(response["id"], "call-1");
+        assert_eq!(response["result"]["decision"], "allow");
+    }
+
+    #[tokio::test]
+    async fn denied_approval_emits_permission_denied_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let policy_path = tmp.path().join("policy.json");
+        crate::permissions::update_policy(&policy_path, |policy| {
+            policy.deny_tool("Bash");
+        })
+        .unwrap();
+        let (events, mut rx_events) = tokio::sync::mpsc::channel(1);
+
+        let id = RpcId(json!("call-1"));
+        let params = json!({
+            "conversationId": "conv-1",
+            "callId": "call-1",
+            "command": ["bash", "-c", "ls"],
+            "cwd": "/tmp",
+        });
+        let response = handle_approval_request(
+            "qa",
+            &id,
+            EXEC_APPROVAL_METHOD,
+            &params,
+            None,
+            Some(policy_path),
+            &events,
+        )
+        .await;
+
+        assert_eq!(response["result"]["decision"], "deny");
+        match rx_events.recv().await.expect("permission denial event") {
+            CrepEvent::PermissionDenied {
+                role,
+                tool_name,
+                tool_input,
+                reason,
+            } => {
+                assert_eq!(role, "qa");
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(tool_input["command"], json!(["bash", "-c", "ls"]));
+                assert_eq!(reason, "CodeRoom session policy");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn approval_request_persists_session_bridge_decision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let policy_path = tmp.path().join("policy.json");
+        let socket_path = tmp.path().join("permission.sock");
+        let (_handle, mut rx) = crate::permissions::bridge::start(socket_path.clone()).unwrap();
+
+        let listener = tokio::spawn(async move {
+            let sink = rx.recv().await.expect("codex approval request");
+            assert_eq!(sink.request.role, "qa");
+            assert_eq!(sink.request.tool, "Bash");
+            sink.responder.respond(crate::permissions::BridgeResponse {
+                v: 1,
+                decision: crate::permissions::PermissionDecision::Allow,
+                scope: crate::permissions::DecisionScope::Session,
+                reason: "approved".into(),
+            });
+        });
+
+        let id = RpcId(json!(7));
+        let (events, _rx_events) = tokio::sync::mpsc::channel(1);
+        let params = json!({
+            "conversationId": "conv-1",
+            "callId": "call-1",
+            "command": ["bash", "-c", "pwd"],
+            "cwd": "/tmp",
+        });
+        let response = handle_approval_request(
+            "qa",
+            &id,
+            EXEC_APPROVAL_METHOD,
+            &params,
+            Some(socket_path),
+            Some(policy_path.clone()),
+            &events,
+        )
+        .await;
+
+        listener.await.unwrap();
+        assert_eq!(response["result"]["decision"], "allow");
+
+        let policy = crate::permissions::PermissionPolicy::load(&policy_path).unwrap();
+        assert_eq!(
+            policy.decision_for_tool("Bash"),
+            Some(crate::permissions::PermissionDecision::Allow)
+        );
     }
 
     #[test]

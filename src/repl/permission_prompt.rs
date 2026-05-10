@@ -19,9 +19,14 @@
 //! prompt is visually attributed even when many roles are active.
 
 use std::io::Write as _;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::style::Stylize;
 use crossterm::terminal;
 
@@ -34,6 +39,12 @@ use crate::permissions::{
 /// truncate with `…`. Chosen to fit comfortably on an 80-col terminal
 /// after the gutter and label prefix.
 const PREVIEW_MAX: usize = 64;
+
+/// Poll interval for permission keypress reads. The async prompt path
+/// runs the terminal read in `spawn_blocking`; polling instead of a
+/// single indefinite `event::read()` lets cancellation drop raw mode
+/// promptly when the surrounding role turn times out or is interrupted.
+const KEYPRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Paint the prompt for `request`, read one keypress, and send the
 /// decision back through `request.responder`. Always sends a response —
@@ -79,49 +90,7 @@ pub(super) fn handle_request_blocking(sink: BridgeRequestSink, host_role: &str) 
 /// already entered raw mode. Used from the TTY input loop where the
 /// editor's RawModeGuard is still in scope.
 fn read_decision_keypress_blocking_in_raw() -> Result<Option<BridgeResponse>> {
-    loop {
-        match crossterm::event::read().context("reading permission keypress")? {
-            Event::Key(key) => {
-                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    continue;
-                }
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Char('c'))
-                {
-                    return Ok(None);
-                }
-                match key.code {
-                    KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Allow,
-                            DecisionScope::Once,
-                        )));
-                    }
-                    KeyCode::Char('s' | 'S') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Allow,
-                            DecisionScope::Session,
-                        )));
-                    }
-                    KeyCode::Char('d' | 'D') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Deny,
-                            DecisionScope::Once,
-                        )));
-                    }
-                    KeyCode::Char('n' | 'N') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Deny,
-                            DecisionScope::Session,
-                        )));
-                    }
-                    KeyCode::Esc => return Ok(None),
-                    _ => continue,
-                }
-            }
-            _ => continue,
-        }
-    }
+    read_decision_keypress_loop(|| true)
 }
 
 fn paint_prompt(request: &BridgeRequest, host_role: &str) {
@@ -233,9 +202,36 @@ fn truncate_preview(s: &str) -> String {
 /// answer, `Ok(None)` if the user pressed Esc / Ctrl-C (treated as
 /// cancel → deny once), or `Err` if raw mode could not be entered.
 async fn read_decision_keypress() -> Result<Option<BridgeResponse>> {
-    tokio::task::spawn_blocking(read_decision_keypress_blocking)
+    let cancel = PromptReadCancel::new();
+    let token = cancel.token();
+    let result = tokio::task::spawn_blocking(move || read_decision_keypress_blocking(&token))
         .await
-        .context("joining permission keypress reader")?
+        .context("joining permission keypress reader")?;
+    drop(cancel);
+    result
+}
+
+#[derive(Debug)]
+struct PromptReadCancel {
+    keep_reading: Arc<AtomicBool>,
+}
+
+impl PromptReadCancel {
+    fn new() -> Self {
+        Self {
+            keep_reading: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    fn token(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.keep_reading)
+    }
+}
+
+impl Drop for PromptReadCancel {
+    fn drop(&mut self) {
+        self.keep_reading.store(false, Ordering::Release);
+    }
 }
 
 /// RAII guard for the brief raw-mode window the permission prompt opens
@@ -257,50 +253,58 @@ impl Drop for RawModeGuard {
     }
 }
 
-fn read_decision_keypress_blocking() -> Result<Option<BridgeResponse>> {
+fn read_decision_keypress_blocking(keep_reading: &AtomicBool) -> Result<Option<BridgeResponse>> {
     let _raw = RawModeGuard::enter()?;
-    loop {
-        match crossterm::event::read().context("reading permission keypress")? {
-            Event::Key(key) => {
-                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    continue;
-                }
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Char('c'))
-                {
-                    return Ok(None);
-                }
-                match key.code {
-                    KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Allow,
-                            DecisionScope::Once,
-                        )));
-                    }
-                    KeyCode::Char('s' | 'S') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Allow,
-                            DecisionScope::Session,
-                        )));
-                    }
-                    KeyCode::Char('d' | 'D') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Deny,
-                            DecisionScope::Once,
-                        )));
-                    }
-                    KeyCode::Char('n' | 'N') => {
-                        return Ok(Some(decision(
-                            PermissionDecision::Deny,
-                            DecisionScope::Session,
-                        )));
-                    }
-                    KeyCode::Esc => return Ok(None),
-                    _ => continue,
-                }
-            }
-            _ => continue,
+    read_decision_keypress_loop(|| keep_reading.load(Ordering::Acquire))
+}
+
+fn read_decision_keypress_loop(
+    mut keep_reading: impl FnMut() -> bool,
+) -> Result<Option<BridgeResponse>> {
+    while keep_reading() {
+        if !crossterm::event::poll(KEYPRESS_POLL_INTERVAL).context("polling permission keypress")? {
+            continue;
         }
+        if let Event::Key(key) = crossterm::event::read().context("reading permission keypress")? {
+            match decision_for_key(key) {
+                PromptKeyDecision::Respond(response) => return Ok(Some(response)),
+                PromptKeyDecision::Cancel => return Ok(None),
+                PromptKeyDecision::Continue => {}
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Clone)]
+enum PromptKeyDecision {
+    Respond(BridgeResponse),
+    Cancel,
+    Continue,
+}
+
+fn decision_for_key(key: KeyEvent) -> PromptKeyDecision {
+    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+        return PromptKeyDecision::Continue;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
+        return PromptKeyDecision::Cancel;
+    }
+    match key.code {
+        KeyCode::Char('a' | 'A' | 'y' | 'Y') => {
+            PromptKeyDecision::Respond(decision(PermissionDecision::Allow, DecisionScope::Once))
+        }
+        KeyCode::Char('s' | 'S') => {
+            PromptKeyDecision::Respond(decision(PermissionDecision::Allow, DecisionScope::Session))
+        }
+        KeyCode::Char('d' | 'D') => {
+            PromptKeyDecision::Respond(decision(PermissionDecision::Deny, DecisionScope::Once))
+        }
+        KeyCode::Char('n' | 'N') => {
+            PromptKeyDecision::Respond(decision(PermissionDecision::Deny, DecisionScope::Session))
+        }
+        KeyCode::Esc => PromptKeyDecision::Cancel,
+        _ => PromptKeyDecision::Continue,
     }
 }
 
@@ -357,5 +361,39 @@ mod tests {
         let input = json!({"weird_key": "weird_value"});
         let summary = summarize_input(&input);
         assert!(summary.contains("weird_key"));
+    }
+
+    #[test]
+    fn prompt_key_maps_allow_session() {
+        let key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE);
+        match decision_for_key(key) {
+            PromptKeyDecision::Respond(response) => {
+                assert_eq!(response.decision, PermissionDecision::Allow);
+                assert_eq!(response.scope, DecisionScope::Session);
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_key_maps_ctrl_c_to_cancel() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(matches!(decision_for_key(key), PromptKeyDecision::Cancel));
+    }
+
+    #[test]
+    fn prompt_key_ignores_unhandled_key() {
+        let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        assert!(matches!(decision_for_key(key), PromptKeyDecision::Continue));
+    }
+
+    #[test]
+    fn prompt_read_cancel_drop_stops_reader_token() {
+        let cancel = PromptReadCancel::new();
+        let token = cancel.token();
+        assert!(token.load(Ordering::Acquire));
+
+        drop(cancel);
+        assert!(!token.load(Ordering::Acquire));
     }
 }

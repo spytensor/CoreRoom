@@ -551,6 +551,12 @@ pub(super) fn print_help(cfg: &Config) {
     println!("  /help               this help");
     println!("  /exit, /quit        leave the REPL");
     println!();
+    println!("keys:");
+    println!("  Tab                 cycle @role completions");
+    println!("  Right, Ctrl-F       accept visible completion");
+    println!("  Enter               accept visible completion and send");
+    println!("  Esc                 dismiss visible completion");
+    println!();
     println!(
         "{}",
         "tool traces are folded live; run `cr show` for the full event log".with(output::DIM)

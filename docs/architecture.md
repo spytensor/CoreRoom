@@ -128,10 +128,11 @@ Each is a one-liner with rationale. Detailed sections follow.
    writing the next user message. Verified in spike L2.
 5. **Permission modes are explicit.** `permission_mode = "ask" | "auto" |
    "bypass"` is resolved per role. Claude Code uses a settings-injected
-   PreToolUse hook. Codex and Gemini are bypass-only until CodeRoom can
-   supervise their approvals. For compatibility with older generated
-   configs, Codex/Gemini roles that omit a per-role permission mode resolve
-   to bypass; explicit ask/auto still fail fast.
+   PreToolUse hook. Codex uses MCP approval requests when a live REPL bridge
+   is available. Gemini is bypass-only until CodeRoom can supervise its
+   approvals. For compatibility with older generated configs, Codex/Gemini
+   roles that omit a per-role permission mode resolve to bypass; explicit
+   ask/auto on Gemini still fails fast.
 6. **Trust-the-model routing.** Each role's system prompt includes a team
    roster. When a role writes `@x` in its reply, the wrapper routes a
    focused brief to `x`'s session. No syntactic protocol.
@@ -209,11 +210,12 @@ PermissionDenied, RoleStopped).
 - Spawn: `codex mcp-server` over stdio.
 - Wrapper acts as MCP client. Initialize → tools/list → tools/call.
 - Two tools available: `codex` (start session) and `codex-reply` (continue).
-- Permission: CodeRoom currently starts Codex only when
-  `permission_mode="bypass"` and sends `approval-policy="never"` in the
-  `tools/call` payload. Missing per-role permission modes on Codex roles
-  resolve to bypass for older generated configs; explicit `ask` and `auto`
-  fail fast until CodeRoom can answer Codex approval requests over MCP.
+- Permission: `permission_mode="ask"` maps to Codex `approval-policy="untrusted"`,
+  `auto` maps to `on-request`, and `bypass` maps to `never`. In live REPL
+  sessions, server-initiated `execCommandApproval` / `applyPatchApproval`
+  requests flow through CodeRoom's permission bridge and session policy.
+  Missing per-role permission modes on Codex roles still resolve to bypass
+  for older generated configs.
 
 ### Gemini adapter
 

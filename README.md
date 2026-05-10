@@ -202,16 +202,17 @@ engine = "gemini"
 permission_mode = "bypass"
 ```
 
-- `ask` requests approval before tools that are not explicitly allowed. In
-  Claude Code's non-interactive stream mode this surfaces as a safe denial;
-  use `/allow <tool>` and retry when you trust the call.
+- `ask` requests approval before tools that are not explicitly allowed. In a
+  live REPL, Claude Code hooks and Codex MCP approvals surface as CodeRoom
+  prompts; use `/allow <tool>` or choose "allow session" when you trust the
+  call.
 - `auto` allows low-risk read-only tools and asks for risky or unknown tools.
-- `bypass` is explicit yolo mode. It is not required for Claude Code, but it
-  is currently required for Codex and Gemini because CodeRoom cannot yet
-  supervise their approval requests.
+- `bypass` is explicit yolo mode. It is not required for Claude Code. Codex
+  can run `ask` / `auto` only from a live REPL with a permission bridge;
+  headless Codex runs still need `bypass`.
 - For compatibility with projects created before per-role permission modes,
   Codex and Gemini roles that omit `permission_mode` run as `bypass`.
-  Explicit `ask` or `auto` on those engines still fails fast.
+  Explicit `ask` or `auto` on Gemini still fails fast.
 
 ## Contributing
 
