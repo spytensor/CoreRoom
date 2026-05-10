@@ -7,22 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-05-10
+
 ### Added
 
 - `cr show` now supports `--role`, `--tail`, and `--since` filters for
   focused event-log replay.
 - Gemini `stream-json` `tool_use` / `tool_result` events now map into
   CREP `ToolCallProposed` / `ToolCallExecuted` events.
-
-### Fixed
-
-- Ctrl-C now stops running roles during active turns, and the raw-mode init
-  wizard restores the terminal before exiting on SIGINT/SIGTERM.
-
-## [0.1.12] - 2026-05-10
-
-### Added
-
 - `@all <text>` broadcasts a prompt to every running role, and `/host <role>`
   switches the host role for the current REPL session.
 - `cr role host <name>` persists a new project host role.
@@ -50,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Ctrl-C now stops running roles during active turns, and the raw-mode init
+  wizard restores the terminal before exiting on SIGINT/SIGTERM.
 - `/stop`, `/refresh`, Ctrl-C, and per-turn timeouts now signal role adapters
   explicitly and terminate child processes instead of leaking subprocesses.
 - Claude Code and Codex adapters drain stderr so noisy child processes cannot
