@@ -17,6 +17,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
 use crate::config::CODEROOM_DIR;
 
 /// Directory under a project's `.coderoom/` holding per-role session
@@ -32,6 +35,17 @@ use crate::config::CODEROOM_DIR;
 /// directory for unrelated reasons.
 pub(super) const SESSIONS_DIR: &str = "sessions";
 pub(super) const SESSION_IDS_SUBDIR: &str = "ids";
+pub(super) const ROOM_SESSIONS_SUBDIR: &str = "rooms";
+const CURRENT_ROOM_FILE: &str = "current-room.id";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(super) struct RoomSession {
+    pub id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub role_sessions: BTreeMap<String, String>,
+}
 
 /// Path of the session-id file for `role` under `project_root`.
 pub(super) fn session_id_path(project_root: &Path, role: &str) -> PathBuf {
@@ -40,6 +54,32 @@ pub(super) fn session_id_path(project_root: &Path, role: &str) -> PathBuf {
         .join(SESSIONS_DIR)
         .join(SESSION_IDS_SUBDIR)
         .join(format!("{role}.id"))
+}
+
+fn room_sessions_dir(project_root: &Path) -> PathBuf {
+    project_root
+        .join(CODEROOM_DIR)
+        .join(SESSIONS_DIR)
+        .join(ROOM_SESSIONS_SUBDIR)
+}
+
+fn room_session_path(project_root: &Path, id: &str) -> PathBuf {
+    room_sessions_dir(project_root).join(format!("{id}.json"))
+}
+
+fn current_room_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(CODEROOM_DIR)
+        .join(SESSIONS_DIR)
+        .join(CURRENT_ROOM_FILE)
+}
+
+fn now_stamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn new_room_id() -> String {
+    format!("room-{}", chrono::Utc::now().timestamp_millis())
 }
 
 /// Read the persisted session id for `role`. Returns `Ok(None)` when
@@ -75,6 +115,190 @@ pub(super) fn write_session_id(
         fs::create_dir_all(parent)?;
     }
     fs::write(&path, session_id.trim().as_bytes())
+}
+
+fn read_all_session_ids(project_root: &Path) -> io::Result<BTreeMap<String, String>> {
+    let dir = project_root
+        .join(CODEROOM_DIR)
+        .join(SESSIONS_DIR)
+        .join(SESSION_IDS_SUBDIR);
+    let mut ids = BTreeMap::new();
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(ids),
+        Err(err) => return Err(err),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("id") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let text = fs::read_to_string(&path)?;
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            ids.insert(stem.to_owned(), trimmed.to_owned());
+        }
+    }
+    Ok(ids)
+}
+
+fn write_room_session(project_root: &Path, session: &RoomSession) -> io::Result<()> {
+    let path = room_session_path(project_root, &session.id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(session).map_err(io::Error::other)?;
+    fs::write(path, text)
+}
+
+pub(super) fn read_room_session(project_root: &Path, id: &str) -> io::Result<RoomSession> {
+    let path = room_session_path(project_root, id);
+    let text = fs::read_to_string(path)?;
+    serde_json::from_str(&text).map_err(io::Error::other)
+}
+
+fn write_current_room_id(project_root: &Path, id: &str) -> io::Result<()> {
+    let path = current_room_path(project_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, id.trim().as_bytes())
+}
+
+pub(super) fn read_current_room_id(project_root: &Path) -> io::Result<Option<String>> {
+    match fs::read_to_string(current_room_path(project_root)) {
+        Ok(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_owned()))
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+fn create_room_session_with_roles(
+    project_root: &Path,
+    role_sessions: BTreeMap<String, String>,
+) -> io::Result<RoomSession> {
+    let mut id = new_room_id();
+    let mut suffix = 2usize;
+    while room_session_path(project_root, &id).exists() {
+        id = format!("{}-{suffix}", new_room_id());
+        suffix += 1;
+    }
+    let now = now_stamp();
+    let session = RoomSession {
+        id: id.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        role_sessions,
+    };
+    write_room_session(project_root, &session)?;
+    write_current_room_id(project_root, &id)?;
+    Ok(session)
+}
+
+pub(super) fn ensure_current_room_session(project_root: &Path) -> io::Result<RoomSession> {
+    if let Some(current) = read_current_room_id(project_root)? {
+        if let Ok(session) = read_room_session(project_root, &current) {
+            return Ok(session);
+        }
+    }
+    create_room_session_with_roles(project_root, read_all_session_ids(project_root)?)
+}
+
+pub(super) fn start_new_room_session(project_root: &Path) -> io::Result<RoomSession> {
+    create_room_session_with_roles(project_root, BTreeMap::new())
+}
+
+pub(super) fn record_current_room_role_session(
+    project_root: &Path,
+    role: &str,
+    session_id: &str,
+) -> io::Result<()> {
+    let mut session = ensure_current_room_session(project_root)?;
+    session
+        .role_sessions
+        .insert(role.to_owned(), session_id.trim().to_owned());
+    session.updated_at = now_stamp();
+    write_room_session(project_root, &session)
+}
+
+pub(super) fn remove_current_room_role(project_root: &Path, role: &str) -> io::Result<()> {
+    let mut session = ensure_current_room_session(project_root)?;
+    session.role_sessions.remove(role);
+    session.updated_at = now_stamp();
+    write_room_session(project_root, &session)
+}
+
+pub(super) fn list_room_sessions(project_root: &Path) -> io::Result<Vec<RoomSession>> {
+    let dir = room_sessions_dir(project_root);
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+    let mut sessions = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)?;
+        let session = serde_json::from_str::<RoomSession>(&text).map_err(io::Error::other)?;
+        sessions.push(session);
+    }
+    sessions.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    Ok(sessions)
+}
+
+pub(super) fn resolve_room_session(
+    project_root: &Path,
+    selector: &str,
+) -> io::Result<Option<RoomSession>> {
+    let sessions = list_room_sessions(project_root)?;
+    let trimmed = selector.trim();
+    if trimmed.is_empty() || trimmed == "latest" {
+        return Ok(sessions.into_iter().next());
+    }
+    if let Ok(index) = trimmed.parse::<usize>() {
+        return Ok(sessions.get(index.saturating_sub(1)).cloned());
+    }
+    if let Some(exact) = sessions.iter().find(|session| session.id == trimmed) {
+        return Ok(Some(exact.clone()));
+    }
+    let mut matches = sessions
+        .into_iter()
+        .filter(|session| session.id.starts_with(trimmed))
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        Ok(matches.pop())
+    } else {
+        Ok(None)
+    }
+}
+
+pub(super) fn activate_room_session(project_root: &Path, session: &RoomSession) -> io::Result<()> {
+    clear_all(project_root)?;
+    for (role, session_id) in &session.role_sessions {
+        if !session_id.trim().is_empty() {
+            write_session_id(project_root, role, session_id)?;
+        }
+    }
+    write_current_room_id(project_root, &session.id)
 }
 
 /// Remove the persisted session id for `role`. No-op when the file
@@ -155,6 +379,104 @@ mod tests {
         assert_eq!(
             read_session_id(project.path(), "host").unwrap().as_deref(),
             Some("new")
+        );
+    }
+
+    #[test]
+    fn ensure_current_room_adopts_existing_role_ids() {
+        let project = fixture();
+        write_session_id(project.path(), "host", "h1").unwrap();
+        write_session_id(project.path(), "qa", "q1").unwrap();
+
+        let room = ensure_current_room_session(project.path()).unwrap();
+        assert_eq!(
+            room.role_sessions.get("host").map(String::as_str),
+            Some("h1")
+        );
+        assert_eq!(room.role_sessions.get("qa").map(String::as_str), Some("q1"));
+        assert_eq!(
+            read_current_room_id(project.path()).unwrap().as_deref(),
+            Some(room.id.as_str())
+        );
+    }
+
+    #[test]
+    fn record_current_room_role_session_updates_room_snapshot() {
+        let project = fixture();
+        let room = start_new_room_session(project.path()).unwrap();
+
+        record_current_room_role_session(project.path(), "qa", "thread-1").unwrap();
+
+        let updated = read_room_session(project.path(), &room.id).unwrap();
+        assert_eq!(
+            updated.role_sessions.get("qa").map(String::as_str),
+            Some("thread-1")
+        );
+    }
+
+    #[test]
+    fn activate_room_session_restores_role_id_files() {
+        let project = fixture();
+        let mut roles = BTreeMap::new();
+        roles.insert("host".to_owned(), "h1".to_owned());
+        roles.insert("qa".to_owned(), "q1".to_owned());
+        let room = create_room_session_with_roles(project.path(), roles).unwrap();
+        write_session_id(project.path(), "old", "stale").unwrap();
+
+        activate_room_session(project.path(), &room).unwrap();
+
+        assert_eq!(
+            read_session_id(project.path(), "host").unwrap().as_deref(),
+            Some("h1")
+        );
+        assert_eq!(
+            read_session_id(project.path(), "qa").unwrap().as_deref(),
+            Some("q1")
+        );
+        assert_eq!(read_session_id(project.path(), "old").unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_room_session_accepts_latest_index_exact_and_prefix() {
+        let project = fixture();
+        let first = RoomSession {
+            id: "room-alpha".to_owned(),
+            created_at: "2026-01-01T00:00:00.000Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_owned(),
+            role_sessions: BTreeMap::new(),
+        };
+        let second = RoomSession {
+            id: "room-bravo".to_owned(),
+            created_at: "2026-01-02T00:00:00.000Z".to_owned(),
+            updated_at: "9999-01-01T00:00:00.000Z".to_owned(),
+            role_sessions: BTreeMap::new(),
+        };
+        write_room_session(project.path(), &first).unwrap();
+        write_room_session(project.path(), &second).unwrap();
+
+        assert_eq!(
+            resolve_room_session(project.path(), "latest")
+                .unwrap()
+                .map(|s| s.id),
+            Some("room-bravo".to_owned())
+        );
+        assert_eq!(
+            resolve_room_session(project.path(), "2")
+                .unwrap()
+                .map(|s| s.id),
+            Some("room-alpha".to_owned())
+        );
+        assert_eq!(
+            resolve_room_session(project.path(), &second.id)
+                .unwrap()
+                .map(|s| s.id),
+            Some("room-bravo".to_owned())
+        );
+        assert_eq!(
+            resolve_room_session(project.path(), "room-b")
+                .unwrap()
+                .map(|s| s.id),
+            Some("room-bravo".to_owned())
         );
     }
 

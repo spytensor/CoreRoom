@@ -366,6 +366,11 @@ with explicit per-role session persistence:
   session id alongside its reload — the refresh semantic is
   "reload priors + start over", so its conversation history
   should reset to match.
+- CodeRoom also keeps room-level snapshots under
+  `.coderoom/sessions/rooms/`. Each snapshot is a set of per-role
+  engine session ids. `/resume` lists them, and
+  `/resume <number|id|prefix|latest>` switches the running room to
+  that saved set.
 
 Engines that do not support resume (or whose adapters haven't
 plumbed the flag yet) silently degrade to a fresh session at the

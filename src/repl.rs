@@ -189,7 +189,13 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
         } else {
             output::hint("starting fresh — prior role sessions cleared");
         }
+        if let Err(error) = sessions::start_new_room_session(project_root) {
+            output::warn(format!("could not create fresh room session: {error}"));
+        }
     } else {
+        if let Err(error) = sessions::ensure_current_room_session(project_root) {
+            output::warn(format!("could not prepare room session history: {error}"));
+        }
         // Surface which roles will actually resume so the user
         // isn't surprised. Roles with a persisted id whose engine
         // wires resume show up as "resuming"; engines without wired
@@ -401,6 +407,24 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     bus: &bus,
                 };
                 refresh_role(&spawn_context, &mut roles, &role).await;
+            }
+            Command::Resume(selector) => {
+                let spawn_context = SpawnContext {
+                    cfg: &cfg,
+                    adapters: &adapters,
+                    coderoom_dir: &coderoom_dir,
+                    permission_policy_path: &permission_policy_path,
+                    permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
+                    permission_mode_override: options.permission_mode_override,
+                    bus: &bus,
+                };
+                handle_resume(
+                    &spawn_context,
+                    &mut roles,
+                    selector.as_deref(),
+                    project_root,
+                )
+                .await;
             }
             Command::Transcript(role) => {
                 show_transcript(&coderoom_dir, &role, &cfg.host_role).await;
@@ -1316,6 +1340,9 @@ async fn refresh_role(
     if let Err(error) = sessions::clear_session_id(&project_root, role) {
         debug!(role, %error, "could not clear session id during refresh");
     }
+    if let Err(error) = sessions::remove_current_room_role(&project_root, role) {
+        debug!(role, %error, "could not clear role from current room session during refresh");
+    }
     match spawn_role(context, role).await {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
@@ -1325,6 +1352,90 @@ async fn refresh_role(
             output::bad(format!("refreshing @{role} failed: {error:#}"));
         }
     }
+}
+
+async fn handle_resume(
+    context: &SpawnContext<'_>,
+    roles: &mut HashMap<String, RunningRole>,
+    selector: Option<&str>,
+    project_root: &Path,
+) {
+    let Some(selector) = selector.map(str::trim).filter(|s| !s.is_empty()) else {
+        print_room_sessions(project_root);
+        return;
+    };
+    let session = match sessions::resolve_room_session(project_root, selector) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            output::bad(format!("no saved room session matches `{selector}`"));
+            print_room_sessions(project_root);
+            return;
+        }
+        Err(error) => {
+            output::bad(format!("reading room sessions failed: {error}"));
+            return;
+        }
+    };
+
+    output::system(format!("resuming CodeRoom session {}", session.id));
+    shutdown_all_roles(roles, StopReason::Refreshed);
+    if let Err(error) = sessions::activate_room_session(project_root, &session) {
+        output::bad(format!("activating session failed: {error}"));
+        return;
+    }
+
+    for role in context.cfg.role_names() {
+        match spawn_role(context, role).await {
+            Ok(running) => {
+                roles.insert(role.to_owned(), running);
+            }
+            Err(error) => {
+                output::bad(format!("spawning @{role} from session failed: {error:#}"));
+            }
+        }
+    }
+    output::ok(format!(
+        "resumed {} ({} role session{})",
+        session.id,
+        session.role_sessions.len(),
+        if session.role_sessions.len() == 1 {
+            ""
+        } else {
+            "s"
+        }
+    ));
+}
+
+fn print_room_sessions(project_root: &Path) {
+    let current = sessions::read_current_room_id(project_root)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let sessions = match sessions::list_room_sessions(project_root) {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            output::bad(format!("reading room sessions failed: {error}"));
+            return;
+        }
+    };
+    if sessions.is_empty() {
+        output::hint("no saved room sessions yet");
+        return;
+    }
+    println!("saved CodeRoom sessions:");
+    for (index, session) in sessions.iter().enumerate() {
+        let role_count = session.role_sessions.len();
+        let marker = if session.id == current { "*" } else { " " };
+        println!(
+            "  {marker} {:>2}. {}  updated {}  {} role session{}",
+            index + 1,
+            session.id,
+            session.updated_at,
+            role_count,
+            if role_count == 1 { "" } else { "s" }
+        );
+    }
+    output::hint("use `/resume <number|id|prefix|latest>` to switch");
 }
 
 /// Compose priors, stage them in a tempfile, spawn the role's
@@ -1506,6 +1617,15 @@ fn spawn_event_forwarder(
                         role,
                         %error,
                         "failed to persist session id for resume — next start will fresh-spawn this role"
+                    );
+                }
+                if let Err(error) =
+                    sessions::record_current_room_role_session(&project_root, &role, session_id)
+                {
+                    warn!(
+                        role,
+                        %error,
+                        "failed to update room session history"
                     );
                 }
             }

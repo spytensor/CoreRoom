@@ -183,6 +183,8 @@ Useful commands:
 - `cr role host <name>` persists a new host role; `/host <role>` swaps host
   for the current REPL session only.
 - `@all <text>` broadcasts one prompt to every running role.
+- `/resume` lists saved CodeRoom room sessions; `/resume <number|id|prefix|latest>`
+  switches every role to that saved set of engine sessions.
 - `/patch <role> <text>`, `/refresh <role>`, `/transcript <role>`, and
   `/journal <role>` are available inside the REPL.
 - `/halt` (no arg) interrupts every in-flight turn; `/halt @role`

@@ -542,6 +542,7 @@ pub(super) fn print_help(cfg: &Config) {
     println!("  /host <role>        make role the host for this session");
     println!("  /patch <role> <…>   save a correction; loads on next /refresh");
     println!("  /refresh <role>     re-instantiate role with latest priors+patches");
+    println!("  /resume [id]        list or switch saved CodeRoom sessions");
     println!("  /transcript <role>  show that role's recent spoken turns");
     println!("  /journal <role>     ask role to write today's journal entry");
     println!("  /welcome            re-show the first-run welcome card");

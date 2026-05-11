@@ -249,6 +249,20 @@ fn parse_refresh_accepts_at_prefixed_role() {
 }
 
 #[test]
+fn parse_resume_without_selector_lists_sessions() {
+    assert_eq!(parse_line("/resume"), Command::Resume(None));
+}
+
+#[test]
+fn parse_resume_accepts_selector() {
+    assert_eq!(parse_line("/resume 2"), Command::Resume(Some("2".into())));
+    assert_eq!(
+        parse_line("/resume room-123"),
+        Command::Resume(Some("room-123".into()))
+    );
+}
+
+#[test]
 fn parse_refresh_without_role_shows_help() {
     assert_eq!(parse_line("/refresh"), Command::Help);
 }
