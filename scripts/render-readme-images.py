@@ -46,20 +46,32 @@ CI = (38, 190, 142)
 RAIL_BG = (0, 10, 10)
 
 
+# Font candidate lists, checked in order. Linux paths first (CI + most
+# dev boxes), macOS system paths as fallback so contributors can
+# regenerate locally without installing a font package. If none match
+# Pillow drops to a default bitmap font that ignores the size argument
+# — the renderer prints a warning at startup when that happens so a
+# broken regeneration is loud rather than silent.
 FONT_REGULAR = [
     "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf",
     "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/SFNSMono.ttf",
 ]
 FONT_BOLD = [
     "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Bold.ttf",
     "/usr/share/fonts/truetype/ubuntu/UbuntuMono-B.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/SFNSMono.ttf",
 ]
 FONT_ITALIC = [
     "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Italic.ttf",
     "/usr/share/fonts/truetype/ubuntu/UbuntuMono-RI.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf",
+    "/System/Library/Fonts/SFNSMonoItalic.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
 ]
 
 
@@ -68,6 +80,14 @@ def load_font(candidates: Iterable[str], size: int) -> ImageFont.ImageFont:
         path = Path(candidate)
         if path.exists():
             return ImageFont.truetype(str(path), size=size)
+    # Default bitmap font ignores `size`; warn loudly so a contributor
+    # who rebuilt these images on an unsupported box knows the output
+    # will be broken rather than committing tiny illegible PNGs.
+    print(
+        "WARN: no matching truetype font found — output will use Pillow's "
+        "default bitmap font and ignore size hints",
+        file=sys.stderr,
+    )
     return ImageFont.load_default()
 
 
@@ -244,6 +264,55 @@ def chat_line(
     draw_text(draw, (text_x, y), fit_text(draw, text, 1130 - text_x, FONT), WHITE, FONT)
 
 
+def reply_quote(
+    draw: ImageDraw.ImageDraw,
+    y: int,
+    child_role: str,
+    parent_role: str,
+    snippet: str,
+    child_color: tuple[int, int, int],
+    parent_color: tuple[int, int, int],
+) -> None:
+    """Two-line Slack-style reply pointer printed before an auto-routed
+    turn — mirrors `format_reply_quote` in src/repl/render.rs. The gutter
+    belongs to the child (it sits directly above the child's output);
+    the parent role label keeps its own role color so the eye links the
+    quote back to that role's earlier reply."""
+    draw.line((80, y - 3, 80, y + 29), fill=child_color, width=4)
+    draw_text(draw, (111, y), child_role, child_color, BOLD)
+    arrow_x = 111 + text_width(draw, child_role, BOLD) + 14
+    draw_text(draw, (arrow_x, y), "→", DIM, FONT)
+    reply_x = arrow_x + text_width(draw, "→", FONT) + 14
+    draw_text(draw, (reply_x, y), "replying to", MUTED, FONT)
+    parent_x = reply_x + text_width(draw, "replying to", FONT) + 12
+    draw_text(draw, (parent_x, y), parent_role, parent_color, FONT)
+
+    quote_y = y + 32
+    draw.line((80, quote_y - 3, 80, quote_y + 29), fill=child_color, width=4)
+    draw_text(draw, (111, quote_y), "│", DIM, FONT)
+    snippet_text = f'"{snippet}"'
+    draw_text(draw, (135, quote_y), fit_text(draw, snippet_text, 1110, FONT), DIM, FONT)
+
+
+def handoff_banner(
+    draw: ImageDraw.ImageDraw,
+    y: int,
+    role: str,
+    color: tuple[int, int, int],
+) -> None:
+    """Full-width handoff divider — mirrors `handoff_banner` in
+    src/repl/render.rs. Painted when a TurnDispatched fires with
+    queue_position == 0 (the new speaker actually starts)."""
+    draw.line((80, y - 3, 80, y + 29), fill=color, width=4)
+    draw_text(draw, (111, y), role, color, BOLD)
+    dash_start = 111 + text_width(draw, role, BOLD) + 14
+    dash_end = 1144
+    mid_y = y + 15
+    draw.line((dash_start, mid_y, dash_end - text_width(draw, " starting", FONT) - 12, mid_y), fill=DIM, width=1)
+    status_x = dash_end - text_width(draw, "starting", FONT)
+    draw_text(draw, (status_x, y), "starting", MUTED, FONT)
+
+
 def right_rail(draw: ImageDraw.ImageDraw) -> None:
     x = 1244
     draw.rectangle((1204, 128, 1726, 764), fill=RAIL_BG)
@@ -271,15 +340,27 @@ def render_work_cards() -> None:
     status_line(draw, 134, "@security")
     work_card(draw, 208, "@security", "Audit permission boundaries", "4m49s", 33, (10, 118, 108))
     chat_line(draw, 291, "@security", "Findings: bypass defaults, role paths, session scope.", SECURITY)
-    draw_text(draw, (112, 344), "→ auto-routing to @backend", MUTED, SMALL)
 
-    status_line(draw, 392, "@backend")
-    work_card(draw, 466, "@backend", "Implement observable role output", "52s", 7, (30, 110, 178))
-    chat_line(draw, 550, "@backend", "Done: markdown replies, live deltas, WorkCard previews.", BLUE)
+    # Cross-role auto-route: reply pointer (#99) then handoff banner (#98)
+    # before @backend's work surfaces.
+    reply_quote(
+        draw,
+        340,
+        "@backend",
+        "@security",
+        "Findings: bypass defaults, role paths, session scope.",
+        BLUE,
+        SECURITY,
+    )
+    handoff_banner(draw, 410, "@backend", BLUE)
 
-    prompt(draw, 82, 633, "@ci run focused regression tests")
-    status_line(draw, 683, "@ci")
-    work_card(draw, 752, "@ci", "Run focused regression tests", "21s", 5, (30, 142, 107))
+    status_line(draw, 454, "@backend")
+    work_card(draw, 522, "@backend", "Implement observable role output", "52s", 7, (30, 110, 178))
+    chat_line(draw, 606, "@backend", "Done: markdown replies, live deltas, WorkCard previews.", BLUE)
+
+    prompt(draw, 82, 678, "@ci run focused regression tests")
+    status_line(draw, 728, "@ci")
+    work_card(draw, 796, "@ci", "Run focused regression tests", "21s", 5, (30, 142, 107))
     right_rail(draw)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
