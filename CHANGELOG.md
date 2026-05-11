@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-05-11
+
+### Added
+
+- **Unbounded cross-role auto-routing (amendment A-005).** When a
+  role's reply `@`-mentions other running roles, those mentions push
+  follow-up turns onto a FIFO worklist instead of stopping after the
+  first hop. Chains like `user → @host → @security → @host
+  (synthesis)` now run to completion before the prompt returns. The
+  v0.1 "≥3 hops triggers escalation" failure-mode entry is dropped.
+  Three semantic guards remain (self-mention skip, unknown-role
+  skip, grounding-gate skip on all-denied turns); the user halts
+  with Ctrl-C × 2 or `/halt`. Per-role budgets are still the spend
+  cap. (#111, #A)
+- **CommonMark thematic break in role replies.** `---`, `***`,
+  `___`, and the space-separated `- - -` form now render as a
+  colored divider across the available column budget, instead of
+  literal dashes. Mixed-marker lines and prose-with-dashes pass
+  through unchanged. (#114, #F)
+
+### Fixed
+
+- **Streaming output reprinted the role badge on every chunk.**
+  `RoleOutputDelta` events used to render as independent markdown
+  documents, so a long reply showed `▎ @security` at the head of
+  every ~180-char streaming batch. A new `StreamMarkdownState`
+  threads `first_line` and `in_code` flags across chunks within a
+  turn; the badge prints once, and code blocks survive chunk
+  boundaries. (#112, #B + #C)
+- **WorkCard title leaked the `From @host:` brief prefix.**
+  Auto-routed turns received a brief shaped like
+  `From @<role>: <body>`; the fallback title took the first
+  non-blank line verbatim, so dispatched roles got "From @host: ..."
+  as their work-card title. Strip the prefix in `fallback_title`.
+  (#113, #E)
+- **Role-name echo doubled the badge.** When a model started its
+  reply with `@<self_role>` (LLMs often do, because the role name
+  is in the system prompt), the renderer's `first_prefix` produced
+  `▎ @security @security <body>`. Strip the leading self-mention in
+  `clean_role_text` before render and before parsing cross-role
+  mentions. Handles ASCII (`: , . ! ?`) and CJK (`： ， 。 ！ ？`)
+  terminators; preserves longer tokens like `@securityteam` and
+  foreign mentions like `@host`. (#113, #D)
+- **Default host priors didn't cover multi-role fan-out or the
+  shared-vs-role priors ambiguity.** When users asked "其他人啥
+  看法" (what does everyone else think), host answered alone with no
+  follow-ups because nothing in its prompt told it to write
+  `@a @b @c <brief>`. When users said "默认 BACKGROUND" host guessed
+  shared vs role priors and often edited the wrong file. Updated
+  `src/init_defaults/host.md` with explicit guidance for both
+  cases (148 words, still under the 160-word cap). (#115, #G)
+
 ## [0.2.3] - 2026-05-11
 
 ### Fixed

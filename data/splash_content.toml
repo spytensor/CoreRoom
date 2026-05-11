@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.2.4"
+items = [
+  "auto-routing chains run to completion — host hears specialists back",
+  "streaming output no longer reprints the role badge on every chunk",
+  "permission prompts and work-card titles drop routing metadata",
+]
+
+[[whats_new]]
 version = "0.2.3"
 items = [
   "Enter on a fresh @-mention now waits for the task body",
