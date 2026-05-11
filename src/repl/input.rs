@@ -501,7 +501,7 @@ impl LineEditor {
         // dropdown can never push the prompt off-screen on tiny
         // terminals. A budget below 2 disables the menu entirely —
         // the inline ghost is still shown.
-        let budget = self.menu_height_budget();
+        let budget = Self::menu_height_budget();
         if budget < 2 {
             return Vec::new();
         }
@@ -515,7 +515,7 @@ impl LineEditor {
                 .iter()
                 .map(|name| ((*name).to_owned(), String::new()))
                 .collect();
-            return self.format_menu_rows(items, max_visible);
+            return self.format_menu_rows(&items, max_visible);
         }
         if let Some(prefix) = self.slash_token() {
             let matches = Self::matching_slash_commands(&prefix);
@@ -526,7 +526,7 @@ impl LineEditor {
                 .iter()
                 .map(|cmd| (format!("/{}", cmd.name), cmd.description.to_owned()))
                 .collect();
-            return self.format_menu_rows(items, max_visible);
+            return self.format_menu_rows(&items, max_visible);
         }
         Vec::new()
     }
@@ -534,8 +534,9 @@ impl LineEditor {
     /// How many menu rows the terminal can show without scrolling the
     /// prompt off-screen. Reserves 2 rows for the input line + a bit
     /// of breathing room. Returns a generous default when terminal
-    /// size can't be queried (non-TTY, in tests).
-    fn menu_height_budget(&self) -> usize {
+    /// size can't be queried (non-TTY, in tests). Associated function —
+    /// no editor state is involved.
+    fn menu_height_budget() -> usize {
         let terminal_height = terminal::size().map_or(usize::MAX, |(_, rows)| usize::from(rows));
         terminal_height.saturating_sub(2)
     }
@@ -544,7 +545,7 @@ impl LineEditor {
     /// name and description into two columns padded to the longest
     /// visible name. `max_visible` caps the rendered row count; any
     /// overflow becomes a `+N more (continue typing)` footer.
-    fn format_menu_rows(&self, items: Vec<(String, String)>, max_visible: usize) -> Vec<String> {
+    fn format_menu_rows(&self, items: &[(String, String)], max_visible: usize) -> Vec<String> {
         let total = items.len();
         let visible = total.min(max_visible);
         let selected = self.completion_index % total;
