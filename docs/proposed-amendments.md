@@ -206,7 +206,7 @@ Accepted and implemented after v0.1.12.
 
 ## A-005: Auto-routing is unbounded; user halts when satisfied
 
-- **Status:** proposed
+- **Status:** accepted / partially implemented
 - **Filed:** 2026-05-11
 - **Touches:** Locked decision on "Per-thread hop-depth counter, ≥3 hops triggers escalation" in architecture.md (Failure-mode mitigations table) and the "enforces hop-depth limit" line in the layered architecture diagram.
 
@@ -342,16 +342,17 @@ In practice this means:
 Replace the implicit "each `cr start` is a fresh session" behaviour
 with explicit per-role session persistence:
 
-- The REPL's spawn path writes each role's session id (emitted on
-  `RoleStarted`) to `.coderoom/sessions/ids/<role>.id` (sibling of
-  the init wizard's `sessions/role-suggestions-dismissed` marker;
-  the `ids/` subdir keeps the two from colliding). Overwrites on
-  every new id (e.g. after a `/refresh @role`).
+- The REPL's event forwarder writes each role's session id (emitted
+  on `RoleStarted` or `RoleSessionUpdated`) to
+  `.coderoom/sessions/ids/<role>.id` (sibling of the init wizard's
+  `sessions/role-suggestions-dismissed` marker; the `ids/` subdir
+  keeps the two from colliding). Overwrites on every new id.
 - `cr` / `cr start` reads `.coderoom/sessions/ids/<role>.id` for
   each role before spawn; when present, it is plumbed into the
   `RoleConfig::resume_session_id` field and the adapter wires the
-  engine's native resume flag (`--resume <id>` on cc, codex /
-  gemini equivalents land in follow-up adapter work).
+  engine's native resume mechanism (`--resume <id>` on cc,
+  `codex-reply` with the prior `threadId` on codex; gemini lands in
+  follow-up adapter work).
 - When the engine rejects a stored id (session cleaned up
   locally, project moved disks) the REPL clears the stale id, logs
   one warning, and retries the spawn with a fresh conversation —
@@ -369,16 +370,17 @@ with explicit per-role session persistence:
 Engines that do not support resume (or whose adapters haven't
 plumbed the flag yet) silently degrade to a fresh session at the
 engine layer; the REPL prints one user-visible hint at `cr start`
-so the user knows their codex / gemini roles will start clean
-even though their cc roles resume.
+so the user knows their gemini roles will start clean even though
+their cc and codex roles resume.
 
 Currently wired:
 
 - **cc**: `--resume <session-id>`. Sessions live under
   `~/.claude/projects/<hash>/sessions/`.
-- **codex**: NOT wired. `codex mcp-server` (the stdio mode codeRoom
-  drives) has no `--resume` flag; `codex resume <id>` is a separate
-  interactive subcommand. Tracked at #120.
+- **codex**: wired through `codex mcp-server`'s `codex-reply` tool.
+  The first turn starts a thread with `codex`; CodeRoom persists the
+  returned `threadId` via `RoleSessionUpdated`, then later turns and
+  future `cr start` invocations continue with `codex-reply`.
 - **gemini**: NOT wired. `gemini --resume <index>` uses session
   *indexes*, not UUIDs; the synthetic `gemini-<role>` id codeRoom
   emits is not a resumable identifier. Tracked at #121.

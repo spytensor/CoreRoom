@@ -48,6 +48,20 @@ pub enum CrepEvent {
         /// Used to detect drift between intended and actual role identity.
         priors_hash: String,
     },
+    /// A running role learned or changed its engine-native resumable
+    /// session id after startup.
+    ///
+    /// Some engines do not expose a real thread id until the first turn
+    /// completes. The REPL persists this event's `session_id` exactly as
+    /// it persists `RoleStarted.session_id`, so the next `cr start`
+    /// resumes the real conversation instead of a synthetic placeholder.
+    RoleSessionUpdated {
+        /// Configured name of the role.
+        role: String,
+        /// Engine-issued session/thread id that can be passed back into
+        /// the adapter on the next spawn.
+        session_id: String,
+    },
     /// A new turn was dispatched to a role. Emitted by the REPL (or the
     /// auto-router) before the role's adapter starts producing events,
     /// so `cr show` and the renderer can mark queued state visibly.
@@ -298,6 +312,19 @@ mod tests {
         };
         let wire = serde_json::to_string(&event).unwrap();
         let parsed: CrepEvent = serde_json::from_str(&wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn role_session_updated_roundtrips() {
+        let event = CrepEvent::RoleSessionUpdated {
+            role: "qa".into(),
+            session_id: "thread-abc".into(),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["type"], "role_session_updated");
+        assert_eq!(wire["session_id"], "thread-abc");
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
         assert_eq!(event, parsed);
     }
 
@@ -607,7 +634,7 @@ mod tests {
 
     #[test]
     fn type_tag_is_snake_case_for_all_variants() {
-        let cases: [(CrepEvent, &str); 10] = [
+        let cases: [(CrepEvent, &str); 11] = [
             (
                 CrepEvent::RoleStarted {
                     role: "r".into(),
@@ -617,6 +644,13 @@ mod tests {
                     priors_hash: "p".into(),
                 },
                 "role_started",
+            ),
+            (
+                CrepEvent::RoleSessionUpdated {
+                    role: "r".into(),
+                    session_id: "s".into(),
+                },
+                "role_session_updated",
             ),
             (
                 CrepEvent::TurnDispatched {

@@ -173,6 +173,7 @@ these. UI, message bus, and patch logic only ever see CREP.
 | Event              | When fired                                       | Key fields                                       |
 | ------------------ | ------------------------------------------------ | ------------------------------------------------ |
 | `RoleStarted`      | Subprocess up, system prompt loaded              | role, engine, model, session_id, priors_hash     |
+| `RoleSessionUpdated` | Adapter learned a real resumable session id after startup | role, session_id                         |
 | `TurnDispatched`   | (v0.2) REPL fired a turn at a role               | role, turn_id, thread_id, parent_turn_id, queue_position |
 | `RoleSpoke`        | Role emitted a final assistant turn              | role, text, mentions[], cost_usd, cache_read, turn_id, thread_id |
 | `TurnInterrupted`  | (v0.2) `/halt` or watchdog cancelled the turn    | role, turn_id, thread_id, source, partial_text, partial_mentions |
@@ -224,6 +225,9 @@ PermissionDenied, RoleStopped).
 - Spawn: `codex mcp-server` over stdio.
 - Wrapper acts as MCP client. Initialize → tools/list → tools/call.
 - Two tools available: `codex` (start session) and `codex-reply` (continue).
+- Session ID: the first `codex` result returns a `threadId`; CodeRoom persists
+  it via `RoleSessionUpdated`, then uses `codex-reply` for later turns and
+  future `cr start` resumes.
 - Permission: `permission_mode="ask"` maps to Codex `approval-policy="untrusted"`,
   `auto` maps to `on-request`, and `bypass` maps to `never`. In live REPL
   sessions, server-initiated `execCommandApproval` / `applyPatchApproval`

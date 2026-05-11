@@ -1,13 +1,12 @@
 //! Per-role session-id persistence for engine resume.
 //!
-//! Each engine adapter that supports session resume (cc's
-//! `--resume <id>`; codex / gemini equivalents in follow-up work)
-//! emits the session id it created on its `RoleStarted` event.
-//! `cr start` writes that id to `.coderoom/sessions/<role>.id`; the
-//! next invocation reads it back and threads it into `RoleConfig` so
-//! the engine resumes the prior conversation instead of starting
-//! fresh. Per amendment A-006, resume is the default behaviour — the
-//! user types `cr start --fresh` to opt out.
+//! Engine adapters that support session resume emit the session id
+//! they created on `RoleStarted` or `RoleSessionUpdated`. `cr start`
+//! writes that id to `.coderoom/sessions/ids/<role>.id`; the next
+//! invocation reads it back and threads it into `RoleConfig` so the
+//! engine resumes the prior conversation instead of starting fresh.
+//! Per amendment A-006, resume is the default behaviour — the user
+//! types `cr start --fresh` to opt out.
 //!
 //! These files are intentionally outside the project's git tree.
 //! Session ids are pointers into the engine's *local* storage (e.g.

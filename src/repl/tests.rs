@@ -39,6 +39,22 @@ fn parse_at_all_broadcasts() {
 }
 
 #[test]
+fn resume_id_filter_accepts_real_codex_threads_but_rejects_legacy_placeholders() {
+    assert!(is_resumable_session_id(Engine::Codex, "qa", "thread-abc"));
+    assert!(!is_resumable_session_id(Engine::Codex, "qa", "codex-qa"));
+    assert!(!is_resumable_session_id(
+        Engine::Gemini,
+        "security",
+        "gemini-security"
+    ));
+    assert!(is_resumable_session_id(
+        Engine::Cc,
+        "host",
+        "claude-session-id"
+    ));
+}
+
+#[test]
 fn show_filter_keeps_role_events_and_applies_tail() {
     let events = vec![
         CrepEvent::RoleStarted {

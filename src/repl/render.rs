@@ -41,6 +41,12 @@ pub(super) fn render_event_line_at_width(
             let _ = (role, engine, model, host_role);
             String::new()
         }
+        CrepEvent::RoleSessionUpdated {
+            role, session_id, ..
+        } => {
+            let _ = (role, session_id, host_role);
+            String::new()
+        }
         CrepEvent::WorkTitle { role, title, .. } => {
             let _ = (role, title, host_role);
             String::new()

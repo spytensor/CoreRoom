@@ -70,8 +70,8 @@ impl Engine {
     #[must_use]
     pub const fn session_kind(self) -> SessionKind {
         match self {
-            Self::Cc => SessionKind::SessionBound,
-            Self::Codex | Self::Gemini => SessionKind::StatelessDispatch,
+            Self::Cc | Self::Codex => SessionKind::SessionBound,
+            Self::Gemini => SessionKind::StatelessDispatch,
         }
     }
 }
@@ -86,11 +86,11 @@ impl Engine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionKind {
     /// One long-lived engine session per role. Multiple turns share
-    /// session state (priors-cache, conversation memory). cc fits here.
+    /// session state (priors-cache, conversation memory). cc and codex
+    /// fit here.
     SessionBound,
     /// Each turn is a fresh engine invocation. No inter-turn state.
-    /// codex (single-turn MCP today) and gemini (per-turn `gemini -p`)
-    /// fit here.
+    /// gemini (per-turn `gemini -p`) fits here.
     StatelessDispatch,
 }
 
@@ -198,9 +198,10 @@ pub struct RoleConfig {
     /// `cr show` / smoke tests where no user is available to prompt.
     pub permission_socket_path: Option<PathBuf>,
     /// Optional prior-session id to resume. When set, the adapter wires
-    /// the engine-native resume flag (cc: `--resume <id>`; codex /
-    /// gemini equivalents added separately) so the role picks up its
-    /// previous conversation. `None` starts a fresh session.
+    /// the engine-native resume mechanism (cc: `--resume <id>`;
+    /// codex: `codex-reply` with the persisted `threadId`; gemini
+    /// deferred) so the role picks up its previous conversation.
+    /// `None` starts a fresh session.
     ///
     /// Per amendment A-006, the REPL populates this from
     /// `.coderoom/sessions/ids/<role>.id` so `cr start` behaves like

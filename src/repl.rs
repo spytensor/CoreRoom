@@ -192,28 +192,27 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     } else {
         // Surface which roles will actually resume so the user
         // isn't surprised. Roles with a persisted id whose engine
-        // wires resume (currently cc only) show up as "resuming";
-        // codex / gemini roles get a separate "resume not wired"
-        // line so the user knows context isn't actually carried
-        // forward (amendment A-006 codex/gemini follow-up).
+        // wires resume show up as "resuming"; engines without wired
+        // resume get a separate line so the user knows context isn't
+        // actually carried forward (amendment A-006).
         let mut resumed_wired: Vec<String> = Vec::new();
         let mut resumed_dropped: Vec<String> = Vec::new();
         for name in cfg.role_names() {
-            if sessions::read_session_id(project_root, name)
-                .ok()
-                .flatten()
-                .is_none()
-            {
+            let Some(session_id) = sessions::read_session_id(project_root, name).ok().flatten()
+            else {
                 continue;
-            }
+            };
             let engine = cfg
                 .roles
                 .get(name)
                 .and_then(|r| r.engine)
                 .unwrap_or(cfg.default_engine);
+            if !is_resumable_session_id(engine, name, &session_id) {
+                continue;
+            }
             match engine {
-                Engine::Cc => resumed_wired.push(name.to_owned()),
-                Engine::Codex | Engine::Gemini => resumed_dropped.push(name.to_owned()),
+                Engine::Cc | Engine::Codex => resumed_wired.push(name.to_owned()),
+                Engine::Gemini => resumed_dropped.push(name.to_owned()),
             }
         }
         resumed_wired.sort();
@@ -235,7 +234,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 .collect::<Vec<_>>()
                 .join(", ");
             output::hint(format!(
-                "resume not wired for codex/gemini yet — {names} will start fresh"
+                "resume not wired for gemini yet — {names} will start fresh"
             ));
         }
     }
@@ -1365,6 +1364,23 @@ async fn try_start_role(
     }
 }
 
+fn is_resumable_session_id(engine: Engine, role: &str, session_id: &str) -> bool {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Older CodeRoom builds wrote synthetic placeholders for engines
+    // whose real resumable id was not known at startup. Treat those as
+    // non-resumable so an upgraded build does not feed `codex-qa` or
+    // `gemini-security` into the engine's native resume path.
+    match engine {
+        Engine::Cc => true,
+        Engine::Codex => trimmed != format!("codex-{role}"),
+        Engine::Gemini => false,
+    }
+}
+
 async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRole> {
     let cfg = context.cfg;
     let coderoom_dir = context.coderoom_dir;
@@ -1388,17 +1404,20 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         role_cfg.permission_mode = mode;
     }
     // Resume from the prior session if `.coderoom/sessions/ids/<role>.id`
-    // is present (amendment A-006). Engines that don't yet wire the
-    // resume flag (codex, gemini) simply ignore the value. If the
-    // engine rejects a stale id (session was cleaned up locally,
-    // project moved disks), the first spawn errors; we recover by
-    // clearing the stored id and retrying once with a fresh
-    // conversation — so a broken resume never blocks `cr start`.
+    // is present (amendment A-006). If the engine rejects a stale id
+    // (session was cleaned up locally, project moved disks), the first
+    // spawn errors; we recover by clearing the stored id and retrying
+    // once with a fresh conversation — so a broken resume never blocks
+    // `cr start`.
     let project_root = coderoom_dir
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     if let Ok(Some(prior)) = sessions::read_session_id(&project_root, name) {
-        role_cfg.resume_session_id = Some(prior);
+        if is_resumable_session_id(role_cfg.engine, name, &prior) {
+            role_cfg.resume_session_id = Some(prior);
+        } else if let Err(error) = sessions::clear_session_id(&project_root, name) {
+            debug!(role = %name, %error, "failed to clear non-resumable legacy session id");
+        }
     }
 
     let handle = match try_start_role(context, name, &role_cfg).await {
@@ -1465,9 +1484,9 @@ fn writepriors_tempfile(role: &str, composed: &str) -> Result<NamedTempFile> {
 }
 
 /// Forward all events from a role's `rx_events` into the shared bus.
-/// Side-effect: when a `RoleStarted` event flows through, persist its
-/// `session_id` into `.coderoom/sessions/ids/<role>.id` so the next `cr
-/// start` can resume the conversation (amendment A-006).
+/// Side-effect: when an event carries a resumable session id, persist it
+/// into `.coderoom/sessions/ids/<role>.id` so the next `cr start` can
+/// resume the conversation (amendment A-006).
 fn spawn_event_forwarder(
     role: String,
     project_root: PathBuf,
@@ -1476,16 +1495,18 @@ fn spawn_event_forwarder(
 ) {
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let CrepEvent::RoleStarted { session_id, .. } = &event {
-                if !session_id.trim().is_empty() {
-                    if let Err(error) = sessions::write_session_id(&project_root, &role, session_id)
-                    {
-                        warn!(
-                            role,
-                            %error,
-                            "failed to persist session id for resume — next start will fresh-spawn this role"
-                        );
-                    }
+            let session_id = match &event {
+                CrepEvent::RoleStarted { session_id, .. }
+                | CrepEvent::RoleSessionUpdated { session_id, .. } => Some(session_id),
+                _ => None,
+            };
+            if let Some(session_id) = session_id.filter(|id| !id.trim().is_empty()) {
+                if let Err(error) = sessions::write_session_id(&project_root, &role, session_id) {
+                    warn!(
+                        role,
+                        %error,
+                        "failed to persist session id for resume — next start will fresh-spawn this role"
+                    );
                 }
             }
             if let Err(error) = bus.publish(event).await {
