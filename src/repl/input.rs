@@ -26,6 +26,25 @@ const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// 12 rows can still see the menu without scrolling the prompt off.
 const MENU_MAX_VISIBLE: usize = 6;
 
+/// Result of `LineEditor::accept_completion`: whether the completion
+/// applied, and if so whether the resulting buffer expects more user
+/// input before submission would be meaningful. Drives the Enter-key
+/// behavior so a Tab-then-Enter on a role mention does not dispatch
+/// an empty task (Slack/Discord convention).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcceptOutcome {
+    /// No active completion or no matches — buffer unchanged.
+    None,
+    /// Completion applied and the resulting buffer is a self-contained
+    /// command (e.g. `/help`); Enter should submit immediately.
+    Complete,
+    /// Completion applied but the resulting buffer expects the user
+    /// to type an argument or task body (e.g. `@host `, `/halt `).
+    /// Enter should accept the completion and wait for more input
+    /// rather than dispatching an empty task.
+    ExpectsMore,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InputLine {
     Line(String),
@@ -130,7 +149,7 @@ fn read_tty_line_blocking(
                 // the visible ghost text. If no ghost, falls through
                 // to ordinary cursor-move.
                 if editor.ghost_suffix().is_some() {
-                    editor.accept_completion();
+                    let _ = editor.accept_completion();
                     editor.redraw(&mut stdout)?;
                 } else if editor.move_right() {
                     editor.redraw(&mut stdout)?;
@@ -194,10 +213,24 @@ fn read_tty_line_blocking(
                 // Accept any visible ghost first so `@b\n` becomes
                 // `@backend\n` instead of dispatching the prefix.
                 // codex CLI external review caught this — it's the
-                // exact prefix-submission failure this PR was meant to
-                // eliminate.
+                // exact prefix-submission failure the original PR was
+                // meant to eliminate.
+                //
+                // BUT: a fresh @-mention or `/<cmd-with-args>` accept
+                // is "needs more input" — Enter should confirm the
+                // completion and wait for the user to type the actual
+                // task/argument, not dispatch an empty body to the
+                // role. Arg-less slash commands (`/help`, `/exit`,
+                // `/halt`, `/quit`, `/welcome`) keep submitting on
+                // Enter because they are complete as typed.
                 if editor.ghost_suffix().is_some() {
-                    editor.accept_completion();
+                    match editor.accept_completion() {
+                        AcceptOutcome::ExpectsMore => {
+                            editor.redraw(&mut stdout)?;
+                            continue;
+                        }
+                        AcceptOutcome::Complete | AcceptOutcome::None => {}
+                    }
                 }
                 let line = editor.input();
                 editor.finish(&mut stdout)?;
@@ -664,13 +697,15 @@ impl LineEditor {
     /// the inserted form is `@<role> ` (trailing space). For `/command`
     /// the inserted form is `/<command>` with a trailing space only
     /// when the command takes arguments (e.g. `/halt `), and no
-    /// trailing space for arg-less commands (e.g. `/help`). Returns
-    /// `true` when a completion was applied.
-    fn accept_completion(&mut self) -> bool {
+    /// trailing space for arg-less commands (e.g. `/help`). Returns an
+    /// [`AcceptOutcome`] so the Enter key handler can distinguish
+    /// "complete command, submit now" from "needs more input, just
+    /// confirm the completion".
+    fn accept_completion(&mut self) -> AcceptOutcome {
         if let Some((token_start, prefix)) = self.at_token() {
             let matches = self.matching_roles(&prefix);
             if matches.is_empty() {
-                return false;
+                return AcceptOutcome::None;
             }
             let pick = matches[self.completion_index % matches.len()].to_owned();
             self.buffer.drain(token_start..self.cursor);
@@ -684,12 +719,14 @@ impl LineEditor {
             }
             self.cursor = insert_at;
             self.invalidate_completion();
-            return true;
+            // A bare @-mention is never a complete request — the
+            // role still needs a task body.
+            return AcceptOutcome::ExpectsMore;
         }
         if let Some(prefix) = self.slash_token() {
             let matches = Self::matching_slash_commands(&prefix);
             if matches.is_empty() {
-                return false;
+                return AcceptOutcome::None;
             }
             let pick = *matches[self.completion_index % matches.len()];
             // `slash_token` guarantees the buffer starts with `/` and
@@ -707,9 +744,13 @@ impl LineEditor {
             }
             self.cursor = insert_at;
             self.invalidate_completion();
-            return true;
+            return if pick.takes_args {
+                AcceptOutcome::ExpectsMore
+            } else {
+                AcceptOutcome::Complete
+            };
         }
-        false
+        AcceptOutcome::None
     }
 
     fn redraw(&mut self, stdout: &mut std::io::Stdout) -> Result<()> {
@@ -928,7 +969,7 @@ mod tests {
         for ch in "@ba".chars() {
             editor.insert(ch);
         }
-        assert!(editor.accept_completion());
+        assert_eq!(editor.accept_completion(), AcceptOutcome::ExpectsMore);
         assert_eq!(editor.input(), "@backend ");
         assert_eq!(editor.cursor, editor.buffer.len());
     }
@@ -945,8 +986,22 @@ mod tests {
         // cursor IS at the end, but `ci_status` is no longer prefix-only.
         // Confirm no ghost and no spurious accept.
         assert!(editor.ghost_suffix().is_none());
-        assert!(!editor.accept_completion());
+        assert_eq!(editor.accept_completion(), AcceptOutcome::None);
         assert_eq!(editor.input(), "ping @ci_status");
+    }
+
+    #[test]
+    fn accept_completion_signals_expects_more_for_role_mentions() {
+        // The user's complaint: `@host<Enter>` used to dispatch a
+        // turn with an empty body because Enter accepted the ghost
+        // and submitted in one stroke. The fix: accept_completion
+        // returns ExpectsMore for role mentions so the Enter handler
+        // confirms the mention and waits for the task body.
+        let mut editor = role_editor();
+        editor.insert('@');
+        editor.insert('h');
+        assert_eq!(editor.accept_completion(), AcceptOutcome::ExpectsMore);
+        assert_eq!(editor.input(), "@host ");
     }
 
     // ---- slash command completion ------------------------------------
@@ -992,7 +1047,10 @@ mod tests {
         editor.insert('/');
         editor.insert('a');
         // First match alphabetically for `a` is /allow (takes_args = true).
-        assert!(editor.accept_completion());
+        // ExpectsMore so Enter confirms the command and waits for the
+        // tool-name argument, instead of submitting `/allow ` (which
+        // would fall through to /help in the parser).
+        assert_eq!(editor.accept_completion(), AcceptOutcome::ExpectsMore);
         assert_eq!(editor.input(), "/allow ");
         assert_eq!(editor.cursor, editor.buffer.len());
     }
@@ -1002,11 +1060,12 @@ mod tests {
         // `/halt` alone halts every running role; that is the common
         // path. Tab-accept must leave the buffer ready for an immediate
         // Enter, not pad a space the user has to backspace away.
+        // Complete so Enter submits without a second keystroke.
         let mut editor = slash_editor();
         for ch in "/ha".chars() {
             editor.insert(ch);
         }
-        assert!(editor.accept_completion());
+        assert_eq!(editor.accept_completion(), AcceptOutcome::Complete);
         assert_eq!(editor.input(), "/halt");
     }
 
@@ -1027,8 +1086,9 @@ mod tests {
         for ch in "/exi".chars() {
             editor.insert(ch);
         }
-        // /exit takes no args; accept lands the cursor right after `t`.
-        assert!(editor.accept_completion());
+        // /exit takes no args; accept lands the cursor right after `t`
+        // and signals Complete so Enter dispatches the command directly.
+        assert_eq!(editor.accept_completion(), AcceptOutcome::Complete);
         assert_eq!(editor.input(), "/exit");
         assert_eq!(editor.cursor, editor.buffer.len());
     }
@@ -1076,7 +1136,7 @@ mod tests {
             editor.insert(ch);
         }
         assert!(editor.ghost_suffix().is_none());
-        assert!(!editor.accept_completion());
+        assert_eq!(editor.accept_completion(), AcceptOutcome::None);
     }
 
     // ---- dropdown menu ------------------------------------------------
