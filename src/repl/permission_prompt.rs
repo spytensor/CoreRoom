@@ -9,14 +9,24 @@
 //! Visible UX:
 //!
 //! ```text
-//!   ▎ @backend wants to run Bash  ─────────────────────────────────
-//!   ▎ command: cargo test --no-run
-//!   ▎ reason:  Bash requires approval under permission_mode=ask
-//!   ▎ [a] allow once  [s] allow session  [d] deny once  [n] deny session
+//!   ▎ @backend wants Bash `cargo test --no-run` — [a]llow once · [s]ession · [d]eny · [n]ever
+//! ```
+//!
+//! After a keypress the prompt row is overwritten in place with a
+//! single-line outcome:
+//!
+//! ```text
+//!   ▎ ✓ @backend allowed (session)
 //! ```
 //!
 //! The `▎` left gutter is painted in the role's stable color so the
-//! prompt is visually attributed even when many roles are active.
+//! prompt is visually attributed even when many roles are active; the
+//! `@role` label on the outcome keeps the attribution readable on
+//! monochrome terminals and in `tee`-captured logs.
+//!
+//! Sessions in which the user chose "allow session" never re-prompt
+//! for the same tool — `crate::permissions::decide_tool` short-circuits
+//! via the persisted policy before the bridge fires.
 
 use std::io::Write as _;
 use std::sync::{
@@ -94,73 +104,122 @@ fn read_decision_keypress_blocking_in_raw() -> Result<Option<BridgeResponse>> {
 }
 
 fn paint_prompt(request: &BridgeRequest, host_role: &str) {
-    let role_paint = output::role_color(&request.role, host_role);
-    let gutter = "▎".with(role_paint);
-    let header = format!("@{} wants to run {}", request.role, request.tool)
-        .with(role_paint)
-        .bold();
-    let rule_width = compute_rule_width();
-    let rule = "─".repeat(rule_width).with(output::FADE);
-
-    println!();
-    println!("{gutter} {header}  {rule}");
-
-    let summary = summarize_input(&request.input);
-    if !summary.is_empty() {
-        println!(
-            "{gutter} {} {}",
-            "input:".with(output::MUTE),
-            summary.with(output::TEXT),
-        );
-    }
-
-    let trimmed_reason = request.reason.trim();
-    if !trimmed_reason.is_empty() {
-        println!(
-            "{gutter} {} {}",
-            "reason:".with(output::MUTE),
-            trimmed_reason.with(output::DIM),
-        );
-    }
-
-    println!(
-        "{gutter} {} {} {} {} {} {} {} {}",
-        "[a]".with(output::OK).bold(),
-        "allow once".with(output::TEXT),
-        "[s]".with(output::OK).bold(),
-        "allow session".with(output::TEXT),
-        "[d]".with(output::BAD).bold(),
-        "deny once".with(output::TEXT),
-        "[n]".with(output::BAD).bold(),
-        "deny session".with(output::TEXT),
-    );
-    print!("{gutter} ");
+    // print + flush, NOT println — the outcome line uses `\r\x1b[2K` to
+    // overwrite this row in place. A trailing newline here would move
+    // the cursor to the next row and the outcome would land *below*
+    // the prompt instead of replacing it.
+    let width = crossterm::terminal::size().map_or(80, |(c, _)| usize::from(c));
+    print!("{}", format_prompt_line(request, host_role, width));
     let _ = std::io::stdout().flush();
 }
 
+/// Pure formatter for the one-line prompt — used by paint_prompt and
+/// exposed for unit tests so the visible string is testable without a
+/// terminal. The engine's "reason" string is intentionally dropped
+/// from the visible line; for denied calls it is preserved on
+/// `CrepEvent::PermissionDenied` for `cr show` replay, but for allowed
+/// calls there is no equivalent event so the reason is not durably
+/// recorded. The compact line keeps multiple in-session prompts from
+/// stacking into a wall of approval ceremony.
+///
+/// `width` is the terminal column count and is used to keep the line
+/// inside one row: when the choices ribbon plus the role/tool prefix
+/// crowd the terminal, the tool-input summary is shortened so the
+/// total stays under the budget.
+fn format_prompt_line(request: &BridgeRequest, host_role: &str, width: usize) -> String {
+    let role_paint = output::role_color(&request.role, host_role);
+    let gutter = "▎".with(role_paint);
+    let role_label = format!("@{}", request.role).with(role_paint).bold();
+    let tool_label = request.tool.as_str().with(output::EM).bold();
+
+    // Cells occupied by everything except the input summary. Mirrors
+    // the format string below; kept as a const-ish list so the math
+    // is checkable.
+    let role_plain = format!("@{}", request.role);
+    let prefix_cells = 2  // "▎ "
+        + role_plain.chars().count()
+        + " wants ".chars().count()
+        + request.tool.chars().count()
+        + " — ".chars().count();
+    // Choices ribbon (`[a]llow once · [s]ession · [d]eny · [n]ever`)
+    // in display cells, no styling.
+    let choices_cells = "[a]llow once · [s]ession · [d]eny · [n]ever"
+        .chars()
+        .count();
+    // Reserve 2 cells of breathing room so the line doesn't run flush
+    // to the terminal edge. Floor the budget at 12 so very long Bash
+    // commands still get a recognizable preview even on tight widths.
+    let summary_budget = width
+        .saturating_sub(prefix_cells + choices_cells + " ``".chars().count() + 2)
+        .max(12);
+
+    let raw_summary = summarize_input(&request.input);
+    let summary_part = if raw_summary.is_empty() {
+        String::new()
+    } else {
+        let bounded = truncate_to(&raw_summary, summary_budget);
+        format!(" {}", format!("`{bounded}`").with(output::DIM))
+    };
+    // No space between `[a]` and `llow once`: the bracketed letter is
+    // the visible mnemonic for the choice (`[a]` highlights the `a`
+    // in `allow`), so they read as one word in the styled output.
+    format!(
+        "{gutter} {role_label} wants {tool_label}{summary_part} — {}{} · {}{} · {}{} · {}{}",
+        "[a]".with(output::OK).bold(),
+        "llow once".with(output::TEXT),
+        "[s]".with(output::OK).bold(),
+        "ession".with(output::TEXT),
+        "[d]".with(output::BAD).bold(),
+        "eny".with(output::TEXT),
+        "[n]".with(output::BAD).bold(),
+        "ever".with(output::TEXT),
+    )
+}
+
 fn paint_outcome(role: &str, host_role: &str, response: &BridgeResponse) {
+    // `\r\x1b[2K` returns to col 0 and clears the prompt line; the
+    // outcome then writes over it and the trailing newline (`println!`)
+    // advances to the next row, ready for whatever comes next.
+    println!(
+        "\r\x1b[2K{}",
+        format_outcome_line(role, host_role, response)
+    );
+}
+
+/// Pure formatter for the one-line outcome echo — same testability
+/// rationale as [`format_prompt_line`]. Even though the outcome
+/// replaces the prompt in place, the role label is preserved so the
+/// line is self-attributing in plain-text capture (`cr ... | tee`)
+/// and on terminals without truecolor.
+fn format_outcome_line(role: &str, host_role: &str, response: &BridgeResponse) -> String {
     let role_paint = output::role_color(role, host_role);
     let gutter = "▎".with(role_paint);
-    let (label, color) = match response.decision {
-        PermissionDecision::Allow => ("allowed", output::OK),
-        PermissionDecision::Deny => ("denied", output::BAD),
+    let role_label = format!("@{role}").with(role_paint).bold();
+    let (glyph, label, color) = match response.decision {
+        PermissionDecision::Allow => ("✓", "allowed", output::OK),
+        PermissionDecision::Deny => ("⊘", "denied", output::BAD),
     };
     let scope_label = match response.scope {
         DecisionScope::Once => "once",
         DecisionScope::Session => "session",
     };
-    println!(
-        "\r\x1b[2K{gutter} {} {} {}",
-        label.with(color).bold(),
-        format!("({scope_label})").with(output::DIM),
-        response.reason.as_str().with(output::DIM),
-    );
-    println!();
+    format!(
+        "{gutter} {glyph_styled} {role_label} {action} ({scope_label})",
+        glyph_styled = glyph.with(color).bold(),
+        action = label.with(color),
+    )
 }
 
-fn compute_rule_width() -> usize {
-    let cols = crossterm::terminal::size().map_or(80, |(c, _)| usize::from(c));
-    cols.saturating_sub(40).clamp(8, 60)
+/// Char-count truncation with an ellipsis suffix — purpose-built for
+/// the compact prompt line so it doesn't depend on the existing
+/// `PREVIEW_MAX` constant which was tuned for the multi-line layout.
+fn truncate_to(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_owned();
+    }
+    let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn summarize_input(input: &serde_json::Value) -> String {
@@ -385,6 +444,107 @@ mod tests {
     fn prompt_key_ignores_unhandled_key() {
         let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
         assert!(matches!(decision_for_key(key), PromptKeyDecision::Continue));
+    }
+
+    /// Strip ANSI escape sequences for substring-based assertions on
+    /// styled lines.
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for inner in chars.by_ref() {
+                    if inner.is_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn bash_request(command: &str) -> BridgeRequest {
+        BridgeRequest {
+            v: 1,
+            role: "backend".to_owned(),
+            tool: "Bash".to_owned(),
+            input: json!({"command": command}),
+            reason: "Bash requires approval under permission_mode=ask".to_owned(),
+        }
+    }
+
+    #[test]
+    fn prompt_line_is_single_line_with_compact_choices() {
+        let request = bash_request("cargo test --no-run");
+        let line = strip_ansi(&format_prompt_line(&request, "host", 120));
+        assert!(!line.contains('\n'), "prompt is a single line: {line:?}");
+        assert!(line.starts_with("▎ @backend wants Bash"));
+        assert!(line.contains("`cargo test --no-run`"));
+        assert!(line.contains("[a]llow once"));
+        assert!(line.contains("[s]ession"));
+        assert!(line.contains("[d]eny"));
+        assert!(line.contains("[n]ever"));
+    }
+
+    #[test]
+    fn prompt_line_omits_summary_when_input_is_empty() {
+        // Some tools (`/welcome`, `LS`) propose no useful input — the
+        // backtick block should disappear, not show empty backticks.
+        let request = BridgeRequest {
+            v: 1,
+            role: "backend".to_owned(),
+            tool: "TodoRead".to_owned(),
+            input: json!(null),
+            reason: "approval required".to_owned(),
+        };
+        let line = strip_ansi(&format_prompt_line(&request, "host", 120));
+        assert!(line.starts_with("▎ @backend wants TodoRead"));
+        assert!(!line.contains("``"), "no empty backticks: {line:?}");
+    }
+
+    #[test]
+    fn prompt_line_truncates_summary_on_narrow_terminals() {
+        // On an 80-col terminal the choices ribbon plus the role/tool
+        // prefix eats most of the budget, so a long command must
+        // truncate with an ellipsis rather than overflow the row.
+        let long_cmd = "cargo test --workspace --all-features --no-run -- --test-threads=4";
+        let request = bash_request(long_cmd);
+        let plain = strip_ansi(&format_prompt_line(&request, "host", 80));
+        assert!(
+            plain.contains('…'),
+            "summary should be ellipsized: {plain:?}"
+        );
+        // The original command must NOT appear in full at 80 cols.
+        assert!(
+            !plain.contains(long_cmd),
+            "long command should be truncated: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn outcome_line_includes_role_label_and_glyph() {
+        let response = BridgeResponse {
+            v: 1,
+            decision: PermissionDecision::Allow,
+            scope: DecisionScope::Session,
+            reason: "user allowed (session)".to_owned(),
+        };
+        let line = strip_ansi(&format_outcome_line("backend", "host", &response));
+        assert_eq!(line, "▎ ✓ @backend allowed (session)");
+    }
+
+    #[test]
+    fn outcome_line_denial_uses_deny_glyph() {
+        let response = BridgeResponse {
+            v: 1,
+            decision: PermissionDecision::Deny,
+            scope: DecisionScope::Once,
+            reason: "user denied (once)".to_owned(),
+        };
+        let line = strip_ansi(&format_outcome_line("backend", "host", &response));
+        assert_eq!(line, "▎ ⊘ @backend denied (once)");
     }
 
     #[test]

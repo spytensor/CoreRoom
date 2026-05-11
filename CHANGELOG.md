@@ -30,6 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Permission prompts collapsed to a single line.** The approval
+  block used to take five rows (header + rule, input, reason,
+  choices, cursor) for every Bash / Edit / Read approval; dense
+  exploratory turns produced walls of approval ceremony. The new
+  shape is one row for the prompt and one for the outcome:
+  ```
+  ▎ @backend wants Bash `cargo test --no-run` — [a]llow once · [s]ession · [d]eny · [n]ever
+  ▎ ✓ @backend allowed (session)
+  ```
+  The outcome line overwrites the prompt row in place. Tool-input
+  preview width is computed from the terminal column count so the
+  line stays on one row on 80-col terminals. Engine "reason" strings
+  no longer render inline (denials still carry the reason on
+  `CrepEvent::PermissionDenied` for `cr show` replay). Allow-session
+  memoization was already in place via `decide_tool`; the same tool
+  is never prompted twice in one session. (#100)
 - **Cross-role auto-routes now print a Slack-style quote block.** When
   one role's reply mentions another role and the REPL auto-routes a
   brief, the live chat shows a two-line reply pointer:
