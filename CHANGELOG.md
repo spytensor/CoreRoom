@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cross-role handoffs now render as a full-width banner.** When a
+  role's turn is dispatched and actually starts, the renderer prints
+  `▎ @role ──────────────────────────────── starting` across the
+  terminal width instead of a dim italic trace, so the speaker change
+  is a clear visual anchor in dense activity streams. Dispatches that
+  queue behind an in-flight turn keep the old terse italic so long
+  auto-route chains don't paper the chat with banners. (#98)
 - **Per-tool trace lines are now folded by default during a live turn.**
   Each tool's `ToolCallProposed` / `ToolCallExecuted` pair used to print
   its own line in addition to the WorkCard and the live status spinner;

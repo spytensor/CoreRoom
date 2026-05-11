@@ -1,6 +1,7 @@
 use crossterm::style::{Color, Stylize};
 use crossterm::terminal;
 use tracing::debug;
+use unicode_width::UnicodeWidthStr;
 
 use crate::crep::CrepEvent;
 use crate::output;
@@ -153,24 +154,30 @@ pub(super) fn render_event_line_at_width(
                     .italic()
             )
         }
-        // Turn lifecycle traces stay intentionally terse; WorkCards and
-        // status lines carry the richer activity state.
+        // `TurnDispatched` is the cross-role handoff boundary. When
+        // the role is *actually starting* (queue_position == 0) we
+        // render a full-width banner so the speaker change is an
+        // unmistakable visual anchor. When the dispatch is queued
+        // behind an in-flight turn we keep the old terse italic so
+        // long chains of auto-routed dispatches don't paper the chat
+        // with banners.
         CrepEvent::TurnDispatched {
             role,
             queue_position,
             ..
         } => {
-            let role_paint = output::role_color(role, host_role);
-            let queued = if *queue_position == 0 {
-                "starting".to_owned()
+            if *queue_position == 0 {
+                handoff_banner(role, host_role, "starting", width)
             } else {
-                format!("queued · {queue_position} ahead")
-            };
-            format!(
-                "{} {}",
-                GUTTER.with(role_paint),
-                format!("@{role} {queued}").with(output::DIM).italic()
-            )
+                let role_paint = output::role_color(role, host_role);
+                format!(
+                    "{} {}",
+                    GUTTER.with(role_paint),
+                    format!("@{role} queued · {queue_position} ahead")
+                        .with(output::DIM)
+                        .italic()
+                )
+            }
         }
         CrepEvent::TurnInterrupted { role, source, .. } => {
             let role_paint = output::role_color(role, host_role);
@@ -183,6 +190,52 @@ pub(super) fn render_event_line_at_width(
             )
         }
     }
+}
+
+/// Build the role-handoff banner. Mirrors the layout of WorkCards
+/// (gutter + role badge on the left, status on the right) but stretches
+/// across the available terminal width so the speaker change reads as
+/// a section divider, not a line of dim chatter.
+///
+/// Layout: `▎ @role ────────────────────────── status`. The dash run
+/// shrinks gracefully as terminal width drops:
+///
+/// * `width >= fixed + 3` — dash separator fills the gap exactly so
+///   the rendered line is exactly `width` cells.
+/// * `width >= fixed`     — padded with spaces, line still exactly
+///   `width` cells.
+/// * `width < fixed`      — best-effort one space between role and
+///   status; the line is `fixed - 1` cells. Realistic terminals are
+///   ≥ 40 columns so this fallback rarely fires.
+fn handoff_banner(role: &str, host_role: &str, status: &str, width: usize) -> String {
+    let role_paint = output::role_color(role, host_role);
+    let gutter = GUTTER.with(role_paint).to_string();
+    let role_label = format!("@{role}").with(role_paint).bold().to_string();
+    let role_plain = format!("@{role}");
+    // 2 cells for "▎ ", role-label width, 1 separator space at each
+    // end of the dashes, status width. Anything left over goes into
+    // the dash run (or spaces, on a tight fit).
+    let fixed =
+        2 + UnicodeWidthStr::width(role_plain.as_str()) + 2 + UnicodeWidthStr::width(status);
+    let dash_count = width.saturating_sub(fixed);
+    let separator = if dash_count >= 3 {
+        format!(" {} ", "─".repeat(dash_count))
+            .with(output::RULE)
+            .to_string()
+    } else if width >= fixed {
+        // 0 ≤ dash_count ≤ 2 — not enough dashes to read as a
+        // divider, but we still pad with spaces so the total width
+        // stays at `width` (status drifts left toward the role badge
+        // rather than running off the right edge).
+        " ".repeat(dash_count + 2)
+    } else {
+        // Terminal too narrow even for the role + status combo. Drop
+        // the divider entirely; output will be `fixed - 1` cells and
+        // will wrap if the terminal is genuinely smaller than that.
+        " ".to_owned()
+    };
+    let status_styled = status.with(output::DIM).to_string();
+    format!("{gutter} {role_label}{separator}{status_styled}")
 }
 
 pub(super) fn summarize_tool_input(input: &serde_json::Value) -> String {

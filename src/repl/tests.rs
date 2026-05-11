@@ -643,6 +643,98 @@ fn multi_line_role_spoke_keeps_gutter_on_each_line() {
 }
 
 #[test]
+fn turn_dispatched_renders_as_full_width_handoff_banner() {
+    // `starting` (queue_position == 0): the typical handoff. The
+    // dash run fills the middle of the terminal so the speaker change
+    // is unmistakable on a busy chat log. Width-property assertions
+    // are more robust than character-exact snapshots when the dash
+    // count depends on the role-name width.
+    let dispatched = CrepEvent::TurnDispatched {
+        role: "backend".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 0,
+    };
+    let rendered = strip_ansi(&render_event_line_at_width(&dispatched, "host", 48));
+    assert_eq!(unicode_width::UnicodeWidthStr::width(rendered.as_str()), 48);
+    assert!(rendered.starts_with("▎ @backend "));
+    assert!(rendered.ends_with(" starting"));
+    assert!(rendered.contains('─'));
+
+    // Queued behind two in-flight turns — kept as a terse italic
+    // trace line rather than a banner so a long auto-route chain
+    // doesn't paper the chat with section dividers for dispatches
+    // that haven't actually changed the speaker on-screen.
+    let queued = CrepEvent::TurnDispatched {
+        role: "frontend".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 2,
+    };
+    let rendered = strip_ansi(&render_event_line_at_width(&queued, "host", 60));
+    assert_eq!(rendered, "▎ @frontend queued · 2 ahead");
+}
+
+#[test]
+fn turn_dispatched_banner_pads_to_exact_width_in_tight_fits() {
+    // Width budget exactly equal to fixed + 2 (1 dash position) used
+    // to fall to the collapse branch and undershoot by 3 cells. Now
+    // it pads with spaces so the rendered line is exactly `width`.
+    let dispatched = CrepEvent::TurnDispatched {
+        role: "backend".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 0,
+    };
+    // fixed = 2 + |@backend|(8) + 2 + |starting|(8) = 20.
+    // width = 22 → dash_count = 2 → space-padded branch.
+    let rendered = strip_ansi(&render_event_line_at_width(&dispatched, "host", 22));
+    assert_eq!(unicode_width::UnicodeWidthStr::width(rendered.as_str()), 22);
+    assert!(rendered.starts_with("▎ @backend"));
+    assert!(rendered.ends_with("starting"));
+}
+
+#[test]
+fn turn_dispatched_banner_handles_long_role_names() {
+    // Locks the width math against the role-name parameter — a long
+    // role name eats more `fixed` budget so the dash run shrinks but
+    // the total width remains exactly `width`.
+    let dispatched = CrepEvent::TurnDispatched {
+        role: "docs-reviewer".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 0,
+    };
+    let rendered = strip_ansi(&render_event_line_at_width(&dispatched, "host", 60));
+    assert_eq!(unicode_width::UnicodeWidthStr::width(rendered.as_str()), 60);
+    assert!(rendered.starts_with("▎ @docs-reviewer "));
+    assert!(rendered.ends_with(" starting"));
+    assert!(rendered.contains('─'));
+}
+
+#[test]
+fn turn_dispatched_collapses_on_narrow_terminals() {
+    // On very narrow terminals the dash run shrinks to a single space
+    // so the banner never wraps — the role badge + status still fit
+    // on one line.
+    let dispatched = CrepEvent::TurnDispatched {
+        role: "backend".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 0,
+    };
+    let rendered = strip_ansi(&render_event_line_at_width(&dispatched, "host", 16));
+    // 16 cells: "▎ " (2) + "@backend" (8) + " " (1) + "starting" (8) = 19
+    // → not enough for the dash run; fall back to a single space.
+    assert_eq!(rendered, "▎ @backend starting");
+}
+
+#[test]
 fn role_spoke_renders_markdown_lite_with_wrapping() {
     let event = CrepEvent::RoleSpoke {
         role: "security".into(),
