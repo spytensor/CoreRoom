@@ -173,6 +173,7 @@ these. UI, message bus, and patch logic only ever see CREP.
 | Event              | When fired                                       | Key fields                                       |
 | ------------------ | ------------------------------------------------ | ------------------------------------------------ |
 | `RoleStarted`      | Subprocess up, system prompt loaded              | role, engine, model, session_id, priors_hash     |
+| `RoleSessionUpdated` | Adapter learned a real resumable session id after startup | role, session_id                         |
 | `TurnDispatched`   | (v0.2) REPL fired a turn at a role               | role, turn_id, thread_id, parent_turn_id, queue_position |
 | `RoleSpoke`        | Role emitted a final assistant turn              | role, text, mentions[], cost_usd, cache_read, turn_id, thread_id |
 | `TurnInterrupted`  | (v0.2) `/halt` or watchdog cancelled the turn    | role, turn_id, thread_id, source, partial_text, partial_mentions |
@@ -188,7 +189,8 @@ no longer collapses with a crashed role. The variant stays on the
 wire for v0.1 log replay only.
 
 `RoleSpoke.mentions` is the parsed list of `@x` references found in `text`.
-The wrapper uses this to route briefs.
+The wrapper surfaces those references in logs; auto-routing is narrower and
+uses only explicit delegation blocks whose line starts with `@role`.
 
 JSONL append-only log at `.coderoom/messages.jsonl`. The full transcript view
 the user sees is just a render of this stream filtered to events that humans
@@ -223,6 +225,9 @@ PermissionDenied, RoleStopped).
 - Spawn: `codex mcp-server` over stdio.
 - Wrapper acts as MCP client. Initialize → tools/list → tools/call.
 - Two tools available: `codex` (start session) and `codex-reply` (continue).
+- Session ID: the first `codex` result returns a `threadId`; CodeRoom persists
+  it via `RoleSessionUpdated`, then uses `codex-reply` for later turns and
+  future `cr start` resumes.
 - Permission: `permission_mode="ask"` maps to Codex `approval-policy="untrusted"`,
   `auto` maps to `on-request`, and `bypass` maps to `never`. In live REPL
   sessions, server-initiated `execCommandApproval` / `applyPatchApproval`
@@ -339,7 +344,7 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 | Brief loses thread context (HIPAA)   | Thread sticky: rolling 200-token constraint summary auto-prepended on every cross-role route. User-emphasized statements ("we use…", "must…") seed it. |
 | Journal hallucination compounding    | JSON-schema-enforced citations on every `learned` entry; unverified entries quarantined |
 | Patch directory bloat                | Hard 50-cap per role + FIFO archive at v0.1               |
-| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router skips three cases only: self-mention (`@a` mentioning itself), unknown role (`@<not-running>`), and ungrounded turn (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). Per-role budgets cap total spend per chain. See `docs/proposed-amendments.md` A-005. |
+| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router only acts on explicit delegation lines that start with `@role`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). Per-role budgets cap total spend per chain. See `docs/proposed-amendments.md` A-005. |
 | Permission gate fail-open            | Hook script defaults to deny on any error; wrapper supervises hook process and treats non-zero exit without decision-file as deny |
 | Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coderoom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
 | Token cost runaway                   | `--max-budget-usd` ceiling per engine call. Wrapper-tracked daily aggregate per role with soft warning |
@@ -372,6 +377,7 @@ cr cost                          # cost breakdown per role since YYYY-MM-DD
 
 /patch <role> <text>             # save correction
 /refresh <role>                  # tear down + respawn from priors+patches+journal
+/resume [number|id|prefix|latest] # list or switch saved room sessions
 /stop <role>                     # terminate the role's subprocess (v0.1 semantics)
 /halt                            # (v0.2) interrupt every in-flight turn; roles stay alive
 /halt <role>                     # (v0.2) interrupt one role's in-flight turn

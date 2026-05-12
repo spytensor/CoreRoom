@@ -6,17 +6,18 @@
 //!
 //! v0.1 scope (intentionally minimal — see `docs/architecture.md`):
 //!
-//! - Single-turn per user message. No `codex-reply` for follow-ups; each
-//!   prompt starts a fresh Codex session. Slower / more expensive than
-//!   the CC adapter's long-lived session, but functionally correct.
+//! - One Codex thread per role. The first prompt calls the `codex` MCP
+//!   tool; follow-up prompts call `codex-reply` with the thread id
+//!   returned by Codex. A persisted thread id lets `cr start` resume a
+//!   role after restart.
 //! - Codex exec lifecycle notifications are translated into best-effort
 //!   CREP tool events when the installed CLI emits them.
 //! - Codex `permission_mode="ask"` / `"auto"` is supported only when the
 //!   live REPL provides a permission bridge. Headless callers still need
 //!   `permission_mode="bypass"` so approval requests cannot hang.
 //!
-//! Multi-turn (resume / `codex-reply`) is scheduled for
-//! `feat/adapter-codex-v2`.
+//! `codex-reply` parity landed after the CLI exposed it through
+//! `codex mcp-server`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -121,22 +122,6 @@ impl EngineAdapter for CodexAdapter {
             });
         }
 
-        // `codex mcp-server` (the stdio mode codeRoom drives) does not
-        // accept a session-id resume flag — `codex resume <id>` is a
-        // separate interactive subcommand. So when the wrapper passes
-        // `resume_session_id` for a codex role we log it and continue
-        // with a fresh session, instead of silently dropping it. The
-        // user-facing hint at `spawn_role` already warns about this so
-        // they aren't surprised when context isn't carried forward.
-        // Tracked as a follow-up — see `docs/proposed-amendments.md`
-        // A-006 "codex/gemini resume parity is deferred".
-        if config.resume_session_id.is_some() {
-            tracing::debug!(
-                role = %config.name,
-                "ignoring resume_session_id: codex mcp-server has no resume flag"
-            );
-        }
-
         let priors_text = tokio::fs::read_to_string(&config.priors_path)
             .await
             .map_err(|source| AdapterError::PriorsRead {
@@ -217,7 +202,7 @@ impl EngineAdapter for CodexAdapter {
                         role: config.name.clone(),
                         engine: Engine::Codex.as_str().to_owned(),
                         model,
-                        session_id: format!("codex-{}", config.name),
+                        session_id: config.resume_session_id.clone().unwrap_or_default(),
                         priors_hash: crate::adapter::cc::fingerprint(&priors_text),
                     })
                     .await;
@@ -235,6 +220,7 @@ impl EngineAdapter for CodexAdapter {
             priors_text,
             config.budget_usd,
             config.permission_mode,
+            config.resume_session_id.clone(),
             rx_user,
             client,
             Arc::clone(&current_tools_call),
@@ -383,6 +369,7 @@ struct PendingEntry {
     responder: oneshot::Sender<JsonRpcResponse>,
     activity: Arc<Notify>,
     partial_text: Arc<Mutex<String>>,
+    thread_id: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone)]
@@ -441,7 +428,7 @@ impl RpcClient {
         method: &str,
         params: Value,
         id: u64,
-    ) -> (Result<Value, RpcError>, String) {
+    ) -> (Result<Value, RpcError>, String, Option<String>) {
         let envelope = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -451,12 +438,14 @@ impl RpcClient {
         let (tx, rx) = oneshot::channel();
         let activity = Arc::new(Notify::new());
         let partial_text = Arc::new(Mutex::new(String::new()));
+        let thread_id = Arc::new(Mutex::new(None));
         self.pending.lock().await.insert(
             id,
             PendingEntry {
                 responder: tx,
                 activity: Arc::clone(&activity),
                 partial_text: Arc::clone(&partial_text),
+                thread_id: Arc::clone(&thread_id),
             },
         );
         let _guard = PendingRequestGuard {
@@ -469,7 +458,7 @@ impl RpcClient {
             let mut w = self.writer.lock().await;
             if w.write_all(line.as_bytes()).await.is_err() || w.flush().await.is_err() {
                 self.pending.lock().await.remove(&id);
-                return (Err(RpcError::Closed), String::new());
+                return (Err(RpcError::Closed), String::new(), None);
             }
         }
 
@@ -477,14 +466,20 @@ impl RpcClient {
             Ok(response) => response,
             Err(error) => {
                 let partial = partial_text.lock().await.clone();
-                return (Err(error), partial);
+                let thread_id = thread_id.lock().await.clone();
+                return (Err(error), partial, thread_id);
             }
         };
         let partial = partial_text.lock().await.clone();
+        let thread_id = thread_id.lock().await.clone();
         if let Some(err) = response.error {
-            return (Err(RpcError::Server(err.to_string())), partial);
+            return (Err(RpcError::Server(err.to_string())), partial, thread_id);
         }
-        (Ok(response.result.unwrap_or(Value::Null)), partial)
+        (
+            Ok(response.result.unwrap_or(Value::Null)),
+            partial,
+            thread_id,
+        )
     }
 
     /// Send a JSON-RPC notification (no response expected).
@@ -664,14 +659,21 @@ async fn read_rpc_loop(
                 // resets and a long, busy turn doesn't get cut off.
                 let request_state = if let Some(req_id) = codex_event_request_id(&value) {
                     let pending = pending.lock().await;
-                    pending
-                        .get(&req_id)
-                        .map(|entry| (Arc::clone(&entry.activity), Arc::clone(&entry.partial_text)))
+                    pending.get(&req_id).map(|entry| {
+                        (
+                            Arc::clone(&entry.activity),
+                            Arc::clone(&entry.partial_text),
+                            Arc::clone(&entry.thread_id),
+                        )
+                    })
                 } else {
                     None
                 };
-                if let Some((activity, _)) = &request_state {
+                if let Some((activity, _, event_thread_id)) = &request_state {
                     activity.notify_one();
+                    if let Some(thread_id) = codex_event_thread_id(&value) {
+                        *event_thread_id.lock().await = Some(thread_id);
+                    }
                 }
                 if let Some(mut event) = codex_notification_to_event(&runtime.role, &value) {
                     if let CrepEvent::RoleOutputDelta {
@@ -686,7 +688,7 @@ async fn read_rpc_loop(
                         } else {
                             fallback_delta_sequence = fallback_delta_sequence.max(*sequence);
                         }
-                        if let Some((_, partial_text)) = &request_state {
+                        if let Some((_, partial_text, _)) = &request_state {
                             partial_text.lock().await.push_str(text_delta);
                         }
                         let _ = runtime.events.try_send(event);
@@ -1012,6 +1014,21 @@ fn codex_event_request_id(value: &Value) -> Option<u64> {
         .as_u64()
 }
 
+fn codex_event_thread_id(value: &Value) -> Option<String> {
+    let method = value.get("method").and_then(Value::as_str)?;
+    if method != "codex/event" {
+        return None;
+    }
+    value
+        .get("params")?
+        .get("_meta")?
+        .get("threadId")?
+        .as_str()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 /// Translate one JSON-RPC line from codex stdout into a CodeRoom CREP
 /// event. Codex 0.130+ wraps every lifecycle/tool/text update inside a
 /// single `codex/event` notification with the actual variant name in
@@ -1174,6 +1191,7 @@ async fn write_loop(
     priors_text: String,
     budget_usd: f64,
     permission_mode: PermissionMode,
+    initial_thread_id: Option<String>,
     mut rx: mpsc::Receiver<UserMessage>,
     client: RpcClient,
     current_tools_call: Arc<Mutex<Option<u64>>>,
@@ -1182,6 +1200,7 @@ async fn write_loop(
 ) {
     let approval_policy = codex_approval_policy(permission_mode);
     let sandbox = codex_sandbox(permission_mode);
+    let mut thread_id = initial_thread_id.filter(|id| !id.trim().is_empty());
     while let Some(msg) = rx.recv().await {
         if runtime.base.stopping.load(Ordering::SeqCst) {
             break;
@@ -1189,20 +1208,13 @@ async fn write_loop(
         let UserMessage::Prompt(prompt) = msg else {
             continue;
         };
-        let params = serde_json::json!({
-            "name": "codex",
-            "arguments": {
-                "prompt": prompt,
-                "base-instructions": priors_text,
-                // Wire the requested mode through to codex so its server
-                // actually emits applyPatchApproval / execCommandApproval
-                // requests our bridge can answer. Earlier code hardcoded
-                // "never" here, which made the entire approval pipe
-                // unreachable regardless of permission_mode.
-                "approval-policy": approval_policy,
-                "sandbox": sandbox,
-            },
-        });
+        let params = codex_tool_call_params(
+            &prompt,
+            &priors_text,
+            approval_policy,
+            sandbox,
+            thread_id.as_deref(),
+        );
         let _ = budget_usd; // wired in v0.2 with codex's --max-* config
 
         // Allocate the tools/call request id up front and publish it
@@ -1212,7 +1224,7 @@ async fn write_loop(
         // so initialize ids and stale-during-cleanup ids cannot win.
         let request_id = client.alloc_id().await;
         *current_tools_call.lock().await = Some(request_id);
-        let (outcome, partial_text) = client
+        let (outcome, partial_text, event_thread_id) = client
             .request_with_id_capture("tools/call", params, request_id)
             .await;
         *current_tools_call.lock().await = None;
@@ -1250,6 +1262,21 @@ async fn write_loop(
                         .send(turn_interrupted_event(&runtime.base.role, &partial_text))
                         .await;
                     continue;
+                }
+                if let Some(next_thread_id) =
+                    extract_thread_id_from_tool_result(&result).or(event_thread_id)
+                {
+                    if thread_id.as_deref() != Some(next_thread_id.as_str()) {
+                        thread_id = Some(next_thread_id.clone());
+                        let _ = runtime
+                            .base
+                            .events
+                            .send(CrepEvent::RoleSessionUpdated {
+                                role: runtime.base.role.clone(),
+                                session_id: next_thread_id,
+                            })
+                            .await;
+                    }
                 }
                 let text = extract_text_from_tool_result(&result);
                 for event in
@@ -1323,18 +1350,94 @@ fn turn_interrupted_event(role: &str, partial_text: &str) -> CrepEvent {
     }
 }
 
+fn codex_tool_call_params(
+    prompt: &str,
+    priors_text: &str,
+    approval_policy: &str,
+    sandbox: &str,
+    thread_id: Option<&str>,
+) -> Value {
+    if let Some(thread_id) = thread_id.filter(|id| !id.trim().is_empty()) {
+        return serde_json::json!({
+            "name": "codex-reply",
+            "arguments": {
+                "threadId": thread_id,
+                "prompt": prompt,
+            },
+        });
+    }
+
+    serde_json::json!({
+        "name": "codex",
+        "arguments": {
+            "prompt": prompt,
+            "base-instructions": priors_text,
+            // Wire the requested mode through to codex so its server
+            // actually emits applyPatchApproval / execCommandApproval
+            // requests our bridge can answer. Earlier code hardcoded
+            // "never" here, which made the entire approval pipe
+            // unreachable regardless of permission_mode.
+            "approval-policy": approval_policy,
+            "sandbox": sandbox,
+        },
+    })
+}
+
+fn extract_thread_id_from_tool_result(result: &Value) -> Option<String> {
+    find_thread_id(result).or_else(|| {
+        result
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .filter_map(|text| serde_json::from_str::<Value>(text).ok())
+            .find_map(|value| find_thread_id(&value))
+    })
+}
+
+fn find_thread_id(value: &Value) -> Option<String> {
+    value
+        .get("structuredContent")
+        .and_then(|content| content.get("threadId"))
+        .or_else(|| value.get("threadId"))
+        .or_else(|| value.get("_meta").and_then(|meta| meta.get("threadId")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn extract_text_from_tool_result(result: &Value) -> String {
+    if let Some(content) = result
+        .get("structuredContent")
+        .and_then(|content| content.get("content"))
+        .and_then(Value::as_str)
+    {
+        return content.to_owned();
+    }
+    if let Some(content) = result.get("content").and_then(Value::as_str) {
+        return content.to_owned();
+    }
     // MCP tool result shape: { content: [{ type: "text", text: "..." }, ...], isError: bool }
     // We concatenate every text block in order.
     let Some(blocks) = result.get("content").and_then(Value::as_array) else {
         return String::new();
     };
-    blocks
+    let text_blocks = blocks
         .iter()
         .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
         .filter_map(|b| b.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        .collect::<Vec<_>>();
+    if text_blocks.len() == 1 {
+        if let Ok(value) = serde_json::from_str::<Value>(text_blocks[0]) {
+            if let Some(content) = value.get("content").and_then(Value::as_str) {
+                return content.to_owned();
+            }
+        }
+    }
+    text_blocks.join("\n\n")
 }
 
 async fn wait_child(
@@ -1462,6 +1565,23 @@ mod tests {
     }
 
     #[test]
+    fn extract_text_prefers_structured_content() {
+        let v = serde_json::json!({
+            "structuredContent": {"threadId": "thread-1", "content": "assistant text"},
+            "content": [{"type": "text", "text": "{\"threadId\":\"thread-1\",\"content\":\"assistant text\"}"}],
+        });
+        assert_eq!(extract_text_from_tool_result(&v), "assistant text");
+    }
+
+    #[test]
+    fn extract_text_unwraps_json_text_content() {
+        let v = serde_json::json!({
+            "content": [{"type": "text", "text": "{\"threadId\":\"thread-1\",\"content\":\"assistant text\"}"}],
+        });
+        assert_eq!(extract_text_from_tool_result(&v), "assistant text");
+    }
+
+    #[test]
     fn extract_text_handles_missing_content() {
         let v = serde_json::json!({});
         assert_eq!(extract_text_from_tool_result(&v), "");
@@ -1476,6 +1596,54 @@ mod tests {
             ],
         });
         assert_eq!(extract_text_from_tool_result(&v), "ok");
+    }
+
+    #[test]
+    fn extract_thread_id_reads_structured_content() {
+        let v = serde_json::json!({
+            "structuredContent": {"threadId": "thread-1", "content": "ok"},
+        });
+        assert_eq!(
+            extract_thread_id_from_tool_result(&v).as_deref(),
+            Some("thread-1")
+        );
+    }
+
+    #[test]
+    fn extract_thread_id_reads_json_text_content() {
+        let v = serde_json::json!({
+            "content": [{"type": "text", "text": "{\"threadId\":\"thread-2\",\"content\":\"ok\"}"}],
+        });
+        assert_eq!(
+            extract_thread_id_from_tool_result(&v).as_deref(),
+            Some("thread-2")
+        );
+    }
+
+    #[test]
+    fn codex_tool_call_params_start_new_thread_when_no_thread_id() {
+        let params =
+            codex_tool_call_params("hello", "priors", "on-request", "workspace-write", None);
+        assert_eq!(params["name"], "codex");
+        assert_eq!(params["arguments"]["prompt"], "hello");
+        assert_eq!(params["arguments"]["base-instructions"], "priors");
+        assert_eq!(params["arguments"]["approval-policy"], "on-request");
+        assert_eq!(params["arguments"]["sandbox"], "workspace-write");
+    }
+
+    #[test]
+    fn codex_tool_call_params_replies_when_thread_id_exists() {
+        let params = codex_tool_call_params(
+            "continue",
+            "priors",
+            "never",
+            "danger-full-access",
+            Some("thread-1"),
+        );
+        assert_eq!(params["name"], "codex-reply");
+        assert_eq!(params["arguments"]["threadId"], "thread-1");
+        assert_eq!(params["arguments"]["prompt"], "continue");
+        assert!(params["arguments"].get("base-instructions").is_none());
     }
 
     #[test]
@@ -1902,6 +2070,23 @@ mod tests {
             "params": {}
         });
         assert_eq!(codex_event_request_id(&other), None);
+    }
+
+    #[test]
+    fn codex_event_thread_id_extracted() {
+        let value = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "codex/event",
+            "params": {"_meta": {"requestId": 17, "threadId": "thread-17"}, "msg": {"type": "task_started"}}
+        });
+        assert_eq!(codex_event_thread_id(&value).as_deref(), Some("thread-17"));
+
+        let other = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"_meta": {"threadId": "thread-17"}}
+        });
+        assert_eq!(codex_event_thread_id(&other), None);
     }
 
     #[test]

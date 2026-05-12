@@ -39,6 +39,22 @@ fn parse_at_all_broadcasts() {
 }
 
 #[test]
+fn resume_id_filter_accepts_real_codex_threads_but_rejects_legacy_placeholders() {
+    assert!(is_resumable_session_id(Engine::Codex, "qa", "thread-abc"));
+    assert!(!is_resumable_session_id(Engine::Codex, "qa", "codex-qa"));
+    assert!(!is_resumable_session_id(
+        Engine::Gemini,
+        "security",
+        "gemini-security"
+    ));
+    assert!(is_resumable_session_id(
+        Engine::Cc,
+        "host",
+        "claude-session-id"
+    ));
+}
+
+#[test]
 fn show_filter_keeps_role_events_and_applies_tail() {
     let events = vec![
         CrepEvent::RoleStarted {
@@ -229,6 +245,20 @@ fn parse_refresh_accepts_at_prefixed_role() {
     assert_eq!(
         parse_line("/refresh @backend"),
         Command::Refresh("backend".into())
+    );
+}
+
+#[test]
+fn parse_resume_without_selector_lists_sessions() {
+    assert_eq!(parse_line("/resume"), Command::Resume(None));
+}
+
+#[test]
+fn parse_resume_accepts_selector() {
+    assert_eq!(parse_line("/resume 2"), Command::Resume(Some("2".into())));
+    assert_eq!(
+        parse_line("/resume room-123"),
+        Command::Resume(Some("room-123".into()))
     );
 }
 
@@ -1300,74 +1330,122 @@ fn streaming_state_resets_first_line_only_after_real_content() {
     );
 }
 
-// ---- filter_routable_mentions ----------------------------------------
+// ---- extract_route_instructions --------------------------------------
 //
-// Tests for the worklist's mention-filtering helper. The dispatcher
-// itself is async + cross-module and harder to drive in a unit test,
-// but the routing decision is a pure function we can lock here.
+// Tests for the worklist's delegation extraction helper. The dispatcher
+// itself is async + cross-module and harder to drive in a unit test, but the
+// routing decision is a pure function we can lock here.
 
 #[test]
-fn filter_routable_mentions_drops_self_mention() {
-    use super::filter_routable_mentions;
+fn route_instructions_ignore_plain_status_mentions() {
+    use super::extract_route_instructions;
     let known = &["host", "security", "backend"];
-    let out = filter_routable_mentions(
-        "security",
-        &["security".to_owned(), "host".to_owned()],
-        known,
+    let text = concat!(
+        "Received security review. Still waiting for @backend and @frontend.\n",
+        "| owner | risk |\n",
+        "| @security | auth |",
     );
-    assert_eq!(out, vec!["host".to_owned()]);
+    let out = extract_route_instructions("host", text, known);
+    assert!(out.is_empty());
 }
 
 #[test]
-fn filter_routable_mentions_drops_unknown_role() {
-    use super::filter_routable_mentions;
-    let known = &["host", "security"];
-    let out = filter_routable_mentions(
-        "host",
-        &[
-            "security".to_owned(),
-            "nobody".to_owned(),
-            "backend".to_owned(),
-        ],
-        known,
+fn route_instructions_extract_targeted_blocks() {
+    use super::{extract_route_instructions, RouteInstruction};
+    let known = &["host", "backend", "frontend", "qa"];
+    let text = concat!(
+        "@backend review authority.py\n",
+        "1. Check auth context.\n",
+        "2. Check negative tests.\n",
+        "\n",
+        "@frontend review Services.swift\n",
+        "- Check token policy.\n",
+        "\n",
+        "Summary: qa should watch this but this is not a route to @qa.",
     );
-    // `nobody` and `backend` aren't running; only `security` survives.
-    assert_eq!(out, vec!["security".to_owned()]);
-}
-
-#[test]
-fn filter_routable_mentions_preserves_order_and_duplicates() {
-    // BFS dispatch order is preserved, including duplicates within a
-    // single reply. A role mentioning `@peer` twice is two distinct
-    // asks that may carry different conversational weight; dedup is
-    // explicitly NOT applied at this layer.
-    use super::filter_routable_mentions;
-    let known = &["host", "security", "backend"];
-    let out = filter_routable_mentions(
-        "host",
-        &[
-            "backend".to_owned(),
-            "security".to_owned(),
-            "backend".to_owned(),
-        ],
-        known,
-    );
+    let out = extract_route_instructions("host", text, known);
     assert_eq!(
         out,
         vec![
-            "backend".to_owned(),
-            "security".to_owned(),
-            "backend".to_owned(),
+            RouteInstruction {
+                target: "backend".to_owned(),
+                brief: "review authority.py\n1. Check auth context.\n2. Check negative tests."
+                    .to_owned(),
+            },
+            RouteInstruction {
+                target: "frontend".to_owned(),
+                brief: "review Services.swift\n- Check token policy.".to_owned(),
+            },
         ]
     );
 }
 
 #[test]
-fn filter_routable_mentions_handles_empty_inputs() {
-    use super::filter_routable_mentions;
-    assert!(filter_routable_mentions("host", &[], &["host", "security"]).is_empty());
-    // No known roles → every mention is "unknown", nothing routable.
-    assert!(filter_routable_mentions("host", &["security".to_owned()], &[]).is_empty());
+fn route_instructions_support_multi_target_lines_and_list_markers() {
+    use super::{extract_route_instructions, RouteInstruction};
+    let known = &["host", "security", "backend"];
+    let out = extract_route_instructions(
+        "host",
+        "1. @backend and @security review the shared policy\n- include test gaps",
+        known,
+    );
+    assert_eq!(
+        out,
+        vec![
+            RouteInstruction {
+                target: "backend".to_owned(),
+                brief: "review the shared policy\n- include test gaps".to_owned(),
+            },
+            RouteInstruction {
+                target: "security".to_owned(),
+                brief: "review the shared policy\n- include test gaps".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn route_instructions_support_cjk_punctuation_and_conjunctions() {
+    use super::{extract_route_instructions, RouteInstruction};
+    let known = &["host", "security", "backend"];
+    let out = extract_route_instructions(
+        "host",
+        "@backend 和 @security：复核鉴权边界\n- 给出阻塞项",
+        known,
+    );
+    assert_eq!(
+        out,
+        vec![
+            RouteInstruction {
+                target: "backend".to_owned(),
+                brief: "复核鉴权边界\n- 给出阻塞项".to_owned(),
+            },
+            RouteInstruction {
+                target: "security".to_owned(),
+                brief: "复核鉴权边界\n- 给出阻塞项".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn route_instructions_drop_self_unknown_indented_and_code_block_mentions() {
+    use super::extract_route_instructions;
+    let known = &["host", "backend", "security"];
+    let text = concat!(
+        "@security inspect auth\n",
+        "- include evidence\n",
+        "  @backend done · pasted transcript line should not route\n",
+        "@mobile unknown role should not route\n",
+        "@host self mention should not route\n",
+        "```text\n",
+        "@security example only\n",
+        "```",
+    );
+    let out = extract_route_instructions("host", text, known);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].target, "security");
+    assert_eq!(out[0].brief, "inspect auth\n- include evidence");
 }
 
 #[test]

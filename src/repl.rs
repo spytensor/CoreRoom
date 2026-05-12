@@ -2,9 +2,9 @@
 //!
 //! `cr start` enters this loop. Each user input picks exactly one role,
 //! sends it a prompt, and renders bus events until that role emits a
-//! `RoleSpoke`. If the role's reply `@`-mentions any other running
-//! roles, those mentions push follow-up turns onto a FIFO worklist
-//! inside [`send_and_drain`], so chains like
+//! `RoleSpoke`. If the role's reply contains explicit delegation lines
+//! that start with `@role`, those blocks push follow-up turns onto a FIFO
+//! worklist inside [`send_and_drain`], so chains like
 //! `user → @host → @security → @host (synthesis)` run to completion
 //! before the prompt returns. See amendment A-005 in
 //! `docs/proposed-amendments.md`: the chain has no hop-depth limit;
@@ -189,31 +189,36 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
         } else {
             output::hint("starting fresh — prior role sessions cleared");
         }
+        if let Err(error) = sessions::start_new_room_session(project_root) {
+            output::warn(format!("could not create fresh room session: {error}"));
+        }
     } else {
+        if let Err(error) = sessions::ensure_current_room_session(project_root) {
+            output::warn(format!("could not prepare room session history: {error}"));
+        }
         // Surface which roles will actually resume so the user
         // isn't surprised. Roles with a persisted id whose engine
-        // wires resume (currently cc only) show up as "resuming";
-        // codex / gemini roles get a separate "resume not wired"
-        // line so the user knows context isn't actually carried
-        // forward (amendment A-006 codex/gemini follow-up).
+        // wires resume show up as "resuming"; engines without wired
+        // resume get a separate line so the user knows context isn't
+        // actually carried forward (amendment A-006).
         let mut resumed_wired: Vec<String> = Vec::new();
         let mut resumed_dropped: Vec<String> = Vec::new();
         for name in cfg.role_names() {
-            if sessions::read_session_id(project_root, name)
-                .ok()
-                .flatten()
-                .is_none()
-            {
+            let Some(session_id) = sessions::read_session_id(project_root, name).ok().flatten()
+            else {
                 continue;
-            }
+            };
             let engine = cfg
                 .roles
                 .get(name)
                 .and_then(|r| r.engine)
                 .unwrap_or(cfg.default_engine);
+            if !is_resumable_session_id(engine, name, &session_id) {
+                continue;
+            }
             match engine {
-                Engine::Cc => resumed_wired.push(name.to_owned()),
-                Engine::Codex | Engine::Gemini => resumed_dropped.push(name.to_owned()),
+                Engine::Cc | Engine::Codex => resumed_wired.push(name.to_owned()),
+                Engine::Gemini => resumed_dropped.push(name.to_owned()),
             }
         }
         resumed_wired.sort();
@@ -235,7 +240,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 .collect::<Vec<_>>()
                 .join(", ");
             output::hint(format!(
-                "resume not wired for codex/gemini yet — {names} will start fresh"
+                "resume not wired for gemini yet — {names} will start fresh"
             ));
         }
     }
@@ -402,6 +407,24 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     bus: &bus,
                 };
                 refresh_role(&spawn_context, &mut roles, &role).await;
+            }
+            Command::Resume(selector) => {
+                let spawn_context = SpawnContext {
+                    cfg: &cfg,
+                    adapters: &adapters,
+                    coderoom_dir: &coderoom_dir,
+                    permission_policy_path: &permission_policy_path,
+                    permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
+                    permission_mode_override: options.permission_mode_override,
+                    bus: &bus,
+                };
+                handle_resume(
+                    &spawn_context,
+                    &mut roles,
+                    selector.as_deref(),
+                    project_root,
+                )
+                .await;
             }
             Command::Transcript(role) => {
                 show_transcript(&coderoom_dir, &role, &cfg.host_role).await;
@@ -616,15 +639,15 @@ async fn mark_welcomed(coderoom_dir: &Path) {
 }
 
 /// Send `text` to `role` and drain bus events until that role finishes
-/// its turn. Each finished turn's `@<peer>` mentions push follow-up
-/// turns onto a FIFO worklist, so a chain like
+/// its turn. Each finished turn's explicit `@<peer>` delegation lines push
+/// follow-up turns onto a FIFO worklist, so a chain like
 /// `user → @host → @security → @host (synthesis)` runs to completion
 /// without manual prodding from the user. Per amendment A-005
 /// (`docs/proposed-amendments.md`), the chain has no depth limit; it
 /// ends when the queue drains, a turn is interrupted, or the user
 /// halts (`Ctrl-C` × 2 / `/halt`). Three semantic guards still apply:
 ///
-/// 1. **Self-mention skip** — `@host` mentioning `@host` doesn't fire
+/// 1. **Self-mention skip** — `@host` delegating to `@host` doesn't fire
 ///    a recursive turn; a role talking to itself is a no-op.
 /// 2. **Unknown-role skip** — `@<not-running>` mentions have nobody
 ///    to receive the brief.
@@ -685,14 +708,16 @@ async fn send_and_drain(
             return Ok(());
         };
 
+        let known: Vec<&str> = roles.keys().map(String::as_str).collect();
+        let route_instructions = extract_route_instructions(&current_role, &captured.text, &known);
+
         // Grounding gate: if the role's tool calls were systematically
-        // denied, don't auto-route its `@<peer>` mentions. The reply
-        // was almost certainly an ungrounded guess (memory + git log
-        // instead of source), so dispatching that guess as a brief
-        // would just spread the hallucination across the team. The
-        // user still sees the role's reply; they can re-issue manually
-        // after granting access.
-        if captured.activity.looks_ungrounded() && !captured.mentions.is_empty() {
+        // denied, don't auto-route its explicit `@<peer>` delegations. The
+        // reply was almost certainly an ungrounded guess (memory + git log
+        // instead of source), so dispatching that guess as a brief would just
+        // spread the hallucination across the team. The user still sees the
+        // role's reply; they can re-issue manually after granting access.
+        if captured.activity.looks_ungrounded() && !route_instructions.is_empty() {
             let activity = &captured.activity;
             let suggestion = if activity.denied > 0 {
                 let names = activity.top_denied_tools(3).join(", ");
@@ -722,17 +747,13 @@ async fn send_and_drain(
             continue;
         }
 
-        // Enqueue each mentioned running role for a follow-up turn.
-        // Self-mentions and unknown roles are filtered out silently;
-        // duplicates within a single reply are preserved (a role
-        // mentioning `@peer` twice in one message gets two follow-up
-        // turns — each mention may be a distinct ask, and dedup-by-
-        // string is too aggressive without conversational context).
-        let known: Vec<&str> = roles.keys().map(String::as_str).collect();
-        let next_targets = filter_routable_mentions(&current_role, &captured.mentions, &known);
+        // Enqueue explicit delegation blocks only. A plain prose/table
+        // reference like "waiting for @backend" is not a routing command; a
+        // line that starts with `@backend ...` is. Each target receives the
+        // block addressed to it, not the parent's whole reply.
         let width = crossterm::terminal::size().map_or(80, |(cols, _)| usize::from(cols));
-        for mention in next_targets {
-            let brief = format!("From @{current_role}: {}", captured.text);
+        for instruction in route_instructions {
+            let brief = format!("From @{current_role}: {}", instruction.brief);
             // Render the Slack/Discord-style reply pointer (#99)
             // before dispatching so the user can see *which* part of
             // the parent reply triggered this hop. The handoff
@@ -741,38 +762,277 @@ async fn send_and_drain(
             println!(
                 "{}",
                 render::format_reply_quote(
-                    &mention,
+                    &instruction.target,
                     &current_role,
                     host_role,
-                    &captured.text,
+                    &instruction.brief,
                     width
                 )
             );
-            queue.push_back((mention, brief));
+            queue.push_back((instruction.target, brief));
         }
     }
 
     Ok(())
 }
 
-/// Filter the mentions captured from a finished turn down to roles
-/// that should actually receive a follow-up dispatch. Pure: takes the
-/// finishing role's name, the parsed mentions in order, and the names
-/// of currently running roles. Returns mentions in original order,
-/// with self-mentions and unknown roles removed. Duplicates within a
-/// single reply are preserved (see [`send_and_drain`] worklist
-/// comment for rationale).
-fn filter_routable_mentions(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RouteInstruction {
+    target: String,
+    brief: String,
+}
+
+/// Extract explicit delegation blocks from a role reply.
+///
+/// `@role` in prose is often just attribution ("@security found S1") or a
+/// waiting/status note ("still waiting for @backend"). Auto-routing those
+/// mentions turns reports into fresh tasks and causes cross-role churn. A
+/// routable delegation must start a line (optionally after a list marker):
+///
+/// ```text
+/// @backend review authority.py
+/// 1. @qa validate these release gates
+/// @frontend @security check the URL policy
+/// ```
+///
+/// Continuation lines belong to that delegation until the next explicit
+/// delegation line. This lets a host send focused multi-line briefs without
+/// giving every specialist the whole team brief.
+fn extract_route_instructions(
     current_role: &str,
-    mentions: &[String],
+    text: &str,
     known_roles: &[&str],
-) -> Vec<String> {
-    mentions
-        .iter()
-        .filter(|m| m.as_str() != current_role)
-        .filter(|m| known_roles.contains(&m.as_str()))
-        .cloned()
-        .collect()
+) -> Vec<RouteInstruction> {
+    let mut out = Vec::new();
+    let mut targets: Vec<String> = Vec::new();
+    let mut block: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    let mut block_had_blank = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let fence_marker_line = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+
+        if !in_fence {
+            if let Some((next_targets, first_line)) =
+                parse_delegation_line(line, current_role, known_roles)
+            {
+                flush_route_block(&mut out, &mut targets, &mut block);
+                block_had_blank = false;
+                targets = next_targets;
+                if !first_line.trim().is_empty() {
+                    block.push(first_line);
+                }
+                continue;
+            }
+            if !targets.is_empty() && line_starts_with_role_mention(line) {
+                flush_route_block(&mut out, &mut targets, &mut block);
+                block_had_blank = false;
+                continue;
+            }
+            if !targets.is_empty() && line_has_indented_role_mention(line) {
+                flush_route_block(&mut out, &mut targets, &mut block);
+                block_had_blank = false;
+                continue;
+            }
+        }
+
+        if !targets.is_empty() && !in_fence && block_had_blank && !is_route_continuation_line(line)
+        {
+            flush_route_block(&mut out, &mut targets, &mut block);
+            block_had_blank = false;
+        }
+
+        if !targets.is_empty() {
+            block.push(line.to_owned());
+            block_had_blank = trimmed.is_empty();
+        }
+
+        if fence_marker_line {
+            in_fence = !in_fence;
+        }
+    }
+
+    flush_route_block(&mut out, &mut targets, &mut block);
+    out
+}
+
+fn flush_route_block(
+    out: &mut Vec<RouteInstruction>,
+    targets: &mut Vec<String>,
+    block: &mut Vec<String>,
+) {
+    if targets.is_empty() {
+        return;
+    }
+    let brief = trim_blank_edges(&block.join("\n"));
+    if brief.is_empty() {
+        targets.clear();
+    } else {
+        for target in targets.drain(..) {
+            out.push(RouteInstruction {
+                target,
+                brief: brief.clone(),
+            });
+        }
+    }
+    block.clear();
+}
+
+fn parse_delegation_line(
+    line: &str,
+    current_role: &str,
+    known_roles: &[&str],
+) -> Option<(Vec<String>, String)> {
+    let mut rest = strip_leading_list_marker(line);
+    let mut targets = Vec::new();
+
+    loop {
+        let Some(after_at) = rest.strip_prefix('@') else {
+            break;
+        };
+        let (name, after_name) = take_role_name(after_at)?;
+        if name == current_role || !known_roles.contains(&name.as_str()) {
+            return None;
+        }
+        targets.push(name);
+        if let Some(next_target) = next_delegation_target(after_name) {
+            rest = next_target;
+        } else {
+            rest = trim_delegation_separator(after_name);
+            break;
+        }
+    }
+
+    if targets.is_empty() {
+        None
+    } else {
+        Some((targets, rest.trim_start().to_owned()))
+    }
+}
+
+fn strip_leading_list_marker(line: &str) -> &str {
+    for marker in ["-", "*", "+"] {
+        if let Some(rest) = line.strip_prefix(marker) {
+            if rest.starts_with(char::is_whitespace) {
+                return rest.trim_start();
+            }
+        }
+    }
+    if let Some(rest) = line.strip_prefix('•') {
+        if rest.starts_with(char::is_whitespace) {
+            return rest.trim_start();
+        }
+    }
+
+    let mut digits_end = 0;
+    for (idx, ch) in line.char_indices() {
+        if ch.is_ascii_digit() {
+            digits_end = idx + ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    if digits_end > 0 {
+        let rest = &line[digits_end..];
+        if let Some(after_marker) = rest
+            .strip_prefix('.')
+            .or_else(|| rest.strip_prefix(')'))
+            .filter(|s| s.starts_with(char::is_whitespace))
+        {
+            return after_marker.trim_start();
+        }
+    }
+
+    line
+}
+
+fn is_route_continuation_line(line: &str) -> bool {
+    if line.starts_with(char::is_whitespace) {
+        return true;
+    }
+    let trimmed = line.trim_start();
+    trimmed.starts_with('|')
+        || trimmed.starts_with('>')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+        || strip_leading_list_marker(trimmed) != trimmed
+}
+
+fn line_starts_with_role_mention(line: &str) -> bool {
+    let stripped = strip_leading_list_marker(line);
+    stripped
+        .strip_prefix('@')
+        .and_then(take_role_name)
+        .is_some()
+}
+
+fn line_has_indented_role_mention(line: &str) -> bool {
+    line.starts_with(char::is_whitespace) && line_starts_with_role_mention(line.trim_start())
+}
+
+fn take_role_name(input: &str) -> Option<(String, &str)> {
+    let mut chars = input.char_indices();
+    let (_, first) = chars.next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+    let mut end = first.len_utf8();
+    for (idx, ch) in chars {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
+            end = idx + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    Some((input[..end].to_owned(), &input[end..]))
+}
+
+fn next_delegation_target(after_name: &str) -> Option<&str> {
+    let rest = trim_delegation_separator(after_name);
+    if rest.starts_with('@') {
+        return Some(rest);
+    }
+    for sep in ["and", "or"] {
+        if let Some(after_sep) = rest.strip_prefix(sep) {
+            if after_sep.starts_with(char::is_whitespace) {
+                let after_sep = after_sep.trim_start();
+                if after_sep.starts_with('@') {
+                    return Some(after_sep);
+                }
+            }
+        }
+    }
+    for sep in ["&", "+", "和", "与", "及", "并"] {
+        if let Some(after_sep) = rest.strip_prefix(sep) {
+            let after_sep = after_sep.trim_start();
+            if after_sep.starts_with('@') {
+                return Some(after_sep);
+            }
+        }
+    }
+    None
+}
+
+fn trim_delegation_separator(input: &str) -> &str {
+    input.trim_start_matches(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                ':' | '：' | ',' | '，' | '、' | '/' | '.' | '。' | ';' | '；'
+            )
+    })
+}
+
+fn trim_blank_edges(input: &str) -> String {
+    let mut lines: Vec<&str> = input.lines().collect();
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
 }
 
 #[allow(
@@ -1080,6 +1340,9 @@ async fn refresh_role(
     if let Err(error) = sessions::clear_session_id(&project_root, role) {
         debug!(role, %error, "could not clear session id during refresh");
     }
+    if let Err(error) = sessions::remove_current_room_role(&project_root, role) {
+        debug!(role, %error, "could not clear role from current room session during refresh");
+    }
     match spawn_role(context, role).await {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
@@ -1089,6 +1352,90 @@ async fn refresh_role(
             output::bad(format!("refreshing @{role} failed: {error:#}"));
         }
     }
+}
+
+async fn handle_resume(
+    context: &SpawnContext<'_>,
+    roles: &mut HashMap<String, RunningRole>,
+    selector: Option<&str>,
+    project_root: &Path,
+) {
+    let Some(selector) = selector.map(str::trim).filter(|s| !s.is_empty()) else {
+        print_room_sessions(project_root);
+        return;
+    };
+    let session = match sessions::resolve_room_session(project_root, selector) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            output::bad(format!("no saved room session matches `{selector}`"));
+            print_room_sessions(project_root);
+            return;
+        }
+        Err(error) => {
+            output::bad(format!("reading room sessions failed: {error}"));
+            return;
+        }
+    };
+
+    output::system(format!("resuming CodeRoom session {}", session.id));
+    shutdown_all_roles(roles, StopReason::Refreshed);
+    if let Err(error) = sessions::activate_room_session(project_root, &session) {
+        output::bad(format!("activating session failed: {error}"));
+        return;
+    }
+
+    for role in context.cfg.role_names() {
+        match spawn_role(context, role).await {
+            Ok(running) => {
+                roles.insert(role.to_owned(), running);
+            }
+            Err(error) => {
+                output::bad(format!("spawning @{role} from session failed: {error:#}"));
+            }
+        }
+    }
+    output::ok(format!(
+        "resumed {} ({} role session{})",
+        session.id,
+        session.role_sessions.len(),
+        if session.role_sessions.len() == 1 {
+            ""
+        } else {
+            "s"
+        }
+    ));
+}
+
+fn print_room_sessions(project_root: &Path) {
+    let current = sessions::read_current_room_id(project_root)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let sessions = match sessions::list_room_sessions(project_root) {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            output::bad(format!("reading room sessions failed: {error}"));
+            return;
+        }
+    };
+    if sessions.is_empty() {
+        output::hint("no saved room sessions yet");
+        return;
+    }
+    println!("saved CodeRoom sessions:");
+    for (index, session) in sessions.iter().enumerate() {
+        let role_count = session.role_sessions.len();
+        let marker = if session.id == current { "*" } else { " " };
+        println!(
+            "  {marker} {:>2}. {}  updated {}  {} role session{}",
+            index + 1,
+            session.id,
+            session.updated_at,
+            role_count,
+            if role_count == 1 { "" } else { "s" }
+        );
+    }
+    output::hint("use `/resume <number|id|prefix|latest>` to switch");
 }
 
 /// Compose priors, stage them in a tempfile, spawn the role's
@@ -1128,6 +1475,23 @@ async fn try_start_role(
     }
 }
 
+fn is_resumable_session_id(engine: Engine, role: &str, session_id: &str) -> bool {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Older CodeRoom builds wrote synthetic placeholders for engines
+    // whose real resumable id was not known at startup. Treat those as
+    // non-resumable so an upgraded build does not feed `codex-qa` or
+    // `gemini-security` into the engine's native resume path.
+    match engine {
+        Engine::Cc => true,
+        Engine::Codex => trimmed != format!("codex-{role}"),
+        Engine::Gemini => false,
+    }
+}
+
 async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRole> {
     let cfg = context.cfg;
     let coderoom_dir = context.coderoom_dir;
@@ -1151,17 +1515,20 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         role_cfg.permission_mode = mode;
     }
     // Resume from the prior session if `.coderoom/sessions/ids/<role>.id`
-    // is present (amendment A-006). Engines that don't yet wire the
-    // resume flag (codex, gemini) simply ignore the value. If the
-    // engine rejects a stale id (session was cleaned up locally,
-    // project moved disks), the first spawn errors; we recover by
-    // clearing the stored id and retrying once with a fresh
-    // conversation — so a broken resume never blocks `cr start`.
+    // is present (amendment A-006). If the engine rejects a stale id
+    // (session was cleaned up locally, project moved disks), the first
+    // spawn errors; we recover by clearing the stored id and retrying
+    // once with a fresh conversation — so a broken resume never blocks
+    // `cr start`.
     let project_root = coderoom_dir
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     if let Ok(Some(prior)) = sessions::read_session_id(&project_root, name) {
-        role_cfg.resume_session_id = Some(prior);
+        if is_resumable_session_id(role_cfg.engine, name, &prior) {
+            role_cfg.resume_session_id = Some(prior);
+        } else if let Err(error) = sessions::clear_session_id(&project_root, name) {
+            debug!(role = %name, %error, "failed to clear non-resumable legacy session id");
+        }
     }
 
     let handle = match try_start_role(context, name, &role_cfg).await {
@@ -1228,9 +1595,9 @@ fn writepriors_tempfile(role: &str, composed: &str) -> Result<NamedTempFile> {
 }
 
 /// Forward all events from a role's `rx_events` into the shared bus.
-/// Side-effect: when a `RoleStarted` event flows through, persist its
-/// `session_id` into `.coderoom/sessions/ids/<role>.id` so the next `cr
-/// start` can resume the conversation (amendment A-006).
+/// Side-effect: when an event carries a resumable session id, persist it
+/// into `.coderoom/sessions/ids/<role>.id` so the next `cr start` can
+/// resume the conversation (amendment A-006).
 fn spawn_event_forwarder(
     role: String,
     project_root: PathBuf,
@@ -1239,16 +1606,27 @@ fn spawn_event_forwarder(
 ) {
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let CrepEvent::RoleStarted { session_id, .. } = &event {
-                if !session_id.trim().is_empty() {
-                    if let Err(error) = sessions::write_session_id(&project_root, &role, session_id)
-                    {
-                        warn!(
-                            role,
-                            %error,
-                            "failed to persist session id for resume — next start will fresh-spawn this role"
-                        );
-                    }
+            let session_id = match &event {
+                CrepEvent::RoleStarted { session_id, .. }
+                | CrepEvent::RoleSessionUpdated { session_id, .. } => Some(session_id),
+                _ => None,
+            };
+            if let Some(session_id) = session_id.filter(|id| !id.trim().is_empty()) {
+                if let Err(error) = sessions::write_session_id(&project_root, &role, session_id) {
+                    warn!(
+                        role,
+                        %error,
+                        "failed to persist session id for resume — next start will fresh-spawn this role"
+                    );
+                }
+                if let Err(error) =
+                    sessions::record_current_room_role_session(&project_root, &role, session_id)
+                {
+                    warn!(
+                        role,
+                        %error,
+                        "failed to update room session history"
+                    );
                 }
             }
             if let Err(error) = bus.publish(event).await {

@@ -81,6 +81,11 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommand] = &[
         takes_args: true,
     },
     SlashCommand {
+        name: "resume",
+        description: "list or switch saved room sessions",
+        takes_args: true,
+    },
+    SlashCommand {
         name: "stop",
         description: "terminate a role's subprocess",
         takes_args: true,
@@ -182,6 +187,9 @@ pub enum Command {
     /// composed priors (shared.md + role.md + active patches). The
     /// old subprocess is dropped; a fresh one starts.
     Refresh(String),
+    /// `/resume` lists saved CodeRoom room sessions. `/resume <id|index|latest>`
+    /// switches the room to that saved set of per-role engine sessions.
+    Resume(Option<String>),
     /// `/transcript <role>` — show the last few RoleSpoke entries for a
     /// role from `.coderoom/messages.jsonl`.
     Transcript(String),
@@ -246,6 +254,14 @@ pub fn parse_line(input: &str) -> Command {
                     Command::Help
                 } else {
                     Command::Refresh(role)
+                }
+            }
+            "resume" => {
+                let selector = arg.trim();
+                if selector.is_empty() {
+                    Command::Resume(None)
+                } else {
+                    Command::Resume(Some(selector.to_owned()))
                 }
             }
             "transcript" if !arg.is_empty() => {
