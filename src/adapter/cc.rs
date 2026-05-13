@@ -11,8 +11,7 @@
 //! ```text
 //! claude --print --input-format=stream-json --output-format=stream-json \
 //!        --include-hook-events --verbose --dangerously-skip-permissions \
-//!        --max-budget-usd=<cap> --append-system-prompt-file=<priors> \
-//!        [--model=<model>]
+//!        --append-system-prompt-file=<priors> [--model=<model>]
 //! ```
 //!
 //! v0.1 scope:
@@ -26,8 +25,7 @@
 //!
 //! Out of v0.2 scope (deferred to follow-up PRs): routing dynamic
 //! `UserMessage::ToolDecision` values back into an already-running Claude
-//! native approval prompt, and parsing `terminal_reason` to detect
-//! budget-cap exits separately from crashes.
+//! native approval prompt.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -114,7 +112,6 @@ impl EngineAdapter for CcAdapter {
             .arg("--include-hook-events")
             .arg("--verbose")
             .arg("--dangerously-skip-permissions")
-            .arg(format!("--max-budget-usd={}", config.budget_usd))
             .arg(format!(
                 "--append-system-prompt-file={}",
                 config.priors_path.display()

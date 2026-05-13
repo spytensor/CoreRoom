@@ -218,7 +218,6 @@ impl EngineAdapter for CodexAdapter {
 
         tokio::spawn(write_loop(
             priors_text,
-            config.budget_usd,
             config.permission_mode,
             config.resume_session_id.clone(),
             rx_user,
@@ -1185,11 +1184,10 @@ async fn drain_stderr(role: String, stderr: ChildStderr) {
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "all 8 are intrinsic state for the loop; bundling them into a struct only moves the noise"
+    reason = "all 7 are intrinsic state for the loop; bundling them into a struct only moves the noise"
 )]
 async fn write_loop(
     priors_text: String,
-    budget_usd: f64,
     permission_mode: PermissionMode,
     initial_thread_id: Option<String>,
     mut rx: mpsc::Receiver<UserMessage>,
@@ -1215,7 +1213,6 @@ async fn write_loop(
             sandbox,
             thread_id.as_deref(),
         );
-        let _ = budget_usd; // wired in v0.2 with codex's --max-* config
 
         // Allocate the tools/call request id up front and publish it
         // into the cancel-tracker before sending. The drainer reads
@@ -1670,7 +1667,6 @@ mod tests {
                     engine: Engine::Codex,
                     model: None,
                     priors_path: PathBuf::from("/missing/priors.md"),
-                    budget_usd: 0.50,
                     permission_mode,
                     permission_policy_path: None,
                     permission_socket_path: None,

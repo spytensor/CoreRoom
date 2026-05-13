@@ -183,9 +183,6 @@ pub struct RoleConfig {
     /// Path to the composed system prompt file. The adapter is expected
     /// to load this verbatim into the engine's session.
     pub priors_path: PathBuf,
-    /// Maximum dollar amount the engine may spend on this session before
-    /// the adapter forces a `RoleStopped { reason: Budget }`.
-    pub budget_usd: f64,
     /// Permission mode applied to this role's tool calls.
     pub permission_mode: PermissionMode,
     /// Optional path to the session policy file used by hook-backed

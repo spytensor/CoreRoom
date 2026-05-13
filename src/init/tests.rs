@@ -321,7 +321,6 @@ fn host_only_config(default_engine: Engine, default_model: Option<&str>) -> Conf
         default_engine,
         default_model: default_model.map(ToOwned::to_owned),
         permission_mode: PermissionMode::Ask,
-        budget_per_role_usd: 0.50,
         host_role: "host".into(),
         roles: HashMap::from([("host".into(), RoleEntry::default())]),
     }

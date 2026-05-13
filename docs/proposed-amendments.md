@@ -94,9 +94,9 @@ Accepted in #67 and implemented in v0.1.12.
 
 ### Problem
 
-The v0.1 document promises wrapper-side permission gating and budget caps
-for every engine. That is only fully true for Claude Code today. Codex and
-Gemini have different surfaces for approvals, tool traces, and usage data.
+The v0.1 document promises wrapper-side permission gating for every
+engine. That is only fully true for Claude Code today. Codex and Gemini
+have different surfaces for approvals, tool traces, and usage data.
 
 ### Alternatives considered
 
@@ -233,8 +233,8 @@ The "smart models will loop forever" risk that motivated the 1-hop cap in
 v0.1 has not held up under 2026 frontier models. They reliably converge
 ("we're done here", "no further questions") on their own when the prompts
 don't push them into adversarial roles. The escape hatches that matter
-(per-role budget, Ctrl-C two-press halt, `/halt`, grounding-gate skip on
-all-denied tools) are already in place and are *not* depth-based.
+(Ctrl-C two-press halt, `/halt`, grounding-gate skip on all-denied tools)
+are already in place and are *not* depth-based.
 
 ### Alternatives considered
 
@@ -259,7 +259,7 @@ Replace the architecture.md failure-mode entry:
 with:
 
 ```
-| Routing loops (`@a` ↔ `@b` ↔ `@a`) | Trust the model + bounded by user. Auto-router skips three cases only: self-mention (`@a` mentioning `@a`), unknown role (`@<not-running>`), and ungrounded turn (tool calls were systematically denied → reply is a guess, not data). Hop depth is unbounded. User halts a runaway chain with Ctrl-C twice or `/halt`; per-role budgets cap total spend per chain. |
+| Routing loops (`@a` ↔ `@b` ↔ `@a`) | Trust the model + bounded by user. Auto-router skips three cases only: self-mention (`@a` mentioning `@a`), unknown role (`@<not-running>`), and ungrounded turn (tool calls were systematically denied → reply is a guess, not data). Hop depth is unbounded. User halts a runaway chain with Ctrl-C twice or `/halt`. |
 ```
 
 Replace the layered diagram line "enforces hop-depth limit, inflight
@@ -288,13 +288,11 @@ tracked as a separate v0.2.x deliverable. The dispatcher works without
 them; once the IDs land, `cr show` will be able to reconstruct chains by
 walking `parent_turn_id` ancestry.
 
-Spend: a chain can burn more tokens than before. The structural cap is
-the per-role engine budget — `budget_per_role_usd` is wired into the cc
-adapter (`--max-budget-usd` on spawn). **Caveat:** Codex ignores the
-value pending its own `--max-*` config, and Gemini has no native budget
-flag, so on those engines the only real spend bound is the user's
-`Ctrl-C` and any platform-side quota. Users running unbounded routing
-on chatty Codex/Gemini roles should keep that in mind.
+Spend: a chain can burn more tokens than before. CodeRoom does not
+impose a wrapper-side budget cap — the bound is the user's `Ctrl-C`,
+platform-side quotas, and the per-turn cost surfaced in the WorkCard.
+Users running unbounded routing on chatty roles should keep that in
+mind.
 
 ### Decision
 

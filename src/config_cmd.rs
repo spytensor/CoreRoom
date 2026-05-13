@@ -79,9 +79,6 @@ pub fn get(project_root: &Path, key: &str) -> Result<()> {
             .default_model
             .clone()
             .unwrap_or_else(|| "(engine default)".to_owned()),
-        "budget_per_role_usd" | "defaults.budget_per_role_usd" => {
-            format!("{:.2}", cfg.budget_per_role_usd)
-        }
         "permission_mode" | "defaults.permission_mode" => cfg.permission_mode.as_str().to_owned(),
         "host_role" => cfg.host_role,
         other => bail!("unsupported key `{other}`"),
@@ -216,7 +213,6 @@ fn normalize_set_key(layer: LayerTarget, key: &str) -> String {
     if layer == LayerTarget::User {
         match key {
             "default_engine" => "defaults.engine".to_owned(),
-            "budget_per_role_usd" => "defaults.budget_per_role_usd".to_owned(),
             "permission_mode" => "defaults.permission_mode".to_owned(),
             _ => key.to_owned(),
         }
@@ -252,8 +248,6 @@ const USER_STUB: &str = "\
 #
 # [defaults]
 # engine = \"cc\"             # cc | codex | gemini
-# budget_per_role_usd = 0.30  # personal floor; project's budget is
-#                              # min'd with this.
 # permission_mode = \"ask\"    # ask | auto | bypass
 #
 # [engines.cc]
@@ -342,7 +336,6 @@ fn print_effective(cfg: &Config, coderoom_dir: &Path) {
     } else {
         println!("default_model       = (engine default)");
     }
-    println!("budget_per_role_usd = {:.2}", cfg.budget_per_role_usd);
     println!("permission_mode     = {}", cfg.permission_mode.as_str());
     println!("host_role           = {}", cfg.host_role);
     println!();

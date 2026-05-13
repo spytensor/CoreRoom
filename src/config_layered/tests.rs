@@ -8,7 +8,6 @@ fn write_minimal_project(coderoom: &Path, body_extra: &str) {
     let body = format!(
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -33,7 +32,6 @@ fn project_only_loads_unchanged() {
     let cfg = load(tmp.path(), None).expect("load");
     assert_eq!(cfg.default_engine, Engine::Cc);
     assert_eq!(cfg.permission_mode, PermissionMode::Ask);
-    assert!((cfg.budget_per_role_usd - 0.50).abs() < 1e-9);
     assert_eq!(cfg.host_role, "host");
 }
 
@@ -55,7 +53,6 @@ permission_mode = "auto"
         r#"
 default_engine = "cc"
 permission_mode = "bypass"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -84,7 +81,6 @@ engine = "codex"
     std::fs::write(
         coderoom.join(CONFIG_FILE),
         r#"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -112,40 +108,6 @@ engine = "codex"
     write_minimal_project(&coderoom, ""); // project: cc
     let cfg = load(tmp.path(), Some(&user_path)).expect("load");
     assert_eq!(cfg.default_engine, Engine::Cc);
-}
-
-#[test]
-fn budget_takes_min_across_layers() {
-    let tmp = TempDir::new().unwrap();
-    let user_path = tmp.path().join("user-config.toml");
-    write_user(
-        &user_path,
-        r"
-[defaults]
-budget_per_role_usd = 0.20
-",
-    );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, ""); // project: 0.50
-    let cfg = load(tmp.path(), Some(&user_path)).expect("load");
-    assert!((cfg.budget_per_role_usd - 0.20).abs() < 1e-9);
-}
-
-#[test]
-fn budget_user_higher_does_not_relax_project_floor() {
-    let tmp = TempDir::new().unwrap();
-    let user_path = tmp.path().join("user-config.toml");
-    write_user(
-        &user_path,
-        r"
-[defaults]
-budget_per_role_usd = 5.00
-",
-    );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, ""); // 0.50 wins
-    let cfg = load(tmp.path(), Some(&user_path)).expect("load");
-    assert!((cfg.budget_per_role_usd - 0.50).abs() < 1e-9);
 }
 
 #[test]
@@ -186,7 +148,6 @@ fn project_layer_with_engine_bin_is_rejected() {
         coderoom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -213,7 +174,6 @@ fn project_layer_with_engine_api_key_env_is_rejected() {
         coderoom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -267,7 +227,6 @@ fn missing_default_engine_in_all_layers_errors() {
     std::fs::write(
         coderoom.join(CONFIG_FILE),
         r#"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -292,7 +251,6 @@ fn merged_always_include_unions_layers_then_filters_never() {
         default_engine: Some(Engine::Cc),
         default_model: None,
         permission_mode: None,
-        budget_per_role_usd: Some(0.5),
         host_role: "host".into(),
         roles: HashMap::new(),
         init: Some(InitConfig {
@@ -318,7 +276,6 @@ fn schema_version_is_accepted_but_not_required() {
         r#"
 schema_version = 1
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]

@@ -41,7 +41,6 @@ mod tests {
             r#"
 default_engine = "cc"
 permission_mode = "ask"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]

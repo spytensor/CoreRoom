@@ -41,7 +41,6 @@ async fn cc_smoke_says_hello() {
         engine: Engine::Cc,
         model: None,
         priors_path,
-        budget_usd: 0.50,
         permission_mode: PermissionMode::Bypass,
         permission_policy_path: None,
         permission_socket_path: None,
