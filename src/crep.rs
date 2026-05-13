@@ -265,9 +265,6 @@ pub enum StopReason {
     Refreshed,
     /// Subprocess crashed unexpectedly. Wrapper logs the cause.
     Crashed,
-    /// `--max-budget-usd` ceiling was hit. Tool calls and replies stop;
-    /// user must explicitly raise the cap or `/refresh`.
-    Budget,
     /// The wrapper timed out while waiting for the role to finish its
     /// current turn.
     ///
@@ -607,10 +604,6 @@ mod tests {
             "\"refreshed\""
         );
         assert_eq!(
-            serde_json::to_string(&StopReason::Budget).unwrap(),
-            "\"budget\""
-        );
-        assert_eq!(
             serde_json::from_str::<StopReason>("\"completed\"").unwrap(),
             StopReason::Completed
         );
@@ -624,12 +617,12 @@ mod tests {
     fn role_stopped_event_shape() {
         let event = CrepEvent::RoleStopped {
             role: "backend".into(),
-            reason: StopReason::Budget,
+            reason: StopReason::Completed,
             turn_id: None,
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_stopped");
-        assert_eq!(wire["reason"], "budget");
+        assert_eq!(wire["reason"], "completed");
     }
 
     #[test]

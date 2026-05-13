@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Per-role budget cap (`budget_per_role_usd`).** The day-1
+  `--max-budget-usd` plumbing was a silent failure mode: when the cap
+  was hit, Claude Code returned an empty `result` envelope which the
+  adapter rendered as a successful zero-step turn. Users saw "done · 0s
+  · 0 steps" with no explanation, the resumed session stayed wedged at
+  the cumulative cost just over the cap, and every follow-up prompt
+  burned an init for nothing. The flag, the config field
+  (`budget_per_role_usd` in both project and user layers),
+  `StopReason::Budget`, and the `--max-budget-usd` cc-adapter arg are
+  all gone. Spend bounds are now the user's `Ctrl-C`, the per-turn cost
+  surfaced in the WorkCard, and any platform-side quota. **Migration:**
+  remove `budget_per_role_usd` from any `.coderoom/config.toml` and
+  user-level config; the field is no longer accepted.
+
 ### Fixed
 
 - **Auto-routing now distinguishes delegation from attribution.** Role
@@ -115,8 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v0.1 "≥3 hops triggers escalation" failure-mode entry is dropped.
   Three semantic guards remain (self-mention skip, unknown-role
   skip, grounding-gate skip on all-denied turns); the user halts
-  with Ctrl-C × 2 or `/halt`. Per-role budgets are still the spend
-  cap. (#111, #A)
+  with Ctrl-C × 2 or `/halt`. (#111, #A)
 - **CommonMark thematic break in role replies.** `---`, `***`,
   `___`, and the space-separated `- - -` form now render as a
   colored divider across the available column budget, instead of

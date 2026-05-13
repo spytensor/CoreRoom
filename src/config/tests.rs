@@ -23,7 +23,6 @@ fn load_minimal_valid_config() {
     let tmp = fixture(
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.5
 host_role = "pm"
 
 [roles.pm]
@@ -46,7 +45,6 @@ fn role_config_inherits_defaults() {
         r#"
 default_engine = "cc"
 default_model = "opus"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]
@@ -60,7 +58,6 @@ host_role = "pm"
     assert_eq!(pm.name, "pm");
     assert_eq!(pm.engine, Engine::Cc);
     assert_eq!(pm.model.as_deref(), Some("opus"));
-    assert!((pm.budget_usd - 0.50).abs() < 1e-9);
     assert_eq!(pm.permission_mode, PermissionMode::Ask);
 
     let backend = cfg.role_config("backend", &coderoom).unwrap();
@@ -76,7 +73,6 @@ fn role_config_overrides_engine_and_model() {
 default_engine = "cc"
 default_model = "opus"
 permission_mode = "auto"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]
@@ -109,7 +105,6 @@ fn codex_role_without_permission_override_uses_bypass() {
         r#"
 default_engine = "cc"
 permission_mode = "ask"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]
@@ -137,7 +132,6 @@ fn explicit_codex_permission_mode_is_preserved() {
         r#"
 default_engine = "cc"
 permission_mode = "bypass"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]
@@ -165,7 +159,6 @@ fn missing_host_role_is_rejected() {
     let tmp = fixture(
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "ghost"
 
 [roles.pm]
@@ -187,7 +180,6 @@ fn missing_priors_file_is_rejected() {
     let tmp = fixture(
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]
@@ -201,24 +193,6 @@ host_role = "pm"
         ConfigError::MissingPriors { role, .. } => {
             assert_eq!(role, "frontend");
         }
-        other => panic!("unexpected error: {other:?}"),
-    }
-}
-
-#[test]
-fn invalid_budget_is_rejected() {
-    let tmp = fixture(
-        r#"
-default_engine = "cc"
-budget_per_role_usd = -1.0
-host_role = "pm"
-
-[roles.pm]
-[roles.backend]
-"#,
-    );
-    match Config::load_test(tmp.path()).expect_err("should reject negative budget") {
-        ConfigError::InvalidBudget(b) => assert!((b - -1.0).abs() < 1e-9),
         other => panic!("unexpected error: {other:?}"),
     }
 }
@@ -238,7 +212,6 @@ fn role_names_returns_all_declared_roles() {
     let tmp = fixture(
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "pm"
 
 [roles.pm]

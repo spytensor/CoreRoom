@@ -13,7 +13,6 @@ fn fixture() -> TempDir {
         coderoom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]
@@ -112,7 +111,6 @@ fn add_many_preserves_existing_config_text() {
         &config_path,
         r#"# keep this comment
 default_engine = "cc"
-budget_per_role_usd = 0.50
 host_role = "host"
 
 [roles.host]

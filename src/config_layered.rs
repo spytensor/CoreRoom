@@ -17,7 +17,7 @@
 //!   roles, update-check toggle.
 //! - **Project layer** (committed to the project's git repo):
 //!   the team contract. Roles topology, host role, project-pinned
-//!   engine/model, budget cap.
+//!   engine/model.
 //! - **Local layer** (gitignored, machine-specific): paths and other
 //!   things that vary per checkout but were discovered while working
 //!   in this repo. Today: only `engines.X.bin` and engine
@@ -113,11 +113,6 @@ pub struct UserDefaults {
     /// Engine to use when neither project nor local pins one.
     #[serde(default)]
     pub engine: Option<Engine>,
-    /// Personal floor on per-role spend; merged via `min()` across all
-    /// declaring layers so user can self-protect even when project
-    /// declares a higher value.
-    #[serde(default)]
-    pub budget_per_role_usd: Option<f64>,
     /// Default wrapper permission mode when a project doesn't pin one.
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
@@ -198,9 +193,6 @@ pub struct ProjectConfigRaw {
     /// Project-pinned default permission mode.
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
-    /// Project-side spend cap. Merged via `min()` with user's value.
-    #[serde(default)]
-    pub budget_per_role_usd: Option<f64>,
     /// Required: name of the host role.
     pub host_role: String,
     /// Required (may be empty): role declarations.
@@ -418,8 +410,6 @@ fn validate_project_layer(cfg: &ProjectConfigRaw, path: &Path) -> ConfigResult<(
 ///
 /// - **Scalars** (`default_engine`, `default_model`, `host_role`):
 ///   highest layer wins. Project beats user; user fills gaps.
-/// - **`budget_per_role_usd`**: `min()` across all layers that declare
-///   a value. At least one layer MUST declare it.
 /// - **`init.always_include`**: union across layers, then filtered by
 ///   `never_include` from any layer.
 /// - **`engines.X.model`**: layer-priority (project > user) with
@@ -455,29 +445,10 @@ fn merge(
         })
         .unwrap_or(PermissionMode::Ask);
 
-    let mut budgets: Vec<f64> = Vec::new();
-    if let Some(b) = project.budget_per_role_usd {
-        budgets.push(b);
-    }
-    if let Some(b) = user
-        .and_then(|u| u.defaults.as_ref())
-        .and_then(|d| d.budget_per_role_usd)
-    {
-        budgets.push(b);
-    }
-    if budgets.is_empty() {
-        return Err(ConfigError::InvalidBudget(0.0));
-    }
-    let budget_per_role_usd = budgets.into_iter().fold(f64::INFINITY, f64::min);
-    if !budget_per_role_usd.is_finite() || budget_per_role_usd <= 0.0 {
-        return Err(ConfigError::InvalidBudget(budget_per_role_usd));
-    }
-
     Ok(Config {
         default_engine,
         default_model,
         permission_mode,
-        budget_per_role_usd,
         host_role: project.host_role.clone(),
         roles: project.roles.clone(),
     })

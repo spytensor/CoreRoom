@@ -75,12 +75,6 @@ fn render_config(roles: &[RolePlan]) -> String {
     );
     let _ = writeln!(out, "permission_mode = \"ask\"");
     let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "# Per-role budget cap in USD, fed to each engine's native budget flag."
-    );
-    let _ = writeln!(out, "budget_per_role_usd = 0.50");
-    let _ = writeln!(out);
     let _ = writeln!(out, "# Role that catches un-addressed text in the REPL.");
     let _ = writeln!(out, "host_role = \"host\"");
     let _ = writeln!(out);

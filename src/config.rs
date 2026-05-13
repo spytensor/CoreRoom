@@ -17,7 +17,6 @@
 //! default_engine = "cc"          # cc | codex | gemini
 //! default_model = "opus"         # optional; engine-specific id
 //! permission_mode = "ask"        # ask | auto | bypass
-//! budget_per_role_usd = 0.50     # hard cap fed to each engine
 //! host_role = "pm"               # role that catches un-addressed text
 //!
 //! [roles.pm]
@@ -57,9 +56,6 @@ pub struct Config {
     /// Default permission mode for any role that doesn't override.
     #[serde(default = "default_permission_mode")]
     pub permission_mode: PermissionMode,
-    /// Per-role budget cap in USD, fed to each engine via its native
-    /// budget flag (`--max-budget-usd` for `cc`, etc.).
-    pub budget_per_role_usd: f64,
     /// Name of the role that catches un-addressed text in the REPL.
     /// Must exist in [`Self::roles`].
     pub host_role: String,
@@ -125,9 +121,6 @@ pub enum ConfigError {
         /// Path the loader checked.
         expected: PathBuf,
     },
-    /// `budget_per_role_usd` was not a positive finite number.
-    #[error("budget_per_role_usd must be positive and finite, got {0}")]
-    InvalidBudget(f64),
     /// A categorical scoping rule was violated: a key only allowed in
     /// one specific layer was found in a different layer (e.g.
     /// `engines.cc.bin` in committed project config, or `[roles]` in
@@ -163,9 +156,8 @@ impl Config {
     /// the user's project repo root. Validation includes:
     ///
     /// 1. TOML parses into the documented shape.
-    /// 2. `budget_per_role_usd` is positive + finite.
-    /// 3. `host_role` is one of the declared roles.
-    /// 4. Every declared role has a priors file at
+    /// 2. `host_role` is one of the declared roles.
+    /// 3. Every declared role has a priors file at
     ///    `.coderoom/roles/<role>.md`.
     pub fn load(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
         // Delegate to the layered loader. Production code resolves
@@ -181,10 +173,6 @@ impl Config {
     /// Validate the in-memory config against on-disk state. Used by
     /// [`Self::load`]; exposed so tests can validate hand-built configs.
     pub fn validate(&self, coderoom_dir: &Path) -> ConfigResult<()> {
-        if !self.budget_per_role_usd.is_finite() || self.budget_per_role_usd <= 0.0 {
-            return Err(ConfigError::InvalidBudget(self.budget_per_role_usd));
-        }
-
         if !self.roles.contains_key(&self.host_role) {
             let mut declared: Vec<String> = self.roles.keys().cloned().collect();
             declared.sort();
@@ -235,7 +223,6 @@ impl Config {
             engine,
             model: entry.model.clone().or_else(|| self.default_model.clone()),
             priors_path: priors_path_for(coderoom_dir, name),
-            budget_usd: self.budget_per_role_usd,
             permission_mode,
             permission_policy_path: None,
             permission_socket_path: None,

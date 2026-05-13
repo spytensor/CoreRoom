@@ -161,7 +161,6 @@ Each is a one-liner with rationale. Detailed sections follow.
     `cr review` (clustering + propose-promote) lands in v0.2.
 13. **Hard caps from day 1.** 50 patches per role, FIFO archive on overflow.
     Hop-depth ≥3 across roles in one thread escalates back to user.
-    `--max-budget-usd` ceiling on every engine call.
 14. **Default-deny on hook failure.** If the PreToolUse hook script crashes,
     the wrapper treats it as deny + alerts the user. Never silent-approve.
 
@@ -180,7 +179,7 @@ these. UI, message bus, and patch logic only ever see CREP.
 | `ToolCallProposed` | PreToolUse fired                                 | role, tool_name, tool_input, tool_use_id, turn_id, thread_id |
 | `ToolCallExecuted` | PostToolUse fired                                | role, tool_use_id, ok, output_summary, turn_id, thread_id |
 | `PermissionDenied` | Wrapper denied via PreToolUse                    | role, tool_name, tool_input, reason, turn_id, thread_id |
-| `RoleStopped`      | Subprocess exited or `/refresh` invoked          | role, reason: completed/refreshed/crashed/budget, turn_id (Some when stopped during a turn) |
+| `RoleStopped`      | Subprocess exited or `/refresh` invoked          | role, reason: completed/refreshed/crashed, turn_id (Some when stopped during a turn) |
 
 v0.2 amendment: `RoleStopped.reason="timed_out"` is retired alongside
 the wall-clock `PER_TURN_TIMEOUT` (deleted in PR b). Turn-level
@@ -203,8 +202,8 @@ PermissionDenied, RoleStopped).
 
 - Spawn: `claude --print --input-format=stream-json --output-format=stream-json
   --verbose --dangerously-skip-permissions --append-system-prompt-file <priors>
-  --settings <hooks-config> --max-budget-usd <cap>` when permission mode is
-  `ask` or `auto`; `bypass` omits the hook settings.
+  --settings <hooks-config>` when permission mode is `ask` or `auto`;
+  `bypass` omits the hook settings.
 - Input: stream-json messages on stdin. `content` must be array of blocks
   (`[{"type":"text","text":"…"}]`), not bare string.
 - Output: stream-json on stdout (`system`, `assistant`, `result`,
@@ -352,10 +351,10 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 | Brief loses thread context (HIPAA)   | Thread sticky: rolling 200-token constraint summary auto-prepended on every cross-role route. User-emphasized statements ("we use…", "must…") seed it. |
 | Journal hallucination compounding    | JSON-schema-enforced citations on every `learned` entry; unverified entries quarantined |
 | Patch directory bloat                | Hard 50-cap per role + FIFO archive at v0.1               |
-| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router only acts on explicit delegation lines that start with `@role`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). Per-role budgets cap total spend per chain. See `docs/proposed-amendments.md` A-005. |
+| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router only acts on explicit delegation lines that start with `@role`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). See `docs/proposed-amendments.md` A-005. |
 | Permission gate fail-open            | Hook script defaults to deny on any error; wrapper supervises hook process and treats non-zero exit without decision-file as deny |
 | Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coderoom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
-| Token cost runaway                   | `--max-budget-usd` ceiling per engine call. Wrapper-tracked daily aggregate per role with soft warning |
+| Token cost runaway                   | User halts with `Ctrl-C` × 2 or `/halt`; cost per turn is surfaced in the WorkCard so runaway behavior is visible |
 | Role identity drift over months      | v0.2 `cr review` diffs journal-self vs priors-self and surfaces contradictions |
 
 ## v0.1 scope

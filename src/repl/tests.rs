@@ -511,7 +511,6 @@ fn splash_snapshot_config() -> Config {
         default_engine: Engine::Cc,
         default_model: None,
         permission_mode: PermissionMode::Ask,
-        budget_per_role_usd: 1.0,
         host_role: "host".into(),
         roles: HashMap::from([
             (

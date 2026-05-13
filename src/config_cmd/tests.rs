@@ -10,7 +10,6 @@ fn fixture() -> TempDir {
     fs::write(
         coderoom.join(CONFIG_FILE),
         "default_engine = \"cc\"\n\
-         budget_per_role_usd = 0.50\n\
          host_role = \"host\"\n\n\
          [roles.host]\n",
     )
@@ -139,15 +138,9 @@ fn path_subcommand_prints_each_layer() {
 #[test]
 fn set_project_scalar_updates_config() {
     let tmp = fixture();
-    set(
-        LayerTarget::Project,
-        tmp.path(),
-        "budget_per_role_usd",
-        "0.25",
-    )
-    .unwrap();
+    set(LayerTarget::Project, tmp.path(), "default_model", "opus").unwrap();
     let cfg = crate::config::Config::load_test(tmp.path()).unwrap();
-    assert!((cfg.budget_per_role_usd - 0.25).abs() < 1e-9);
+    assert_eq!(cfg.default_model.as_deref(), Some("opus"));
 }
 
 #[test]
