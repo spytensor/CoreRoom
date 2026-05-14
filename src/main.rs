@@ -85,6 +85,11 @@ enum Cmd {
         /// Render only the last N matching events.
         #[arg(long)]
         tail: Option<usize>,
+        /// List turns whose `TurnIntent` has no matching `TurnCommit`
+        /// (amendment A-012). CodeRoom never re-runs orphans
+        /// automatically.
+        #[arg(long)]
+        orphans: bool,
     },
     /// Per-role cost summary aggregated from `.coderoom/messages.jsonl`.
     Cost {
@@ -391,6 +396,7 @@ fn main() -> Result<()> {
             role,
             since,
             tail,
+            orphans,
         }) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -401,6 +407,7 @@ fn main() -> Result<()> {
                     role: role.map(|role| role.strip_prefix('@').unwrap_or(&role).to_owned()),
                     since,
                     tail,
+                    orphans,
                 };
                 coderoom::repl::show_log(&project_root, &options).await
             })

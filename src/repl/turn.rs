@@ -331,6 +331,7 @@ pub(super) async fn drain_one_turn(
                             turn_id,
                             thread_id,
                             mentions: _,
+                            priors_hash,
                         } if spoken == role => {
                             let (cleaned, card) = {
                                 let mut work = work.lock().expect("turn work mutex poisoned");
@@ -365,6 +366,7 @@ pub(super) async fn drain_one_turn(
                                     cache_read: *cache_read,
                                     turn_id: turn_id.clone(),
                                     thread_id: thread_id.clone(),
+                                    priors_hash: priors_hash.clone(),
                                 };
                                 render_event(&rendered, host_role);
                             }

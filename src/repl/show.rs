@@ -6,6 +6,7 @@ use crate::bus::MessageBus;
 use crate::config::{Config, CODEROOM_DIR};
 use crate::crep::CrepEvent;
 use crate::output;
+use crate::wal;
 use crate::work;
 
 use super::render::render_event;
@@ -22,6 +23,10 @@ pub struct ShowOptions {
     pub since: Option<chrono::NaiveDate>,
     /// Render only the last N matching events.
     pub tail: Option<usize>,
+    /// Print turns whose `TurnIntent` has no matching `TurnCommit`
+    /// (amendment A-012). When set, all other rendering is suppressed
+    /// and the output is a compact list of orphans.
+    pub orphans: bool,
 }
 
 /// Replay events in `.coderoom/messages.jsonl` through the same renderer
@@ -60,6 +65,10 @@ pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> 
         println!("(message log is empty)");
         return Ok(());
     }
+    if options.orphans {
+        render_orphans(&replay.events, options.role.as_deref());
+        return Ok(());
+    }
     let events = filter_show_events(&replay.events, options);
     if events.is_empty() {
         println!("(no matching events)");
@@ -69,6 +78,40 @@ pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> 
         render_show_event(event, &host_role);
     }
     Ok(())
+}
+
+/// Surface the result of [`wal::scan_orphans`] in the same compact line
+/// format used by other inspection commands.
+fn render_orphans(events: &[CrepEvent], role_filter: Option<&str>) {
+    let orphans = wal::scan_orphans(events);
+    let filtered: Vec<&wal::OrphanTurn> = orphans
+        .iter()
+        .filter(|orphan| match role_filter {
+            Some(role) => orphan.role == role,
+            None => true,
+        })
+        .collect();
+    if filtered.is_empty() {
+        println!("(no orphan turns — every TurnIntent has a matching TurnCommit)");
+        return;
+    }
+    println!(
+        "{} orphan turn(s) — TurnIntent without TurnCommit. CodeRoom does not auto-reissue.",
+        filtered.len()
+    );
+    for orphan in filtered {
+        let parent = orphan
+            .parent_hash
+            .as_deref()
+            .map_or_else(|| "<root>".to_owned(), str::to_owned);
+        println!(
+            "  @{role} · turn {turn_id} · thread {thread_id} · intent {intent_sha} · parent {parent}",
+            role = orphan.role,
+            turn_id = orphan.turn_id,
+            thread_id = orphan.thread_id,
+            intent_sha = orphan.intent_sha,
+        );
+    }
 }
 
 pub(super) fn filter_show_events<'a>(
@@ -103,7 +146,9 @@ fn event_role(event: &CrepEvent) -> &str {
         | CrepEvent::ToolCallProposed { role, .. }
         | CrepEvent::ToolCallExecuted { role, .. }
         | CrepEvent::PermissionDenied { role, .. }
-        | CrepEvent::RoleStopped { role, .. } => role,
+        | CrepEvent::RoleStopped { role, .. }
+        | CrepEvent::TurnIntent { role, .. }
+        | CrepEvent::TurnCommit { role, .. } => role,
     }
 }
 
@@ -122,6 +167,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
         cache_read,
         turn_id,
         thread_id,
+        priors_hash,
     } = event
     else {
         return vec![event.clone()];
@@ -147,6 +193,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
             cache_read: *cache_read,
             turn_id: turn_id.clone(),
             thread_id: thread_id.clone(),
+            priors_hash: priors_hash.clone(),
         });
     }
     events

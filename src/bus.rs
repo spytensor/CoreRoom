@@ -344,6 +344,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replay_round_trips_a012_wal_pairs() {
+        // A-012 TurnIntent / TurnCommit pairs survive a publish →
+        // file → replay round trip and produce no orphans.
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("messages.jsonl");
+        let bus = MessageBus::open(&log).await.unwrap();
+
+        let intent = CrepEvent::TurnIntent {
+            role: "backend".into(),
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            parent_hash: None,
+            intent_sha: "dh1:aa".into(),
+        };
+        let commit = CrepEvent::TurnCommit {
+            role: "backend".into(),
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            payload_sha: "dh1:bb".into(),
+            priors_hash: "dh1:pp".into(),
+        };
+        bus.publish(intent.clone()).await.unwrap();
+        bus.publish(commit.clone()).await.unwrap();
+
+        let replayed = MessageBus::replay(&log).await.unwrap();
+        assert_eq!(replayed.skipped_malformed, 0);
+        assert_eq!(replayed.events, vec![intent, commit]);
+        assert!(crate::wal::scan_orphans(&replayed.events).is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_surfaces_a012_orphan_when_commit_missing() {
+        // Simulate a crash mid-turn by publishing only the intent.
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("messages.jsonl");
+        {
+            let bus = MessageBus::open(&log).await.unwrap();
+            bus.publish(CrepEvent::TurnIntent {
+                role: "backend".into(),
+                turn_id: "tu-orphan".into(),
+                thread_id: "th-7".into(),
+                parent_hash: None,
+                intent_sha: "dh1:bad".into(),
+            })
+            .await
+            .unwrap();
+        }
+
+        let replayed = MessageBus::replay(&log).await.unwrap();
+        let orphans = crate::wal::scan_orphans(&replayed.events);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].turn_id, "tu-orphan");
+        assert_eq!(orphans[0].role, "backend");
+    }
+
+    #[tokio::test]
     async fn replay_handles_v0_1_and_v0_2_events_interleaved() {
         // Real upgrade story: a session log that started under v0.1
         // (no turn_id / thread_id fields) and continues under v0.2

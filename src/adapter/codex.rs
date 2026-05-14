@@ -180,6 +180,7 @@ impl EngineAdapter for CodexAdapter {
             role: config.name.clone(),
             events: tx_events.clone(),
             stopping: Arc::clone(&stopping),
+            priors_hash: crate::adapter::cc::fingerprint(&priors_text),
         };
         tokio::spawn(read_rpc_loop(
             stdout,
@@ -334,6 +335,10 @@ struct CodexRuntime {
     role: String,
     events: mpsc::Sender<CrepEvent>,
     stopping: Arc<AtomicBool>,
+    /// Amendment A-008: priors composition hash captured at adapter
+    /// start. Stamped on every `RoleSpoke` / `ToolCallProposed` this
+    /// adapter emits.
+    priors_hash: String,
 }
 
 struct CodexWriteRuntime {
@@ -674,7 +679,9 @@ async fn read_rpc_loop(
                         *event_thread_id.lock().await = Some(thread_id);
                     }
                 }
-                if let Some(mut event) = codex_notification_to_event(&runtime.role, &value) {
+                if let Some(mut event) =
+                    codex_notification_to_event(&runtime.role, &runtime.priors_hash, &value)
+                {
                     if let CrepEvent::RoleOutputDelta {
                         text_delta,
                         sequence,
@@ -1044,7 +1051,7 @@ fn codex_event_thread_id(value: &Value) -> Option<String> {
 /// Everything else (token_count, session_configured, …) is intentionally
 /// dropped — the activity-poke in `read_rpc_loop` still uses them to keep
 /// the idle timer fresh.
-fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
+fn codex_notification_to_event(role: &str, priors_hash: &str, value: &Value) -> Option<CrepEvent> {
     let method = value.get("method").and_then(Value::as_str)?;
     if method != "codex/event" {
         return None;
@@ -1077,6 +1084,7 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 tool_use_id: call_id,
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                priors_hash: priors_hash.to_owned(),
             })
         }
         "exec_command_end" => {
@@ -1277,9 +1285,13 @@ async fn write_loop(
                     }
                 }
                 let text = extract_text_from_tool_result(&result);
-                for event in
-                    crate::adapter::role_spoke_events_from_text(&runtime.base.role, &text, 0.0, 0)
-                {
+                for event in crate::adapter::role_spoke_events_from_text(
+                    &runtime.base.role,
+                    &text,
+                    0.0,
+                    0,
+                    &runtime.base.priors_hash,
+                ) {
                     let _ = runtime.base.events.send(event).await;
                 }
             }
@@ -1319,6 +1331,7 @@ async fn write_loop(
                         cache_read: 0,
                         turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                         thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                        priors_hash: runtime.base.priors_hash.clone(),
                     })
                     .await;
             }
@@ -1945,7 +1958,8 @@ mod tests {
                 }
             }
         });
-        let event = codex_notification_to_event("security", &begin).expect("begin event");
+        let event =
+            codex_notification_to_event("security", "dh1:test", &begin).expect("begin event");
         match event {
             CrepEvent::ToolCallProposed {
                 role,
@@ -1981,7 +1995,7 @@ mod tests {
                 }
             }
         });
-        let event = codex_notification_to_event("security", &end).expect("end event");
+        let event = codex_notification_to_event("security", "dh1:test", &end).expect("end event");
         match event {
             CrepEvent::ToolCallExecuted {
                 role,
@@ -2017,7 +2031,7 @@ mod tests {
                 }
             }
         });
-        let event = codex_notification_to_event("qa", &end).expect("end event");
+        let event = codex_notification_to_event("qa", "dh1:test", &end).expect("end event");
         match event {
             CrepEvent::ToolCallExecuted {
                 ok, output_summary, ..
@@ -2043,7 +2057,7 @@ mod tests {
                 }
             }
         });
-        let event = codex_notification_to_event("qa", &value).expect("delta event");
+        let event = codex_notification_to_event("qa", "dh1:test", &value).expect("delta event");
         match event {
             CrepEvent::RoleOutputDelta {
                 role,
@@ -2095,7 +2109,7 @@ mod tests {
                 "params": {"_meta": {"requestId": 1}, "msg": {"type": msg_type}}
             });
             assert!(
-                codex_notification_to_event("qa", &value).is_none(),
+                codex_notification_to_event("qa", "dh1:test", &value).is_none(),
                 "{msg_type} should be ignored"
             );
         }

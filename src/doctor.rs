@@ -4,7 +4,10 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
+use crate::bus::MessageBus;
 use crate::config::CODEROOM_DIR;
+use crate::priors_lock;
+use crate::wal;
 
 /// Options for `cr doctor`.
 #[derive(Debug, Clone, Copy, Default)]
@@ -57,6 +60,13 @@ const LEGACY_MARKERS: &[&str] = &[
 
 /// Run CodeRoom project checks and optionally apply exact safe fixes.
 pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
+    check_shared_md(project_root, options)?;
+    check_orphan_turns(project_root)?;
+    check_priors_lock(project_root, options)?;
+    Ok(())
+}
+
+fn check_shared_md(project_root: &Path, options: DoctorOptions) -> Result<()> {
     let shared = project_root.join(CODEROOM_DIR).join("shared.md");
     let content = match std::fs::read_to_string(&shared) {
         Ok(content) => content,
@@ -95,6 +105,140 @@ pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
              doctor only rewrites exact legacy templates.",
             shared.display()
         ),
+    }
+}
+
+/// Amendment A-012: report any `TurnIntent` events in
+/// `.coderoom/messages.jsonl` that lack a matching `TurnCommit`.
+///
+/// Read-only: doctor never re-runs orphan turns. The user decides
+/// whether to re-issue manually.
+fn check_orphan_turns(project_root: &Path) -> Result<()> {
+    let log_path = project_root.join(CODEROOM_DIR).join("messages.jsonl");
+    if !log_path.is_file() {
+        println!("ok: no .coderoom/messages.jsonl found — nothing to scan for orphan turns");
+        return Ok(());
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime for orphan scan")?;
+    let replay = runtime
+        .block_on(MessageBus::replay(&log_path))
+        .with_context(|| format!("reading {}", log_path.display()))?;
+
+    if replay.skipped_malformed > 0 {
+        println!(
+            "warn: {} corrupted line(s) skipped while scanning {}",
+            replay.skipped_malformed,
+            log_path.display()
+        );
+    }
+
+    let orphans = wal::scan_orphans(&replay.events);
+    if orphans.is_empty() {
+        println!("ok: every TurnIntent in messages.jsonl has a matching TurnCommit");
+        return Ok(());
+    }
+
+    println!(
+        "warn: {} orphan turn(s) in {} — TurnIntent without TurnCommit. \
+         Use `cr show --orphans` for details. CodeRoom does not auto-reissue.",
+        orphans.len(),
+        log_path.display()
+    );
+    Ok(())
+}
+
+/// Amendment A-008: compare `.coderoom/priors.lock` against the current
+/// on-disk priors composition components and report drift. With
+/// `--fix`, regenerates the lockfile so subsequent diffs are clean.
+fn check_priors_lock(project_root: &Path, options: DoctorOptions) -> Result<()> {
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    if !coderoom_dir.is_dir() {
+        return Ok(());
+    }
+    // Per skeptic review: warn loudly if `.coderoom/` exists but
+    // `config.toml` is missing — that's a corrupt or partial init,
+    // not a fresh project (a fresh project has no `.coderoom/` at all).
+    if !coderoom_dir.join("config.toml").is_file() {
+        println!(
+            "warn: {} exists but config.toml is missing — run `cr init` to repair",
+            coderoom_dir.display()
+        );
+        return Ok(());
+    }
+    let current = priors_lock::compute_current(project_root)
+        .context("computing current priors fingerprint")?;
+    let locked = priors_lock::read(project_root).context("reading .coderoom/priors.lock")?;
+    match locked {
+        None => {
+            if options.fix {
+                priors_lock::write(project_root, &current)
+                    .context("writing .coderoom/priors.lock")?;
+                println!(
+                    "fixed: wrote initial .coderoom/priors.lock ({} role(s) tracked)",
+                    current.roles.len()
+                );
+            } else {
+                println!(
+                    "hint: no .coderoom/priors.lock yet — run `cr doctor --fix` to generate one"
+                );
+            }
+            Ok(())
+        }
+        Some(locked) => {
+            let report = priors_lock::diff(&locked, &current);
+            if report.is_clean() {
+                println!("ok: .coderoom/priors.lock matches current priors composition");
+                return Ok(());
+            }
+            if options.fix {
+                priors_lock::write(project_root, &current)
+                    .context("rewriting .coderoom/priors.lock")?;
+                println!(
+                    "fixed: rewrote .coderoom/priors.lock ({} drift entr{} resolved)",
+                    report.entries.len(),
+                    if report.entries.len() == 1 {
+                        "y"
+                    } else {
+                        "ies"
+                    }
+                );
+                return Ok(());
+            }
+            println!(
+                "warn: {} priors drift entr{} vs .coderoom/priors.lock",
+                report.entries.len(),
+                if report.entries.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                }
+            );
+            for entry in &report.entries {
+                let component = match &entry.component {
+                    priors_lock::Component::Kernel => "kernel".to_owned(),
+                    priors_lock::Component::Shared => "shared.md".to_owned(),
+                    priors_lock::Component::Role(name) => format!("role @{name}"),
+                };
+                let descriptor = match &entry.kind {
+                    priors_lock::DriftKind::HashMismatch { locked, current } => {
+                        format!("hash changed ({locked} → {current})")
+                    }
+                    priors_lock::DriftKind::Removed { locked } => {
+                        format!("removed since lock (was {locked})")
+                    }
+                    priors_lock::DriftKind::Added { current } => {
+                        format!("added since lock ({current})")
+                    }
+                };
+                println!("  - {component}: {descriptor}");
+            }
+            println!("hint: review changes, then run `cr doctor --fix` to re-bless the new state");
+            Ok(())
+        }
     }
 }
 

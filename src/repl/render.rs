@@ -150,6 +150,11 @@ pub(super) fn render_event_line_at_width(
                     .italic()
             )
         }
+        // `TurnIntent` / `TurnCommit` are A-012 WAL boundaries — audit
+        // data, not user-visible chat. They render silently. Orphan
+        // detection surfaces them through `cr show --orphans` and
+        // `cr doctor`.
+        CrepEvent::TurnIntent { .. } | CrepEvent::TurnCommit { .. } => String::new(),
     }
 }
 

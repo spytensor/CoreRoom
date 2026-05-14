@@ -172,6 +172,7 @@ mod tests {
             cache_read: cache,
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         }
     }
 

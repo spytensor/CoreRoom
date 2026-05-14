@@ -77,6 +77,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
             cache_read: 0,
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -85,6 +86,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
             tool_use_id: "tool-1".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
@@ -99,6 +101,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
         role: Some("backend".into()),
         since: None,
         tail: Some(2),
+        orphans: false,
     };
 
     let filtered = filter_show_events(&events, &options);
@@ -119,6 +122,7 @@ fn show_filter_tail_zero_renders_no_events() {
         role: None,
         since: None,
         tail: Some(0),
+        orphans: false,
     };
 
     assert!(filter_show_events(&events, &options).is_empty());
@@ -134,6 +138,7 @@ fn show_normalizes_legacy_cr_task_role_spoke() {
         cache_read: 0,
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     };
 
     let normalized = normalize_show_event(&event);
@@ -599,6 +604,7 @@ fn snapshot_render_event_lines() {
             cache_read: 42,
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -607,6 +613,7 @@ fn snapshot_render_event_lines() {
             tool_use_id: "tool-1".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
@@ -656,6 +663,7 @@ fn multi_line_role_spoke_uses_inset_message_block() {
         mentions: vec![],
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     };
     let rendered = strip_ansi(&render_event_line(&event, "host"));
     insta::assert_snapshot!(rendered, @r"
@@ -834,6 +842,7 @@ fn role_spoke_renders_markdown_lite_with_wrapping() {
         mentions: vec![],
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     };
     let rendered = strip_ansi(&render_event_line_at_width(&event, "host", 48));
 
@@ -862,6 +871,7 @@ fn turn_activity_folds_tool_events() {
             tool_use_id: "1".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallProposed {
             role: "host".into(),
@@ -870,6 +880,7 @@ fn turn_activity_folds_tool_events() {
             tool_use_id: "2".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         },
         CrepEvent::ToolCallExecuted {
             role: "host".into(),
@@ -908,6 +919,7 @@ fn turn_activity_ignores_other_roles() {
         tool_use_id: "1".into(),
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     };
 
     assert!(TurnActivity::from_foldable_event(&event, "host").is_none());
@@ -1100,6 +1112,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
         tool_use_id: "t-1".into(),
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     });
     s.update_from_event(&CrepEvent::ToolCallProposed {
         role: "security".into(),
@@ -1108,6 +1121,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
         tool_use_id: "t-2".into(),
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     });
     let rendered = strip_ansi(&s.render_line_at_width(80));
     assert!(
@@ -1130,6 +1144,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
         tool_use_id: "t-3".into(),
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     });
     let rendered = strip_ansi(&s.render_line_at_width(80));
     assert!(rendered.contains("· 2 tools · "), "rendered: {rendered}");
@@ -1469,6 +1484,7 @@ fn turn_interrupted_finalizes_work_card() {
         tool_use_id: "tool-1".into(),
         turn_id: String::new(),
         thread_id: String::new(),
+        priors_hash: String::new(),
     });
     let card = work.interrupted_card("halted by user");
     assert_eq!(card.steps.len(), 1);

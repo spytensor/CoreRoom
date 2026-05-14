@@ -348,6 +348,7 @@ pub(crate) fn role_spoke_events_from_text(
     text: &str,
     cost_usd: f64,
     cache_read: u64,
+    priors_hash: &str,
 ) -> Vec<CrepEvent> {
     let extracted = crate::work::extract_cr_task(text);
     let mut events = Vec::new();
@@ -369,6 +370,7 @@ pub(crate) fn role_spoke_events_from_text(
         cache_read,
         turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
         thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        priors_hash: priors_hash.to_owned(),
     });
     events
 }
@@ -529,6 +531,7 @@ mod tests {
             "```cr-task\nReview adapter timeout paths\n```\n\nI checked with @backend.",
             0.5,
             42,
+            "dh1:1234",
         );
         assert_eq!(events.len(), 2);
         assert_eq!(
@@ -550,6 +553,7 @@ mod tests {
                 cache_read: 42,
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                priors_hash: "dh1:1234".to_owned(),
             }
         );
     }

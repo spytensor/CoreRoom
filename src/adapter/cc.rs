@@ -478,12 +478,16 @@ fn translate(role: &str, priors_hash: &str, line: &Value) -> Vec<CrepEvent> {
                 .unwrap_or(0);
             let mut events = extract_permission_denials(role, line);
             events.extend(crate::adapter::role_spoke_events_from_text(
-                role, &text, cost_usd, cache_read,
+                role,
+                &text,
+                cost_usd,
+                cache_read,
+                priors_hash,
             ));
             events
         }
 
-        "assistant" => extract_assistant_events(role, line),
+        "assistant" => extract_assistant_events(role, priors_hash, line),
 
         "user" => extract_tool_results(role, line),
 
@@ -530,7 +534,7 @@ fn extract_permission_denials(role: &str, line: &Value) -> Vec<CrepEvent> {
         .collect()
 }
 
-fn extract_assistant_events(role: &str, line: &Value) -> Vec<CrepEvent> {
+fn extract_assistant_events(role: &str, priors_hash: &str, line: &Value) -> Vec<CrepEvent> {
     let Some(content) = line
         .get("message")
         .and_then(|m| m.get("content"))
@@ -569,6 +573,7 @@ fn extract_assistant_events(role: &str, line: &Value) -> Vec<CrepEvent> {
                     .to_owned(),
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                priors_hash: priors_hash.to_owned(),
             }),
             _ => {}
         }

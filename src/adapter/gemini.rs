@@ -130,7 +130,7 @@ impl EngineAdapter for GeminiAdapter {
                 engine: Engine::Gemini.as_str().to_owned(),
                 model: config.model.clone().unwrap_or_else(|| "gemini".to_owned()),
                 session_id,
-                priors_hash,
+                priors_hash: priors_hash.clone(),
             })
             .await;
 
@@ -141,6 +141,7 @@ impl EngineAdapter for GeminiAdapter {
                 model: config.model.clone(),
                 priors_path: config.priors_path.clone(),
                 priors_text,
+                priors_hash,
                 prompt_mode,
                 resume_session_id: config.resume_session_id.clone(),
                 rx: rx_user,
@@ -212,6 +213,10 @@ struct GeminiLoop {
     model: Option<String>,
     priors_path: PathBuf,
     priors_text: String,
+    /// Amendment A-008: priors composition hash captured at adapter
+    /// start. Stamped on every `RoleSpoke` / `ToolCallProposed` this
+    /// loop emits.
+    priors_hash: String,
     prompt_mode: GeminiPromptMode,
     resume_session_id: Option<String>,
     events: mpsc::Sender<CrepEvent>,
@@ -251,6 +256,7 @@ impl GeminiLoop {
                     model: self.model.as_deref(),
                     priors_path: &self.priors_path,
                     priors_text: &self.priors_text,
+                    priors_hash: &self.priors_hash,
                     prompt_mode: self.prompt_mode,
                     user_prompt: &prompt,
                     role: &self.role,
@@ -298,9 +304,13 @@ impl GeminiLoop {
                 }
                 GeminiTurnOutcome::Completed(Ok(turn)) => {
                     self.record_session_id(turn.session_id.clone()).await;
-                    for event in
-                        crate::adapter::role_spoke_events_from_text(&self.role, &turn.text, 0.0, 0)
-                    {
+                    for event in crate::adapter::role_spoke_events_from_text(
+                        &self.role,
+                        &turn.text,
+                        0.0,
+                        0,
+                        &self.priors_hash,
+                    ) {
                         let _ = self.events.send(event).await;
                     }
                 }
@@ -316,6 +326,7 @@ impl GeminiLoop {
                             cache_read: 0,
                             turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                             thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                            priors_hash: self.priors_hash.clone(),
                         })
                         .await;
                 }
@@ -374,6 +385,9 @@ struct GeminiTurnRequest<'a> {
     model: Option<&'a str>,
     priors_path: &'a PathBuf,
     priors_text: &'a str,
+    /// Amendment A-008: stamp tool / spoke events emitted during this
+    /// turn with the composition hash captured at adapter start.
+    priors_hash: &'a str,
     prompt_mode: GeminiPromptMode,
     user_prompt: &'a str,
     role: &'a str,
@@ -446,6 +460,7 @@ async fn run_one_turn(
     };
     let stdout_task = tokio::spawn(read_stdout_streaming(
         request.role.to_owned(),
+        request.priors_hash.to_owned(),
         stdout,
         Arc::clone(&stdout_accum),
         stream_state,
@@ -509,6 +524,7 @@ async fn run_one_turn(
 
 async fn read_stdout_streaming(
     role: String,
+    priors_hash: String,
     mut stdout: impl tokio::io::AsyncRead + Unpin,
     raw_accum: Arc<Mutex<Vec<u8>>>,
     stream_state: GeminiStreamState,
@@ -533,6 +549,7 @@ async fn read_stdout_streaming(
             }
             process_gemini_stream_line(
                 &role,
+                &priors_hash,
                 &line,
                 &stream_state,
                 &events,
@@ -546,6 +563,7 @@ async fn read_stdout_streaming(
     if !pending.is_empty() {
         process_gemini_stream_line(
             &role,
+            &priors_hash,
             &pending,
             &stream_state,
             &events,
@@ -571,8 +589,13 @@ struct GeminiStreamState {
     session_id: Arc<Mutex<Option<String>>>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "stream-json line processor threads role, priors_hash, raw line, stream state, events sink, fallback buffer, tool id mapper, and delta sequence"
+)]
 async fn process_gemini_stream_line(
     role: &str,
+    priors_hash: &str,
     line: &[u8],
     stream_state: &GeminiStreamState,
     events: &mpsc::Sender<CrepEvent>,
@@ -616,7 +639,12 @@ async fn process_gemini_stream_line(
         Some("tool_use") => {
             let tool_use_id = tool_ids.for_use(&value);
             let _ = events
-                .send(gemini_tool_use_to_event(role, &value, tool_use_id))
+                .send(gemini_tool_use_to_event(
+                    role,
+                    &value,
+                    tool_use_id,
+                    priors_hash,
+                ))
                 .await;
         }
         Some("tool_result") => {
@@ -797,6 +825,7 @@ fn gemini_tool_use_to_event(
     role: &str,
     value: &serde_json::Value,
     tool_use_id: String,
+    priors_hash: &str,
 ) -> CrepEvent {
     CrepEvent::ToolCallProposed {
         role: role.to_owned(),
@@ -812,6 +841,7 @@ fn gemini_tool_use_to_event(
         tool_use_id,
         turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
         thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+        priors_hash: priors_hash.to_owned(),
     }
 }
 
@@ -900,6 +930,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         let turn = read_stdout_streaming(
             "backend".to_owned(),
+            "dh1:test".to_owned(),
             stdout.as_bytes(),
             Arc::new(Mutex::new(Vec::new())),
             GeminiStreamState::default(),
@@ -924,6 +955,7 @@ mod tests {
                     tool_use_id: "read-1".into(),
                     turn_id: String::new(),
                     thread_id: String::new(),
+                    priors_hash: "dh1:test".into(),
                 },
                 CrepEvent::ToolCallExecuted {
                     role: "backend".into(),
@@ -951,6 +983,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         let turn = read_stdout_streaming(
             "backend".to_owned(),
+            "dh1:test".to_owned(),
             stdout.as_bytes(),
             Arc::new(Mutex::new(Vec::new())),
             GeminiStreamState::default(),
@@ -984,6 +1017,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         let turn = read_stdout_streaming(
             "backend".to_owned(),
+            "dh1:test".to_owned(),
             stdout.as_bytes(),
             Arc::new(Mutex::new(Vec::new())),
             GeminiStreamState::default(),
@@ -1015,6 +1049,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         let turn = read_stdout_streaming(
             "backend".to_owned(),
+            "dh1:test".to_owned(),
             stdout.as_bytes(),
             Arc::new(Mutex::new(Vec::new())),
             GeminiStreamState::default(),

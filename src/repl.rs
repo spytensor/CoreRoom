@@ -38,6 +38,7 @@ use crate::crep::{CrepEvent, StopReason};
 use crate::output;
 use crate::permissions::{BridgeHandle, BridgeRequestSink};
 use crate::priors;
+use crate::wal::{self, ChainTracker};
 
 mod command;
 mod input;
@@ -229,6 +230,17 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     }
 
     let log_path = coderoom_dir.join("messages.jsonl");
+    // Amendment A-012 (two-phase WAL): rebuild the chain tracker from
+    // prior `TurnCommit` events on disk so a resumed REPL session's
+    // first `TurnIntent.parent_hash` correctly references the last
+    // committed payload on each thread.
+    let mut chain = ChainTracker::new();
+    if log_path.is_file() {
+        match MessageBus::replay(&log_path).await {
+            Ok(replay) => chain.ingest_replay(&replay),
+            Err(error) => warn!(%error, "could not replay messages.jsonl for WAL chain tracker"),
+        }
+    }
     let bus = Arc::new(MessageBus::open(&log_path).await?);
 
     let adapters = Adapters::new();
@@ -476,6 +488,8 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &text,
                     &cfg.host_role,
                     &last_ctrl_c,
+                    &bus,
+                    &mut chain,
                 )
                 .await?;
             }
@@ -506,6 +520,8 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                         &text,
                         &cfg.host_role,
                         &last_ctrl_c,
+                        &bus,
+                        &mut chain,
                     )
                     .await?;
                 }
@@ -521,6 +537,8 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &text,
                     &cfg.host_role,
                     &last_ctrl_c,
+                    &bus,
+                    &mut chain,
                 )
                 .await?;
             }
@@ -642,6 +660,10 @@ async fn mark_welcomed(coderoom_dir: &Path) {
     clippy::too_many_arguments,
     reason = "REPL command plumbing passes role maps, event drains, bridge, and Ctrl-C state"
 )]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "send_and_drain plumbs roles, channels, host, ctrl-c state, bus, and WAL chain together; splitting these would require a context struct that adds no clarity"
+)]
 async fn send_and_drain(
     roles: &mut HashMap<String, RunningRole>,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
@@ -651,6 +673,8 @@ async fn send_and_drain(
     text: &str,
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
+    bus: &Arc<MessageBus>,
+    chain: &mut ChainTracker,
 ) -> Result<()> {
     // Pre-flight: validate any `@./img.png` style image refs the user
     // typed. Missing files, oversized images, or unsupported formats
@@ -670,8 +694,33 @@ async fn send_and_drain(
     let mut queue: VecDeque<(String, String)> = VecDeque::new();
     queue.push_back((role.to_owned(), text.to_owned()));
 
+    // Amendment A-012: one fresh thread per user-initiated dispatch.
+    // Every auto-routed follow-up turn pushed onto `queue` stays on
+    // this thread, so the WAL chain reads as one conversation.
+    let thread_id = crate::turn::new_thread_id();
+
     while let Some((current_role, current_text)) = queue.pop_front() {
-        let Some(captured) = drain_one_turn_handling_ctrl_c(
+        // Two-phase WAL: write an intent BEFORE the brief is handed
+        // to the adapter so a mid-turn crash is recoverable.
+        let turn_id = crate::turn::new_turn_id();
+        let parent_hash = chain.parent_hash_for(&thread_id);
+        let intent_event = CrepEvent::TurnIntent {
+            role: current_role.clone(),
+            turn_id: turn_id.clone(),
+            thread_id: thread_id.clone(),
+            parent_hash,
+            intent_sha: wal::intent_sha(&current_text),
+        };
+        if let Err(error) = bus.publish(intent_event).await {
+            warn!(
+                role = %current_role,
+                turn_id = %turn_id,
+                %error,
+                "could not write TurnIntent to bus — proceeding without WAL for this turn",
+            );
+        }
+
+        let captured = drain_one_turn_handling_ctrl_c(
             roles,
             rx,
             live_rx,
@@ -681,14 +730,36 @@ async fn send_and_drain(
             host_role,
             last_ctrl_c,
         )
-        .await?
-        else {
+        .await?;
+
+        // Two-phase WAL: commit fires after the turn's terminal
+        // event regardless of outcome. An absent `captured` still
+        // means the turn ended; only an unrecoverable REPL panic
+        // between intent and commit leaves an orphan.
+        let payload_text = captured.as_ref().map_or("", |c| c.text.as_str());
+        let payload_sha = wal::payload_sha(payload_text);
+        let commit_event = CrepEvent::TurnCommit {
+            role: current_role.clone(),
+            turn_id: turn_id.clone(),
+            thread_id: thread_id.clone(),
+            payload_sha: payload_sha.clone(),
+            priors_hash: String::new(),
+        };
+        if let Err(error) = bus.publish(commit_event).await {
+            warn!(
+                role = %current_role,
+                turn_id = %turn_id,
+                %error,
+                "could not write TurnCommit to bus — orphan scan may flag this turn",
+            );
+        } else {
+            chain.observe_commit(&thread_id, payload_sha);
+        }
+
+        let Some(captured) = captured else {
             // Turn was interrupted or the role stopped before
             // replying. End the whole chain — the user has already
-            // seen the cancellation cue and can re-issue manually
-            // if they want to continue. If anything was queued
-            // behind this turn, surface a hint so the user knows
-            // those follow-ups did not silently fire.
+            // seen the cancellation cue and can re-issue manually.
             if !queue.is_empty() {
                 println!(
                     "  {} {}",

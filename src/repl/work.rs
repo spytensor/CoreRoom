@@ -290,6 +290,7 @@ mod tests {
             tool_use_id: "tool-1".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         });
         work.apply_event(&CrepEvent::ToolCallExecuted {
             role: "security".into(),
@@ -317,6 +318,7 @@ mod tests {
             tool_use_id: "tool-1".into(),
             turn_id: String::new(),
             thread_id: String::new(),
+            priors_hash: String::new(),
         });
         work.apply_event(&CrepEvent::PermissionDenied {
             role: "security".into(),

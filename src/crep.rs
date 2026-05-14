@@ -128,6 +128,10 @@ pub enum CrepEvent {
         /// Opaque conversation-thread id. Empty string for v0.1 log replay.
         #[serde(default)]
         thread_id: TurnId,
+        /// Amendment A-008: hash of the priors composition that
+        /// produced this reply. Empty for pre-A-008 logs.
+        #[serde(default)]
+        priors_hash: String,
     },
     /// Streaming assistant text for the current role turn. This is a
     /// broadcast-only live UI event, not a turn boundary, and must not
@@ -191,6 +195,10 @@ pub enum CrepEvent {
         /// Opaque conversation-thread id. Empty string for v0.1 log replay.
         #[serde(default)]
         thread_id: TurnId,
+        /// Amendment A-008: priors composition hash active when this
+        /// tool call was proposed. Empty for pre-A-008 logs.
+        #[serde(default)]
+        priors_hash: String,
     },
     /// Tool call ran to completion. `output_summary` is a one-line
     /// human-readable summary; full output lives in the transcript.
@@ -230,6 +238,43 @@ pub enum CrepEvent {
         /// Opaque conversation-thread id. Empty string for v0.1 log replay.
         #[serde(default)]
         thread_id: TurnId,
+    },
+    /// Two-phase WAL: REPL is about to dispatch a brief to a role.
+    /// See amendment A-012; the matching [`CrepEvent::TurnCommit`]
+    /// fires after the turn's terminal event.
+    TurnIntent {
+        /// Configured name of the dispatched role.
+        role: String,
+        /// Opaque turn id, paired one-to-one with the matching
+        /// `TurnCommit` on success.
+        turn_id: TurnId,
+        /// Opaque conversation-thread id.
+        thread_id: TurnId,
+        /// `payload_sha` of the most recent `TurnCommit` on the same
+        /// `thread_id`, or `None` for the first turn in a thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_hash: Option<String>,
+        /// Content digest of the brief about to be sent.
+        intent_sha: String,
+    },
+    /// Two-phase WAL: REPL observed the terminal event for a turn.
+    /// `priors_hash` duplicates the underlying `RoleSpoke`'s
+    /// composition fingerprint so the WAL alone answers "which priors
+    /// produced this commit".
+    TurnCommit {
+        /// Configured name of the role whose turn committed.
+        role: String,
+        /// Opaque turn id matching the prior `TurnIntent.turn_id`.
+        turn_id: TurnId,
+        /// Opaque conversation-thread id.
+        thread_id: TurnId,
+        /// Content digest of the terminal-event payload.
+        payload_sha: String,
+        /// Amendment A-008: priors composition hash when the turn
+        /// committed. Empty when the commit fires on a terminal event
+        /// that produced no `RoleSpoke` (interrupt before output).
+        #[serde(default)]
+        priors_hash: String,
     },
     /// Role subprocess exited. Final event emitted for the role's
     /// session id — any subsequent activity comes from a re-instantiated
@@ -335,6 +380,7 @@ mod tests {
             cache_read: 17_889,
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
+            priors_hash: String::new(),
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_spoke");
@@ -576,6 +622,7 @@ mod tests {
             tool_use_id: "toolu_01abc".into(),
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
+            priors_hash: String::new(),
         };
         let wire = serde_json::to_string(&event).unwrap();
         let parsed: CrepEvent = serde_json::from_str(&wire).unwrap();
@@ -626,6 +673,78 @@ mod tests {
     }
 
     #[test]
+    fn turn_intent_round_trips() {
+        let event = CrepEvent::TurnIntent {
+            role: "backend".into(),
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            parent_hash: Some("dh1:aa".into()),
+            intent_sha: "dh1:bb".into(),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["type"], "turn_intent");
+        assert_eq!(wire["parent_hash"], "dh1:aa");
+        assert_eq!(wire["intent_sha"], "dh1:bb");
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn turn_intent_skips_parent_hash_when_none() {
+        let event = CrepEvent::TurnIntent {
+            role: "backend".into(),
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            parent_hash: None,
+            intent_sha: "dh1:bb".into(),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert!(
+            wire.get("parent_hash").is_none(),
+            "expected parent_hash to be skipped: {wire}"
+        );
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn turn_commit_round_trips_with_priors_hash() {
+        let event = CrepEvent::TurnCommit {
+            role: "backend".into(),
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            payload_sha: "dh1:cc".into(),
+            priors_hash: "dh1:pp".into(),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["type"], "turn_commit");
+        assert_eq!(wire["payload_sha"], "dh1:cc");
+        assert_eq!(wire["priors_hash"], "dh1:pp");
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn turn_commit_tolerates_missing_priors_hash_in_legacy_logs() {
+        // Pre-A-008 WAL lines have no priors_hash field; deserialize
+        // must default to empty string.
+        let legacy = serde_json::json!({
+            "type": "turn_commit",
+            "role": "backend",
+            "turn_id": "tu-1",
+            "thread_id": "th-1",
+            "payload_sha": "dh1:cc",
+        });
+        let parsed: CrepEvent = serde_json::from_value(legacy).unwrap();
+        match parsed {
+            CrepEvent::TurnCommit { priors_hash, .. } => {
+                assert_eq!(priors_hash, "");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
     fn type_tag_is_snake_case_for_all_variants() {
         let cases: [(CrepEvent, &str); 11] = [
             (
@@ -673,6 +792,7 @@ mod tests {
                     cache_read: 0,
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
+                    priors_hash: String::new(),
                 },
                 "role_spoke",
             ),
@@ -705,6 +825,7 @@ mod tests {
                     tool_use_id: "id".into(),
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
+                    priors_hash: String::new(),
                 },
                 "tool_call_proposed",
             ),
