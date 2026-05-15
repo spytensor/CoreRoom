@@ -1403,6 +1403,19 @@ fn streaming_state_resets_first_line_only_after_real_content() {
 //
 // Tests for the worklist's dispatcher and delegation extraction helpers.
 
+const DOGFOOD_ORCHESTRATION_FIXTURE: &str =
+    include_str!("../../tests/fixtures/dogfood_orchestration.txt");
+
+fn dogfood_section(name: &str) -> &'static str {
+    let marker = format!("--- {name} ---");
+    let start = DOGFOOD_ORCHESTRATION_FIXTURE
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing dogfood fixture section {name}"));
+    let rest = &DOGFOOD_ORCHESTRATION_FIXTURE[start + marker.len()..];
+    let end = rest.find("\n--- ").unwrap_or(rest.len());
+    rest[..end].trim()
+}
+
 fn test_queued_turn(role: &str, depth: usize) -> QueuedTurn {
     QueuedTurn {
         role: role.to_owned(),
@@ -1494,6 +1507,45 @@ fn route_dispatcher_queue_limit_is_separate_from_hop_depth() {
     assert_eq!(dispatcher.max_fan_out_per_turn(), DEFAULT_MAX_ROUTE_FAN_OUT);
     assert!(dispatcher.accepts_fan_out_index(DEFAULT_MAX_ROUTE_FAN_OUT - 1));
     assert!(!dispatcher.accepts_fan_out_index(DEFAULT_MAX_ROUTE_FAN_OUT));
+}
+
+#[test]
+fn dogfood_fixture_replays_orchestration_expectations() {
+    let known = &["host", "backend", "ci", "security", "qa"];
+
+    let status = dogfood_section("status-authorization");
+    let status_routes = extract_route_instructions("host", status, known);
+    assert!(
+        status_routes.is_empty(),
+        "CJK status/authorization mentions are not delegation: {status_routes:#?}"
+    );
+
+    let explicit = dogfood_section("explicit-multitarget");
+    let explicit_routes = extract_route_instructions("host", explicit, known);
+    assert_eq!(
+        explicit_routes,
+        vec![
+            RouteInstruction {
+                target: "backend".to_owned(),
+                brief: "run the read-only audit commands only after host approval.\nReturn findings with path:line evidence and no code changes.".to_owned(),
+            },
+            RouteInstruction {
+                target: "ci".to_owned(),
+                brief: "run the read-only audit commands only after host approval.\nReturn findings with path:line evidence and no code changes.".to_owned(),
+            },
+        ]
+    );
+
+    let resumed = dogfood_section("resumed-startup");
+    assert!(resumed.contains("@backend"));
+    assert!(resumed.contains("@ci"));
+    assert!(resumed.contains("@host"));
+    let roles = vec!["backend".to_owned(), "ci".to_owned(), "host".to_owned()];
+    let guard = resume_guard_prompt_message(&roles);
+    assert!(guard.contains("@backend, @ci, @host"));
+    assert!(guard.contains("`/fresh`"));
+    assert!(guard.contains("`cr start --fresh`"));
+    assert!(guard.contains("audits/release work"));
 }
 
 #[test]
