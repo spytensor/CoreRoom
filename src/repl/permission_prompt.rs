@@ -161,19 +161,16 @@ fn format_prompt_line(request: &BridgeRequest, host_role: &str, width: usize) ->
         let bounded = truncate_to(&raw_summary, summary_budget);
         format!(" {}", format!("`{bounded}`").with(output::DIM))
     };
-    // No space between `[a]` and `llow once`: the bracketed letter is
-    // the visible mnemonic for the choice (`[a]` highlights the `a`
-    // in `allow`), so they read as one word in the styled output.
+    // Keep each choice as one styled span. Splitting `[a]` from `llow`
+    // makes the visible word look right, but inserts ANSI bytes between
+    // them in PTY captures; automation that waits for `[a]llow` then
+    // misses the prompt and leaves the hook blocked.
     format!(
-        "{gutter} {role_label} wants {tool_label}{summary_part} — {}{} · {}{} · {}{} · {}{}",
-        "[a]".with(output::OK).bold(),
-        "llow once".with(output::TEXT),
-        "[s]".with(output::OK).bold(),
-        "ession".with(output::TEXT),
-        "[d]".with(output::BAD).bold(),
-        "eny".with(output::TEXT),
-        "[n]".with(output::BAD).bold(),
-        "ever".with(output::TEXT),
+        "{gutter} {role_label} wants {tool_label}{summary_part} — {} · {} · {} · {}",
+        "[a]llow once".with(output::OK).bold(),
+        "[s]ession".with(output::OK).bold(),
+        "[d]eny".with(output::BAD).bold(),
+        "[n]ever".with(output::BAD).bold(),
     )
 }
 
@@ -490,6 +487,19 @@ mod tests {
         assert!(line.contains("[s]ession"));
         assert!(line.contains("[d]eny"));
         assert!(line.contains("[n]ever"));
+    }
+
+    #[test]
+    fn prompt_line_keeps_mnemonics_contiguous_in_pty_output() {
+        let request = bash_request("cargo test --no-run");
+        let raw = format_prompt_line(&request, "host", 120);
+        assert!(
+            raw.contains("[a]llow once"),
+            "expect/pty readers should be able to match the prompt: {raw:?}"
+        );
+        assert!(raw.contains("[s]ession"));
+        assert!(raw.contains("[d]eny"));
+        assert!(raw.contains("[n]ever"));
     }
 
     #[test]
