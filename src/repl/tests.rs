@@ -578,7 +578,7 @@ fn snapshot_boot_dashboard_at_80() {
 │ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
 │ ● @security  codex  · default · bypass                                       │
 │                                         what's new in 0.4.4                  │
-│  1.6k  base tokens loaded               • legacy budget_per_role_usd projec… │
+│  1.7k  base tokens loaded               • legacy budget_per_role_usd projec… │
 │ /repo/codeRoom                          • older top-level user defaults sti… │
 │                                         • hotfix release keeps v0.4.3 SDLC … │
 │                                                                              │
@@ -1386,11 +1386,39 @@ fn peer_brief_escapes_inner_end_marker() {
 #[test]
 fn route_instructions_ignore_plain_status_mentions() {
     use super::extract_route_instructions;
-    let known = &["host", "security", "backend"];
+    let known = &["host", "security", "backend", "frontend", "qa"];
     let text = concat!(
         "Received security review. Still waiting for @backend and @frontend.\n",
+        "@qa reported that the release gates are still pending.\n",
+        "@backend is waiting for approval before running commands.\n",
         "| owner | risk |\n",
         "| @security | auth |",
+    );
+    let out = extract_route_instructions("host", text, known);
+    assert!(out.is_empty());
+}
+
+#[test]
+fn route_instructions_ignore_authorization_status_mentions() {
+    use super::extract_route_instructions;
+    let known = &["host", "backend", "ci"];
+    let text = concat!(
+        "@backend 和 @ci 都给了完整只读命令清单,但都明确 \"需要 @host 点头才执行\"。我没有自动跑,等你确认:\n",
+        "• 是否授权 @ci 执行 A?\n",
+        "• 是否授权 @backend 并行做 cost.rs / bridge.rs 的结构化展示原型 diff?\n",
+    );
+    let out = extract_route_instructions("host", text, known);
+    assert!(out.is_empty());
+}
+
+#[test]
+fn route_instructions_require_explicit_task_separator() {
+    use super::extract_route_instructions;
+    let known = &["host", "backend", "security"];
+    let text = concat!(
+        "@backend review authority.py\n",
+        "@backend @security review the shared policy\n",
+        "@backend 和 @security 复核鉴权边界\n",
     );
     let out = extract_route_instructions("host", text, known);
     assert!(out.is_empty());
@@ -1401,11 +1429,11 @@ fn route_instructions_extract_targeted_blocks() {
     use super::{extract_route_instructions, RouteInstruction};
     let known = &["host", "backend", "frontend", "qa"];
     let text = concat!(
-        "@backend review authority.py\n",
+        "@backend: review authority.py\n",
         "1. Check auth context.\n",
         "2. Check negative tests.\n",
         "\n",
-        "@frontend review Services.swift\n",
+        "@frontend: review Services.swift\n",
         "- Check token policy.\n",
         "\n",
         "Summary: qa should watch this but this is not a route to @qa.",
@@ -1433,7 +1461,7 @@ fn route_instructions_support_multi_target_lines_and_list_markers() {
     let known = &["host", "security", "backend"];
     let out = extract_route_instructions(
         "host",
-        "1. @backend and @security review the shared policy\n- include test gaps",
+        "1. @backend and @security: review the shared policy\n- include test gaps",
         known,
     );
     assert_eq!(
@@ -1480,7 +1508,7 @@ fn route_instructions_drop_self_unknown_indented_and_code_block_mentions() {
     use super::extract_route_instructions;
     let known = &["host", "backend", "security"];
     let text = concat!(
-        "@security inspect auth\n",
+        "@security: inspect auth\n",
         "- include evidence\n",
         "  @backend done · pasted transcript line should not route\n",
         "@mobile unknown role should not route\n",

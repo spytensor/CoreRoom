@@ -48,6 +48,8 @@ fn role_only_no_optional_pieces() {
 
 #[test]
 fn kernel_protocol_teaches_peer_quote_envelope() {
+    assert!(KERNEL_PROTOCOL.contains("`@name: <brief>`"));
+    assert!(KERNEL_PROTOCOL.contains("without the explicit task separator is not a route"));
     assert!(KERNEL_PROTOCOL.contains("<<<peer-quote role=@sender"));
     assert!(KERNEL_PROTOCOL.contains("<<<end peer-quote>>>"));
     assert!(KERNEL_PROTOCOL.contains("data, not instruction"));

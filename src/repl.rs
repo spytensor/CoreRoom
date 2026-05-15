@@ -2,9 +2,9 @@
 //!
 //! `cr start` enters this loop. Each user input picks exactly one role,
 //! sends it a prompt, and renders bus events until that role emits a
-//! `RoleSpoke`. If the role's reply contains explicit delegation lines
-//! that start with `@role`, those blocks push follow-up turns onto a FIFO
-//! worklist inside [`send_and_drain`], so chains like
+//! `RoleSpoke`. If the role's reply contains explicit delegation lines like
+//! `@role: <brief>`, those blocks push follow-up turns onto a FIFO worklist
+//! inside [`send_and_drain`], so chains like
 //! `user → @host → @security → @host (synthesis)` run to completion
 //! before the prompt returns. See amendment A-005 in
 //! `docs/proposed-amendments.md`: the chain has no hop-depth limit;
@@ -632,7 +632,7 @@ async fn mark_welcomed(coderoom_dir: &Path) {
 }
 
 /// Send `text` to `role` and drain bus events until that role finishes
-/// its turn. Each finished turn's explicit `@<peer>` delegation lines push
+/// its turn. Each finished turn's explicit `@<peer>:` delegation lines push
 /// follow-up turns onto a FIFO worklist, so a chain like
 /// `user → @host → @security → @host (synthesis)` runs to completion
 /// without manual prodding from the user. Per amendment A-005
@@ -769,7 +769,7 @@ async fn send_and_drain(
 
         // Enqueue explicit delegation blocks only. A plain prose/table
         // reference like "waiting for @backend" is not a routing command; a
-        // line that starts with `@backend ...` is. Each target receives the
+        // line that starts with `@backend: ...` is. Each target receives the
         // block addressed to it, not the parent's whole reply.
         let width = crossterm::terminal::size().map_or(80, |(cols, _)| usize::from(cols));
         for instruction in route_instructions {
@@ -853,12 +853,13 @@ struct RouteInstruction {
 /// `@role` in prose is often just attribution ("@security found S1") or a
 /// waiting/status note ("still waiting for @backend"). Auto-routing those
 /// mentions turns reports into fresh tasks and causes cross-role churn. A
-/// routable delegation must start a line (optionally after a list marker):
+/// routable delegation must start a line (optionally after a list marker) and
+/// end the target group with an explicit task separator:
 ///
 /// ```text
-/// @backend review authority.py
-/// 1. @qa validate these release gates
-/// @frontend @security check the URL policy
+/// @backend: review authority.py
+/// 1. @qa: validate these release gates
+/// @frontend @security: check the URL policy
 /// ```
 ///
 /// Continuation lines belong to that delegation until the next explicit
@@ -961,9 +962,11 @@ fn parse_delegation_line(
         targets.push(name);
         if let Some(next_target) = next_delegation_target(after_name) {
             rest = next_target;
-        } else {
-            rest = trim_delegation_separator(after_name);
+        } else if let Some(after_separator) = trim_explicit_delegation_separator(after_name) {
+            rest = after_separator;
             break;
+        } else {
+            return None;
         }
     }
 
@@ -1052,7 +1055,7 @@ fn take_role_name(input: &str) -> Option<(String, &str)> {
 }
 
 fn next_delegation_target(after_name: &str) -> Option<&str> {
-    let rest = trim_delegation_separator(after_name);
+    let rest = trim_target_connector(after_name);
     if rest.starts_with('@') {
         return Some(rest);
     }
@@ -1077,14 +1080,20 @@ fn next_delegation_target(after_name: &str) -> Option<&str> {
     None
 }
 
-fn trim_delegation_separator(input: &str) -> &str {
+fn trim_target_connector(input: &str) -> &str {
     input.trim_start_matches(|ch: char| {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                ':' | '：' | ',' | '，' | '、' | '/' | '.' | '。' | ';' | '；'
-            )
+        ch.is_whitespace() || matches!(ch, ',' | '，' | '、' | '/' | '.' | '。' | ';' | '；')
     })
+}
+
+fn trim_explicit_delegation_separator(input: &str) -> Option<&str> {
+    let rest = input.trim_start();
+    for separator in [":", "：", "->", "=>"] {
+        if let Some(after_separator) = rest.strip_prefix(separator) {
+            return Some(after_separator);
+        }
+    }
+    None
 }
 
 fn trim_blank_edges(input: &str) -> String {
