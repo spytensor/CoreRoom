@@ -4,6 +4,9 @@ CodeRoom's SDLC gate support is host-first. Users can ask for work normally;
 the host role is expected to classify the work, initialize a gate when needed,
 delegate review, and close the gate before claiming completion.
 
+Gate evidence is structural, not semantic approval. For the trust boundaries
+that reviews must preserve, see `docs/threat-model.md`.
+
 ## Files
 
 - `.coderoom/gates/<thread-id>.json` stores one ledger per work thread.
@@ -68,4 +71,5 @@ cr gate close --thread <thread_id> --bypass "User accepted missing second review
 - Verification evidence must include real command output or cited evidence.
 
 Tier 0 gates skip these structural requirements and cannot record hidden
-evidence writes.
+evidence writes. Routing, permission, resume, and reviewer-provenance changes
+should also satisfy the review checklist in `docs/threat-model.md`.

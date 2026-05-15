@@ -7,6 +7,10 @@ doc go to `docs/proposed-amendments.md` first, not into code.
 Live spike that grounds this design: `docs/spike-2026-05-09.md`. Everything
 below assumes the three GREEN findings of that spike still hold.
 
+Operational trust boundaries live in `docs/threat-model.md`. Any change to
+routing, permissions, resume, gates, priors, logs, or role memory should use
+that document's review checklist before changing this architecture.
+
 ## What CodeRoom is
 
 A coordination shell that runs multiple agent CLI sessions as named "roles"
@@ -305,8 +309,11 @@ The built-in kernel is not copied into `.coderoom/`. It owns the routing
 syntax (`@role: <brief>` delegation lines), peer brief envelope (`<<<peer-quote ...>>>>`,
 with legacy `From @role:` accepted during migration), patch/journal authority
 rules, and WorkCard `cr-task` block. User-editable project and role priors can
-tune behavior, but they cannot redefine those runtime contracts. Every
-composed section carries a source header so `cr prompt show <role>` is auditable.
+tune behavior, but they cannot redefine those runtime contracts or supply
+authoritative routing metadata. Every composed section carries a source header
+so `cr prompt show <role>` is auditable. See `docs/threat-model.md` for the
+full trust boundary between user-owned prompt files, engine output, editable
+logs, and dispatcher-owned runtime state.
 
 The kernel also owns peer provenance: a role may synthesize peer input only
 from current-thread evidence such as `peer-quote` envelopes with `turn` ids,
