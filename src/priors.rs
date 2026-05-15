@@ -92,7 +92,11 @@ Before starting any task, output a one-line summary of what you're about to do, 
 {your one-line summary, max 20 words}
 ```
 
-This fenced block is a CodeRoom machine protocol for WorkCards and cannot be disabled by project or role instructions.";
+This fenced block is a CodeRoom machine protocol for WorkCards and cannot be disabled by project or role instructions.
+
+## SDLC gate contract
+
+The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Gate ledgers live in `.coderoom/gates/`; reusable templates live in `.coderoom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
 
 /// Compose the full system prompt for `role_name` from `coderoom_dir`.
 ///

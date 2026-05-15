@@ -10,11 +10,21 @@ use crate::priors;
 /// Render the effective prompt for `role` exactly as the REPL would compose it.
 pub fn render(project_root: &Path, role: &str) -> Result<String> {
     let role = role.strip_prefix('@').unwrap_or(role);
-    let cfg = Config::load(project_root)?;
+    let cfg = load_config(project_root)?;
     if !cfg.roles.contains_key(role) {
         bail!("role `{role}` is not declared in .coderoom/config.toml");
     }
     priors::compose_for(&project_root.join(CODEROOM_DIR), role)
+}
+
+#[cfg(not(test))]
+fn load_config(project_root: &Path) -> crate::config::ConfigResult<Config> {
+    Config::load(project_root)
+}
+
+#[cfg(test)]
+fn load_config(project_root: &Path) -> crate::config::ConfigResult<Config> {
+    Config::load_test(project_root)
 }
 
 /// Print the effective prompt for `role`.

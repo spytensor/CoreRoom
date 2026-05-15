@@ -8,6 +8,7 @@
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH]` — enter the interactive REPL
 //! - `cr prompt show <role>`     — print a role's effective prompt
+//! - `cr gate ...`               — inspect SDLC gate ledgers
 //! - `cr doctor [--fix]`         — inspect CodeRoom project files
 //! - `cr show [--role ROLE] [--since YYYY-MM-DD] [--tail N]` — replay events
 //! - `cr cost [--since YYYY-MM-DD]` — summarize reported engine spend
@@ -19,6 +20,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use coderoom::adapter::{Engine, PermissionMode};
 use coderoom::config_cmd::LayerTarget;
+use coderoom::gate::{
+    ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, ReviewInput,
+    VerificationInput,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -145,6 +150,11 @@ switch to `@HEAD` when you've reviewed the new content.")]
     Prompt {
         #[command(subcommand)]
         command: PromptCmd,
+    },
+    /// Inspect and update SDLC gate ledgers.
+    Gate {
+        #[command(subcommand)]
+        command: GateCmd,
     },
     /// Diagnose CodeRoom project files.
     Doctor {
@@ -292,6 +302,202 @@ enum PromptCmd {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum GateCmd {
+    /// Create or replace a per-thread SDLC gate ledger.
+    Init {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// CodeRoom thread id.
+        #[arg(long)]
+        thread: String,
+        /// Gate tier: 0 or 1.
+        #[arg(long, value_parser = parse_gate_tier)]
+        tier: GateTier,
+        /// Work item title.
+        #[arg(long)]
+        feature: String,
+        /// Initial phase. Defaults to research.
+        #[arg(long, value_parser = parse_gate_phase, default_value = "research")]
+        phase: GatePhase,
+        /// Implementing role, when known.
+        #[arg(long)]
+        role: Option<String>,
+        /// Implementing engine, when known.
+        #[arg(long, value_parser = parse_engine)]
+        engine: Option<Engine>,
+        /// Implementing model identifier, when known.
+        #[arg(long)]
+        model: Option<String>,
+        /// Implementing turn id, when known.
+        #[arg(long)]
+        turn: Option<String>,
+    },
+    /// Print the selected gate status.
+    Status {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Validate the selected gate structurally.
+    Validate {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Close a gate only when validation passes, unless bypassed.
+    Close {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Explicit human-readable bypass reason.
+        #[arg(long = "bypass")]
+        bypass_reason: Option<String>,
+    },
+    /// Record an explicit bypass or accepted-risk reason.
+    Bypass {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Gate or rule being bypassed.
+        #[arg(long, default_value = "manual")]
+        gate: String,
+        /// Human-readable reason.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Record an evidence artifact.
+    Artifact {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Artifact kind.
+        #[arg(long, value_parser = parse_artifact_kind)]
+        kind: GateArtifactKind,
+        /// Artifact path.
+        #[arg(long)]
+        path: String,
+        /// Producing role.
+        #[arg(long)]
+        role: Option<String>,
+        /// Producing turn id.
+        #[arg(long)]
+        turn: Option<String>,
+    },
+    /// Record implementer metadata.
+    Implementer {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Implementing role.
+        #[arg(long)]
+        role: String,
+        /// Implementing engine.
+        #[arg(long, value_parser = parse_engine)]
+        engine: Engine,
+        /// Implementing model identifier.
+        #[arg(long)]
+        model: String,
+        /// Implementing turn id, when known.
+        #[arg(long)]
+        turn: Option<String>,
+    },
+    /// Record a review turn.
+    Reviewer {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Reviewer role.
+        #[arg(long)]
+        role: String,
+        /// Reviewer engine.
+        #[arg(long, value_parser = parse_engine)]
+        engine: Engine,
+        /// Reviewer model identifier.
+        #[arg(long)]
+        model: String,
+        /// Reviewer turn id, when known.
+        #[arg(long)]
+        turn: Option<String>,
+        /// Review artifact path.
+        #[arg(long)]
+        artifact: Option<String>,
+        /// Mark this review as same-role/self review.
+        #[arg(long)]
+        same_role: bool,
+        /// Blocking finding count.
+        #[arg(long, default_value_t = 0)]
+        blocking_count: u32,
+        /// Warning finding count.
+        #[arg(long, default_value_t = 0)]
+        warning_count: u32,
+        /// Whether review includes file:line evidence.
+        #[arg(long)]
+        file_line_evidence: bool,
+        /// Whether all blocking findings are resolved.
+        #[arg(long)]
+        all_blockings_resolved: bool,
+    },
+    /// Record verification evidence.
+    Verify {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Command or verification method.
+        #[arg(long)]
+        command: String,
+        /// Evidence text or command output.
+        #[arg(long)]
+        evidence: String,
+        /// Whether verification passed.
+        #[arg(long)]
+        ok: bool,
+    },
+    /// Print the selected raw ledger JSON.
+    Show {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Thread id. Defaults to the active gate pointer.
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Install missing SDLC gate templates into `.coderoom/`.
+    Templates {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Overwrite existing template files.
+        #[arg(long)]
+        overwrite: bool,
+    },
+}
+
 fn layer_from_flags(user: bool, local: bool) -> LayerTarget {
     match (user, local) {
         (true, _) => LayerTarget::User,
@@ -322,6 +528,18 @@ fn parse_permission_mode(s: &str) -> Result<PermissionMode, String> {
             "unknown permission mode `{other}` — valid: ask, auto, bypass"
         )),
     }
+}
+
+fn parse_gate_tier(s: &str) -> Result<GateTier, String> {
+    GateTier::parse(s).map_err(|error| error.to_string())
+}
+
+fn parse_gate_phase(s: &str) -> Result<GatePhase, String> {
+    GatePhase::parse(s).map_err(|error| error.to_string())
+}
+
+fn parse_artifact_kind(s: &str) -> Result<GateArtifactKind, String> {
+    GateArtifactKind::parse(s).map_err(|error| error.to_string())
 }
 
 fn parse_date(s: &str) -> std::result::Result<chrono::NaiveDate, String> {
@@ -360,6 +578,7 @@ fn main() -> Result<()> {
         Some(
             Cmd::Config { .. }
                 | Cmd::Prompt { .. }
+                | Cmd::Gate { .. }
                 | Cmd::Doctor { .. }
                 | Cmd::Update
                 | Cmd::Upgrade
@@ -407,6 +626,7 @@ fn main() -> Result<()> {
         }
         Some(Cmd::Config { command }) => run_config_cmd(command),
         Some(Cmd::Prompt { command }) => run_prompt_cmd(command),
+        Some(Cmd::Gate { command }) => run_gate_cmd(command),
         Some(Cmd::Doctor { project, fix }) => {
             let root = project_root_or_cwd(project)?;
             coderoom::doctor::run(&root, coderoom::doctor::DoctorOptions { fix })
@@ -445,6 +665,245 @@ fn run_prompt_cmd(cmd: PromptCmd) -> Result<()> {
             coderoom::prompt_cmd::show(&project_root_or_cwd(project)?, &role)
         }
     }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "gate subcommand plumbing is a flat CLI dispatcher"
+)]
+fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
+    match cmd {
+        GateCmd::Init {
+            project,
+            thread,
+            tier,
+            feature,
+            phase,
+            role,
+            engine,
+            model,
+            turn,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let implementer = match (role, engine, model) {
+                (Some(role), Some(engine), Some(model)) => Some(GateActor {
+                    role: normalize_role(&role),
+                    engine,
+                    model,
+                    turn_id: turn,
+                    thread_id: Some(thread.clone()),
+                }),
+                (None, None, None) => None,
+                _ => anyhow::bail!(
+                    "--role, --engine, and --model must be supplied together for implementer metadata"
+                ),
+            };
+            let ledger = coderoom::gate::init(
+                &root,
+                GateInit {
+                    thread_id: thread,
+                    feature,
+                    tier,
+                    phase,
+                    implementer,
+                },
+            )?;
+            println!(
+                "created {} gate for `{}` ({})",
+                ledger.tier.label(),
+                ledger.feature,
+                ledger.thread_id
+            );
+            Ok(())
+        }
+        GateCmd::Status { project, thread } => {
+            let root = project_root_or_cwd(project)?;
+            let ledger = coderoom::gate::load(&root, thread.as_deref())?;
+            let validation = coderoom::gate::validate(&root, Some(&ledger.thread_id))?;
+            println!("{}", coderoom::gate::format_status(&ledger, &validation));
+            Ok(())
+        }
+        GateCmd::Validate { project, thread } => {
+            let root = project_root_or_cwd(project)?;
+            let validation = coderoom::gate::validate(&root, thread.as_deref())?;
+            if validation.passed() {
+                println!(
+                    "{} gate pass ({})",
+                    validation.tier.label(),
+                    validation.thread_id
+                );
+            } else {
+                println!("{}", coderoom::gate::format_blocking_message(&validation));
+            }
+            Ok(())
+        }
+        GateCmd::Close {
+            project,
+            thread,
+            bypass_reason,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let ledger = coderoom::gate::close(&root, &thread, bypass_reason.as_deref())?;
+            println!(
+                "closed gate {} with result {}",
+                ledger.thread_id,
+                ledger.result.label()
+            );
+            Ok(())
+        }
+        GateCmd::Bypass {
+            project,
+            thread,
+            gate,
+            reason,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let ledger = coderoom::gate::record_bypass(&root, &thread, &gate, &reason)?;
+            println!(
+                "recorded bypass for {} ({})",
+                ledger.thread_id,
+                ledger.result.label()
+            );
+            Ok(())
+        }
+        GateCmd::Artifact {
+            project,
+            thread,
+            kind,
+            path,
+            role,
+            turn,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let ledger = coderoom::gate::record_artifact(
+                &root,
+                ArtifactInput {
+                    thread_id: thread,
+                    kind,
+                    path,
+                    role: role.map(|role| normalize_role(&role)),
+                    turn_id: turn,
+                },
+            )?;
+            println!(
+                "recorded {} artifact for {}",
+                kind.label(),
+                ledger.thread_id
+            );
+            Ok(())
+        }
+        GateCmd::Implementer {
+            project,
+            thread,
+            role,
+            engine,
+            model,
+            turn,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let actor = GateActor {
+                role: normalize_role(&role),
+                engine,
+                model,
+                turn_id: turn,
+                thread_id: Some(thread.clone()),
+            };
+            let ledger = coderoom::gate::set_implementer(&root, &thread, actor)?;
+            println!("recorded implementer for {}", ledger.thread_id);
+            Ok(())
+        }
+        GateCmd::Reviewer {
+            project,
+            thread,
+            role,
+            engine,
+            model,
+            turn,
+            artifact,
+            same_role,
+            blocking_count,
+            warning_count,
+            file_line_evidence,
+            all_blockings_resolved,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let reviewer = GateActor {
+                role: normalize_role(&role),
+                engine,
+                model,
+                turn_id: turn,
+                thread_id: Some(thread.clone()),
+            };
+            let ledger = coderoom::gate::record_review(
+                &root,
+                ReviewInput {
+                    thread_id: thread,
+                    reviewer,
+                    same_role_as_implementer: same_role,
+                    blocking_count,
+                    warning_count,
+                    file_line_evidence,
+                    all_blockings_resolved,
+                    artifact_path: artifact,
+                },
+            )?;
+            println!("recorded reviewer for {}", ledger.thread_id);
+            Ok(())
+        }
+        GateCmd::Verify {
+            project,
+            thread,
+            command,
+            evidence,
+            ok,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let thread = selected_gate_thread(&root, thread.as_deref())?;
+            let ledger = coderoom::gate::record_verification(
+                &root,
+                VerificationInput {
+                    thread_id: thread,
+                    command,
+                    ok,
+                    evidence,
+                },
+            )?;
+            println!("recorded verification for {}", ledger.thread_id);
+            Ok(())
+        }
+        GateCmd::Show { project, thread } => {
+            let root = project_root_or_cwd(project)?;
+            let ledger = coderoom::gate::load(&root, thread.as_deref())?;
+            println!("{}", serde_json::to_string_pretty(&ledger)?);
+            Ok(())
+        }
+        GateCmd::Templates { project, overwrite } => {
+            let root = project_root_or_cwd(project)?;
+            let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
+            if !coderoom_dir.exists() {
+                anyhow::bail!("{} is missing; run `cr init` first", coderoom_dir.display());
+            }
+            let outcome = coderoom::gate::install_templates(&coderoom_dir, overwrite)?;
+            println!(
+                "gate templates: {} written, {} skipped",
+                outcome.written, outcome.skipped
+            );
+            Ok(())
+        }
+    }
+}
+
+fn selected_gate_thread(root: &Path, explicit: Option<&str>) -> Result<String> {
+    Ok(coderoom::gate::load(root, explicit)?.thread_id)
+}
+
+fn normalize_role(role: &str) -> String {
+    role.strip_prefix('@').unwrap_or(role).to_owned()
 }
 
 /// `cr pointers @<role>` — read the role's priors file and list each
