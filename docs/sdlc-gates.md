@@ -12,6 +12,22 @@ delegate review, and close the gate before claiming completion.
 
 Ledgers are structural evidence. They do not approve correctness.
 
+## Tier 0 / Read-Only Boundary
+
+Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
+answer plus lightweight checks is enough. For read-only review, CodeRoom roles
+may inspect repository files, docs, config, tests, local logs, and command
+output needed to cite evidence. They must not mutate project files, write
+`.coderoom/` review evidence, or append gate artifacts, reviewers, or
+verification records unless the user explicitly asks for a persistent gate
+ledger.
+
+Tier 0 output should be reported inline with `path:line` citations and commands
+inspected. A `cr gate init --tier 0 ...` command is an explicit ledger write,
+but Tier 0 ledgers reject later `artifact`, `reviewer`, and `verify` evidence
+writes. Re-run as Tier 1 when persistent evidence, cross-model review, or
+release sign-off is needed.
+
 ## Typical Tier 1 Flow
 
 ```bash
@@ -51,4 +67,5 @@ cr gate close --thread <thread_id> --bypass "User accepted missing second review
   the implementer.
 - Verification evidence must include real command output or cited evidence.
 
-Tier 0 gates skip the cross-model review requirements.
+Tier 0 gates skip these structural requirements and cannot record hidden
+evidence writes.

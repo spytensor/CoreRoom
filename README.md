@@ -216,7 +216,8 @@ Useful commands:
 - `cr prompt show <role>` prints the exact effective prompt for a role.
 - `cr gate status|validate|close` inspects SDLC gate ledgers under
   `.coderoom/gates/`; the normal path is host-led, with commands kept as
-  debug and recovery controls.
+  debug and recovery controls. Tier 0/read-only reviews stay inline unless the
+  user explicitly asks for a ledger.
 - `cr doctor [--fix]` detects old projects whose `shared.md` still contains
   CodeRoom protocol text that now lives in the built-in kernel.
 - `cr show [--role backend] [--tail 20] [--since YYYY-MM-DD]`, `cr cost`,

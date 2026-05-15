@@ -536,6 +536,20 @@ pub fn set_implementer(
     })
 }
 
+fn ensure_evidence_writes_allowed(
+    project_root: &Path,
+    thread_id: &str,
+    operation: &str,
+) -> Result<()> {
+    let ledger = load(project_root, Some(thread_id))?;
+    if ledger.tier == GateTier::Tier0 {
+        bail!(
+            "Tier 0/read-only gates do not record {operation}; report inline evidence or rerun the work as Tier 1 with explicit user approval"
+        );
+    }
+    Ok(())
+}
+
 /// Record an artifact path on an existing ledger.
 pub fn record_artifact(project_root: &Path, input: ArtifactInput) -> Result<GateLedger> {
     let path = input.path.trim();
@@ -543,6 +557,7 @@ pub fn record_artifact(project_root: &Path, input: ArtifactInput) -> Result<Gate
         bail!("artifact path cannot be empty");
     }
     let thread_id = input.thread_id.clone();
+    ensure_evidence_writes_allowed(project_root, &thread_id, "gate artifacts")?;
     update_ledger(project_root, &thread_id, |ledger| {
         let detail = format!("{} artifact recorded at {path}", input.kind.label());
         ledger.artifacts.push(GateArtifact {
@@ -559,6 +574,7 @@ pub fn record_artifact(project_root: &Path, input: ArtifactInput) -> Result<Gate
 /// Record a review turn on an existing ledger.
 pub fn record_review(project_root: &Path, input: ReviewInput) -> Result<GateLedger> {
     let thread_id = input.thread_id.clone();
+    ensure_evidence_writes_allowed(project_root, &thread_id, "review evidence")?;
     update_ledger(project_root, &thread_id, |ledger| {
         let role = input.reviewer.role.clone();
         let engine = input.reviewer.engine.as_str();
@@ -592,6 +608,7 @@ pub fn record_review(project_root: &Path, input: ReviewInput) -> Result<GateLedg
 /// Record verification evidence on an existing ledger.
 pub fn record_verification(project_root: &Path, input: VerificationInput) -> Result<GateLedger> {
     let thread_id = input.thread_id.clone();
+    ensure_evidence_writes_allowed(project_root, &thread_id, "verification evidence")?;
     update_ledger(project_root, &thread_id, |ledger| {
         let command = input.command.trim().to_owned();
         ledger.verifications.push(GateVerification {
@@ -728,6 +745,10 @@ pub fn runtime_prompt_context(
         );
         let _ = writeln!(
             out,
+            "- Tier 0/read-only work reports inline; do not write `.coderoom/` gate or review evidence unless the user explicitly asks for a ledger."
+        );
+        let _ = writeln!(
+            out,
             "- For Tier 1, use `cr gate init --thread {thread_id} --tier 1 --feature \"...\"` and templates in `{template_hint}`."
         );
         let _ = writeln!(
@@ -738,6 +759,10 @@ pub fn runtime_prompt_context(
         let _ = writeln!(
             out,
             "- If reviewing Tier 1 work, record review evidence with `cr gate reviewer --thread {thread_id} ...`."
+        );
+        let _ = writeln!(
+            out,
+            "- For Tier 0/read-only review, cite evidence inline and do not write `.coderoom/` review artifacts."
         );
     }
     out
@@ -1307,6 +1332,96 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.contains("at least two reviewer turns")));
+    }
+
+    #[test]
+    fn tier0_rejects_hidden_review_evidence_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "read-only project review".to_owned(),
+                tier: GateTier::Tier0,
+                phase: GatePhase::Review,
+                implementer: Some(actor("host", Engine::Cc, "claude-sonnet-4")),
+            },
+        )
+        .unwrap();
+
+        let error = record_review(
+            tmp.path(),
+            ReviewInput {
+                thread_id: "thread-1".to_owned(),
+                reviewer: actor("security", Engine::Codex, "gpt-5"),
+                same_role_as_implementer: false,
+                blocking_count: 0,
+                warning_count: 1,
+                file_line_evidence: true,
+                all_blockings_resolved: true,
+                artifact_path: Some("docs/review.md".to_owned()),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Tier 0/read-only gates do not record review evidence"));
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+        assert!(ledger.reviewers.is_empty());
+        assert!(ledger.artifacts.is_empty());
+        assert_eq!(ledger.history.len(), 1);
+    }
+
+    #[test]
+    fn tier0_rejects_artifact_and_verification_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "read-only project review".to_owned(),
+                tier: GateTier::Tier0,
+                phase: GatePhase::Review,
+                implementer: Some(actor("host", Engine::Cc, "claude-sonnet-4")),
+            },
+        )
+        .unwrap();
+
+        let artifact_error = record_artifact(
+            tmp.path(),
+            ArtifactInput {
+                thread_id: "thread-1".to_owned(),
+                kind: GateArtifactKind::Review,
+                path: "docs/review.md".to_owned(),
+                role: Some("security".to_owned()),
+                turn_id: Some("turn-security".to_owned()),
+            },
+        )
+        .unwrap_err();
+        let verification_error = record_verification(
+            tmp.path(),
+            VerificationInput {
+                thread_id: "thread-1".to_owned(),
+                command: "cargo test".to_owned(),
+                ok: true,
+                evidence: "not run; read-only review".to_owned(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(artifact_error
+            .to_string()
+            .contains("Tier 0/read-only gates do not record gate artifacts"));
+        assert!(verification_error
+            .to_string()
+            .contains("Tier 0/read-only gates do not record verification evidence"));
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+        assert!(ledger.artifacts.is_empty());
+        assert!(ledger.verifications.is_empty());
+        assert_eq!(ledger.history.len(), 1);
     }
 
     #[test]
