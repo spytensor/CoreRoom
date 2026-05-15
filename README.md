@@ -40,8 +40,8 @@ no way to express "this rule only matters to backend".
 
 CodeRoom partitions organizational knowledge by role. Each role is a separate
 agent CLI subprocess loaded with its own priors. The user `@`-mentions roles
-to address them. Cross-role routing happens when one role writes `@x` in its
-reply.
+to address them. Cross-role routing happens when one role writes an explicit
+delegation line like `@x: <brief>` in its reply.
 
 ## What you get
 

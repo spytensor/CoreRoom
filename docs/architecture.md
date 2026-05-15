@@ -15,7 +15,7 @@ terminal stream. Each role is a separate CLI subprocess loaded with a
 role-specific knowledge file (its **priors**). One role is designated the
 **host** — it catches any message the user types without an explicit `@`.
 Other roles are addressed by `@`-mention. Cross-role routing happens when one
-role writes `@x` in its reply.
+role writes an explicit delegation line like `@x: <brief>` in its reply.
 
 The CLI binary is `cr`.
 
@@ -139,8 +139,9 @@ Each is a one-liner with rationale. Detailed sections follow.
    roles that omit a per-role permission mode resolve to bypass; explicit
    ask/auto on Gemini still fails fast.
 6. **Trust-the-model routing.** Each role's system prompt includes a team
-   roster. When a role writes `@x` in its reply, the wrapper routes a
-   focused brief to `x`'s session. No syntactic protocol.
+   roster. When a role writes `@x: <brief>` in its reply, the wrapper routes a
+   focused brief to `x`'s session. Plain status or attribution mentions do not
+   route.
 7. **CC-style brief routing.** Cross-role `@` does NOT forward full chat
    history. Wrapper sends a brief = the `@`-paragraph + thread sticky +
    pointer to `.coderoom/transcripts/`. Receiving role reads more on demand.
@@ -189,7 +190,7 @@ wire for v0.1 log replay only.
 
 `RoleSpoke.mentions` is the parsed list of `@x` references found in `text`.
 The wrapper surfaces those references in logs; auto-routing is narrower and
-uses only explicit delegation blocks whose line starts with `@role`.
+uses only explicit delegation blocks whose line starts with `@role:`.
 
 JSONL append-only log at `.coderoom/messages.jsonl`. The full transcript view
 the user sees is just a render of this stream filtered to events that humans
@@ -301,7 +302,7 @@ A role's effective system prompt is composed at spawn time:
 ```
 
 The built-in kernel is not copied into `.coderoom/`. It owns the routing
-syntax (`@role` line starts), peer brief envelope (`<<<peer-quote ...>>>>`,
+syntax (`@role: <brief>` delegation lines), peer brief envelope (`<<<peer-quote ...>>>>`,
 with legacy `From @role:` accepted during migration), patch/journal authority
 rules, and WorkCard `cr-task` block. User-editable project and role priors can
 tune behavior, but they cannot redefine those runtime contracts. Every
@@ -351,7 +352,7 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 | Brief loses thread context (HIPAA)   | Thread sticky: rolling 200-token constraint summary auto-prepended on every cross-role route. User-emphasized statements ("we use…", "must…") seed it. |
 | Journal hallucination compounding    | JSON-schema-enforced citations on every `learned` entry; unverified entries quarantined |
 | Patch directory bloat                | Hard 50-cap per role + FIFO archive at v0.1               |
-| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router only acts on explicit delegation lines that start with `@role`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). See `docs/proposed-amendments.md` A-005. |
+| Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Trust the model + bounded by user. Auto-router only acts on explicit delegation lines that start with `@role:`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). Hop depth is unbounded; chains end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). See `docs/proposed-amendments.md` A-005. |
 | Permission gate fail-open            | Hook script defaults to deny on any error; wrapper supervises hook process and treats non-zero exit without decision-file as deny |
 | Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coderoom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
 | Token cost runaway                   | User halts with `Ctrl-C` × 2 or `/halt`; cost per turn is surfaced in the WorkCard so runaway behavior is visible |

@@ -210,6 +210,12 @@ Accepted and implemented after v0.1.12.
 - **Filed:** 2026-05-11
 - **Touches:** Locked decision on "Per-thread hop-depth counter, ≥3 hops triggers escalation" in architecture.md (Failure-mode mitigations table) and the "enforces hop-depth limit" line in the layered architecture diagram.
 
+Follow-up on 2026-05-15: dogfooding showed that line-start status mentions
+such as `@backend 和 @ci 都给了...` can be mistaken for delegation. The
+unbounded routing decision still stands, but route extraction now requires an
+explicit task separator after the target group, for example `@backend: <brief>`
+or `@backend @security: <brief>`.
+
 ### Problem
 
 v0.1 capped cross-role auto-routing at one hop and the failure-mode table
@@ -242,8 +248,9 @@ are already in place and are *not* depth-based.
    legitimate longer back-and-forth, still requires reasoning about which
    number is right. Tunable knobs accumulate. Rejected.
 2. **Require explicit `@role:report` syntax for cross-role replies.**
-   Violates LLM natural-language norms and forces every prior template to
-   teach the syntax. Rejected.
+   Originally rejected as too protocol-heavy; later accepted in a narrower
+   form after dogfooding showed status mentions could trigger unintended
+   routes.
 3. **Surface a confirmation prompt before each follow-up hop.** Breaks the
    chat illusion; user becomes the manual router. Rejected.
 4. **Unbounded with semantic guards only.** Accepted (this amendment).
@@ -267,7 +274,8 @@ tracking" with "tracks inflight turns, supervises grounding gate".
 
 Internally, `send_and_drain` becomes a worklist over a FIFO queue of
 `(role, brief)` pairs. The originating turn's explicit delegation blocks
-push onto the queue; each dispatched turn's delegation blocks push too.
+with a task separator push onto the queue; each dispatched turn's delegation
+blocks push too.
 Plain prose mentions, tables, quotes, code fences, and pasted transcript
 lines are attribution/context only. The loop ends when the queue drains,
 when a turn is interrupted (`drain` returns `None`), or when the user
