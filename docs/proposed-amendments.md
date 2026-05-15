@@ -204,17 +204,17 @@ Additive CLI flags only.
 
 Accepted and implemented after v0.1.12.
 
-## A-005: Auto-routing is unbounded; user halts when satisfied
+## A-005: Auto-routing worklist; superseded by dispatcher limits
 
-- **Status:** accepted / partially implemented
+- **Status:** superseded by #163 dispatcher limits
 - **Filed:** 2026-05-11
 - **Touches:** Locked decision on "Per-thread hop-depth counter, ≥3 hops triggers escalation" in architecture.md (Failure-mode mitigations table) and the "enforces hop-depth limit" line in the layered architecture diagram.
 
 Follow-up on 2026-05-15: dogfooding showed that line-start status mentions
 such as `@backend 和 @ci 都给了...` can be mistaken for delegation. The
-unbounded routing decision still stands, but route extraction now requires an
-explicit task separator after the target group, for example `@backend: <brief>`
-or `@backend @security: <brief>`.
+later #163 dispatcher boundary also restored a default max hop depth of 5.
+Route extraction now requires an explicit task separator after the target
+group, for example `@backend: <brief>` or `@backend @security: <brief>`.
 
 ### Problem
 
@@ -266,11 +266,12 @@ Replace the architecture.md failure-mode entry:
 with:
 
 ```
-| Routing loops (`@a` ↔ `@b` ↔ `@a`) | Trust the model + bounded by user. Auto-router skips three cases only: self-mention (`@a` mentioning `@a`), unknown role (`@<not-running>`), and ungrounded turn (tool calls were systematically denied → reply is a guess, not data). Hop depth is unbounded. User halts a runaway chain with Ctrl-C twice or `/halt`. |
+| Routing loops (`@a` ↔ `@b` ↔ `@a`) | Superseded by the dispatcher limit from #163: auto-router still skips self-mention (`@a` mentioning `@a`), unknown roles (`@<not-running>`), and ungrounded turns, but user-origin depth is 0, each auto-route child is parent depth + 1, and the default max hop depth is 5. Fan-out and queued-turn limits are separate. |
 ```
 
-Replace the layered diagram line "enforces hop-depth limit, inflight
-tracking" with "tracks inflight turns, supervises grounding gate".
+The A-005 "unbounded" decision was superseded by the #163 dispatcher boundary.
+The runtime now tracks inflight turns, supervises the grounding gate, and owns
+hop-depth/fan-out/queue limits in one prompt-dispatch path.
 
 Internally, `send_and_drain` becomes a worklist over a FIFO queue of
 `(role, brief)` pairs. The originating turn's explicit delegation blocks
@@ -296,11 +297,10 @@ tracked as a separate v0.2.x deliverable. The dispatcher works without
 them; once the IDs land, `cr show` will be able to reconstruct chains by
 walking `parent_turn_id` ancestry.
 
-Spend: a chain can burn more tokens than before. CodeRoom does not
-impose a wrapper-side budget cap — the bound is the user's `Ctrl-C`,
-platform-side quotas, and the per-turn cost surfaced in the WorkCard.
-Users running unbounded routing on chatty roles should keep that in
-mind.
+Spend: a chain can burn more tokens than before. CodeRoom bounds routing by
+hop depth, fan-out, queue length, the user's `Ctrl-C`, platform-side quotas,
+and the per-turn cost surfaced in the WorkCard. Users running chatty roles
+should keep that in mind.
 
 ### Decision
 

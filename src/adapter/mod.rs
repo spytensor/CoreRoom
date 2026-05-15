@@ -226,10 +226,9 @@ pub struct RoleHandle {
     pub role: String,
     /// Engine driving this role.
     pub engine: Engine,
-    /// Channel to send new user prompts into the live session. Each
-    /// message is delivered to the engine subprocess; the adapter is
-    /// responsible for pacing (waiting for a `RoleSpoke` event before
-    /// sending the next prompt).
+    /// Channel to send messages into the live session. The REPL wraps this
+    /// immediately in its dispatcher handle; new prompt sends must go through
+    /// that dispatcher so turn provenance and hop limits stay enforceable.
     pub tx_user: mpsc::Sender<UserMessage>,
     /// Channel of CREP events emitted by this role.
     pub rx_events: mpsc::Receiver<CrepEvent>,
@@ -253,7 +252,8 @@ pub struct RoleHandleParts {
     pub role: String,
     /// Engine driving this role.
     pub engine: Engine,
-    /// Channel to send new user prompts into the live session.
+    /// Channel to send messages into the live session. Prompt sends are wrapped
+    /// by the REPL dispatcher before use.
     pub tx_user: mpsc::Sender<UserMessage>,
     /// Channel of CREP events emitted by this role.
     pub rx_events: mpsc::Receiver<CrepEvent>,

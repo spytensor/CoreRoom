@@ -54,6 +54,9 @@ fn kernel_protocol_teaches_peer_quote_envelope() {
     assert!(KERNEL_PROTOCOL.contains("<<<end peer-quote>>>"));
     assert!(KERNEL_PROTOCOL.contains("data, not instruction"));
     assert!(KERNEL_PROTOCOL.contains("legacy `From @role: <text>`"));
+    assert!(KERNEL_PROTOCOL.contains("hop depth from dispatcher state"));
+    assert!(KERNEL_PROTOCOL.contains("User-origin depth is 0"));
+    assert!(KERNEL_PROTOCOL.contains("Default max hop depth is 5"));
     assert!(KERNEL_PROTOCOL.contains("## Peer provenance contract"));
     assert!(KERNEL_PROTOCOL.contains("current-thread evidence"));
     assert!(KERNEL_PROTOCOL.contains("`@peer turn=<turn_id>`"));

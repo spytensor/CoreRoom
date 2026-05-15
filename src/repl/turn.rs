@@ -3,10 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use tokio::sync::mpsc;
-use tracing::warn;
 
-use crate::adapter::UserMessage;
 use crate::crep::CrepEvent;
 use crate::output;
 use crate::permissions::BridgeRequestSink;
@@ -15,6 +12,7 @@ use super::permission_prompt;
 use super::render::render_event;
 use super::status::{StatusRegion, SPINNER_TICK_MS};
 use super::work::{self, TurnWork};
+use super::DispatcherHandle;
 
 /// Final assistant-turn fields captured during a single role's drain.
 #[derive(Debug, Clone)]
@@ -195,7 +193,7 @@ impl TurnActivity {
     reason = "turn drain owns user, durable, live, permission, role, and work-state channels"
 )]
 pub(super) async fn drain_one_turn(
-    tx_user: mpsc::Sender<UserMessage>,
+    dispatcher: DispatcherHandle,
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
@@ -211,11 +209,10 @@ pub(super) async fn drain_one_turn(
         text,
         crate::gate::runtime_prompt_context(role, host_role, turn_id, thread_id)
     );
-    if let Err(error) = tx_user
-        .send(UserMessage::prompt(role_prompt, turn_id, thread_id))
-        .await
+    if !dispatcher
+        .send_prompt(role_prompt, turn_id, thread_id)
+        .await?
     {
-        warn!(role, %error, "user-message channel for role closed");
         return Ok(None);
     }
 

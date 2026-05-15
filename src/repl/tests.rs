@@ -593,7 +593,7 @@ fn snapshot_boot_dashboard_at_80() {
 │ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
 │ ● @security  codex  · default · bypass                                       │
 │                                         what's new in 0.4.4                  │
-│  2.2k  base tokens loaded               • legacy budget_per_role_usd projec… │
+│  2.4k  base tokens loaded               • legacy budget_per_role_usd projec… │
 │ /repo/codeRoom                          • older top-level user defaults sti… │
 │                                         • hotfix release keeps v0.4.3 SDLC … │
 │                                                                              │
@@ -1365,9 +1365,100 @@ fn streaming_state_resets_first_line_only_after_real_content() {
 
 // ---- extract_route_instructions --------------------------------------
 //
-// Tests for the worklist's delegation extraction helper. The dispatcher
-// itself is async + cross-module and harder to drive in a unit test, but the
-// routing decision is a pure function we can lock here.
+// Tests for the worklist's dispatcher and delegation extraction helpers.
+
+fn test_queued_turn(role: &str, depth: usize) -> QueuedTurn {
+    QueuedTurn {
+        role: role.to_owned(),
+        text: format!("task for {role}"),
+        turn_id: format!("tu-{role}-{depth}"),
+        thread_id: "th-test".to_owned(),
+        parent_turn_id: Some("tu-parent".to_owned()),
+        depth,
+    }
+}
+
+#[test]
+fn route_dispatcher_marks_user_origin_depth_zero() {
+    let mut dispatcher = RouteDispatcher::new_root("host", "start here");
+    let root = dispatcher.pop_next().unwrap();
+
+    assert_eq!(root.role, "host");
+    assert_eq!(root.text, "start here");
+    assert_eq!(root.depth, 0);
+    assert!(root.parent_turn_id.is_none());
+    assert!(root.thread_id.starts_with("th-"));
+}
+
+#[test]
+fn route_dispatcher_rejects_child_past_max_hop_depth() {
+    let mut dispatcher = RouteDispatcher::with_limits(1, DEFAULT_MAX_ROUTE_FAN_OUT, 8);
+
+    dispatcher
+        .enqueue_auto_route(test_queued_turn("backend", 1))
+        .unwrap();
+    let error = dispatcher
+        .enqueue_auto_route(test_queued_turn("security", 2))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        DispatchSkip::HopDepth {
+            target,
+            depth: 2,
+            max: 1,
+        } if target == "security"
+    ));
+}
+
+#[test]
+fn route_dispatcher_default_hop_depth_allows_five_not_six() {
+    let mut dispatcher = RouteDispatcher::with_limits(
+        DEFAULT_MAX_HOP_DEPTH,
+        DEFAULT_MAX_ROUTE_FAN_OUT,
+        DEFAULT_MAX_ROUTE_QUEUE,
+    );
+
+    dispatcher
+        .enqueue_auto_route(test_queued_turn("backend", DEFAULT_MAX_HOP_DEPTH))
+        .unwrap();
+    let error = dispatcher
+        .enqueue_auto_route(test_queued_turn("security", DEFAULT_MAX_HOP_DEPTH + 1))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        DispatchSkip::HopDepth {
+            target,
+            depth,
+            max: DEFAULT_MAX_HOP_DEPTH,
+        } if target == "security" && depth == DEFAULT_MAX_HOP_DEPTH + 1
+    ));
+}
+
+#[test]
+fn route_dispatcher_queue_limit_is_separate_from_hop_depth() {
+    let mut dispatcher = RouteDispatcher::with_limits(5, DEFAULT_MAX_ROUTE_FAN_OUT, 1);
+
+    dispatcher
+        .enqueue_auto_route(test_queued_turn("backend", 1))
+        .unwrap();
+    let error = dispatcher
+        .enqueue_auto_route(test_queued_turn("qa", 1))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        DispatchSkip::QueueDepth {
+            target,
+            queued: 1,
+            max: 1,
+        } if target == "qa"
+    ));
+    assert_eq!(dispatcher.max_fan_out_per_turn(), DEFAULT_MAX_ROUTE_FAN_OUT);
+    assert!(dispatcher.accepts_fan_out_index(DEFAULT_MAX_ROUTE_FAN_OUT - 1));
+    assert!(!dispatcher.accepts_fan_out_index(DEFAULT_MAX_ROUTE_FAN_OUT));
+}
 
 #[test]
 fn peer_brief_uses_quote_envelope() {
