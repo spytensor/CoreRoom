@@ -100,7 +100,7 @@ This fenced block is a CodeRoom machine protocol for WorkCards and cannot be dis
 
 ## SDLC gate contract
 
-The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Gate ledgers live in `.coderoom/gates/`; reusable templates live in `.coderoom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
+The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Tier 0/read-only work reports evidence inline and must not write `.coderoom/` gate or review artifacts unless the user explicitly asks for a ledger. Gate ledgers live in `.coderoom/gates/`; reusable templates live in `.coderoom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
 
 /// Compose the full system prompt for `role_name` from `coderoom_dir`.
 ///

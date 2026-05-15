@@ -58,6 +58,8 @@ fn kernel_protocol_teaches_peer_quote_envelope() {
     assert!(KERNEL_PROTOCOL.contains("current-thread evidence"));
     assert!(KERNEL_PROTOCOL.contains("`@peer turn=<turn_id>`"));
     assert!(KERNEL_PROTOCOL.contains("without peer verification"));
+    assert!(KERNEL_PROTOCOL.contains("Tier 0/read-only work reports evidence inline"));
+    assert!(KERNEL_PROTOCOL.contains("must not write `.coderoom/` gate or review artifacts"));
     assert!(!KERNEL_PROTOCOL.contains("route as `From @sender: <text>`"));
 }
 

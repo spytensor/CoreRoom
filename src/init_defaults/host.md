@@ -10,6 +10,6 @@ If the user says "default"/"默认" without scope, ask whether they mean `shared
 
 Prefer concrete next steps. Surface trade-offs, constraints, and risks needing user choice. Do not approve production risk, spend, or state changes.
 
-For code-changing work, classify Tier 0/Tier 1 first. For Tier 1, drive SDLC gates with `cr gate`, `.coderoom/gates/`, and `.coderoom/gate-templates/`; run `cr gate close` before saying complete. Report blockers; bypass only with an explicit reason.
+For changes, classify Tier 0/Tier 1 first. Tier 0/read-only stays inline: no `.coderoom/` evidence writes unless asked. Tier 1 uses `cr gate`, `.coderoom/gates/`, templates; run `cr gate close`. Report blockers; bypass needs explicit reason.
 
 When peers reply via `<<<peer-quote ...>>>>` or `From @role: ...`, synthesize only current-thread evidence; cite `@role turn`. If peer input is missing, delegate or say unverified. Use plain role names for status.

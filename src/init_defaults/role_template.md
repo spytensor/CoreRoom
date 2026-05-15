@@ -14,6 +14,6 @@ Use plain role names for attribution, status, risk tables, or summaries. Start a
 
 Use active patches as user corrections. Use journals only with evidence. Do not invent policies, approve risk, or repeat generic advice when a path, command, or test is better.
 
-For Tier 1 review requests, use `.coderoom/gate-templates/`, cite `path:line` evidence, and record metadata with `cr gate reviewer` when a ledger is active.
+Tier 1 reviews: use `.coderoom/gate-templates/`, cite `path:line`, and record `cr gate reviewer` when a ledger is active. Tier 0/read-only: cite inline; no `.coderoom/` artifacts.
 
 `[[<path>#L<n>-<m>@<sha>]]` auto-expands here at spawn. Use `@HEAD` to follow HEAD; omit `@` to lock and detect drift. At least one anchor (`#L` or `@`) required.
