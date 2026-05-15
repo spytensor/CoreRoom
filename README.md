@@ -74,7 +74,8 @@ delegation line like `@x: <brief>` in its reply.
 See [docs/architecture.md](docs/architecture.md) for the v0.1 constitution,
 [docs/v0.2-trust-and-interrupt.md](docs/v0.2-trust-and-interrupt.md) for
 the v0.2 amendment, [docs/v0.4-calm-cli-ui.md](docs/v0.4-calm-cli-ui.md)
-for the v0.4 live-surface contract, [docs/sdlc-gates.md](docs/sdlc-gates.md)
+for the v0.4 live-surface contract, [docs/threat-model.md](docs/threat-model.md)
+for routing / permission / resume trust boundaries, [docs/sdlc-gates.md](docs/sdlc-gates.md)
 for host-led SDLC gate ledgers, and [docs/spike-2026-05-09.md](docs/spike-2026-05-09.md)
 for the feasibility spike that grounds the whole project.
 
