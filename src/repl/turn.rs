@@ -206,8 +206,13 @@ pub(super) async fn drain_one_turn(
     host_role: &str,
     work: Arc<Mutex<TurnWork>>,
 ) -> Result<Option<CapturedTurn>> {
+    let role_prompt = format!(
+        "{}{}",
+        text,
+        crate::gate::runtime_prompt_context(role, host_role, turn_id, thread_id)
+    );
     if let Err(error) = tx_user
-        .send(UserMessage::prompt(text, turn_id, thread_id))
+        .send(UserMessage::prompt(role_prompt, turn_id, thread_id))
         .await
     {
         warn!(role, %error, "user-message channel for role closed");

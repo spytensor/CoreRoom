@@ -435,6 +435,10 @@ fn planned_files(coderoom_dir: &Path, roles: &[RolePlan]) -> Vec<PathBuf> {
     for role in roles {
         paths.push(roles_dir.join(format!("{}.md", role.name)));
     }
+    let gate_templates_dir = coderoom_dir.join(crate::gate::GATE_TEMPLATES_DIR);
+    for template in crate::gate::default_templates() {
+        paths.push(gate_templates_dir.join(template.filename));
+    }
     paths.push(coderoom_dir.join(".gitignore"));
     paths
 }

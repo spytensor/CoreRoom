@@ -1456,8 +1456,7 @@ async fn handle_resume(
                 // picker. Print the list as a fallback only when there
                 // actually are sessions; otherwise stay quiet.
                 let has_any = sessions::list_room_sessions(project_root)
-                    .map(|sessions| !sessions.is_empty())
-                    .unwrap_or(false);
+                    .is_ok_and(|sessions| !sessions.is_empty());
                 if has_any {
                     output::hint("resume cancelled");
                 } else {

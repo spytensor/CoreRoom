@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 
 use crate::adapter::Engine;
 use crate::config::{CONFIG_FILE, ROLES_DIR};
+use crate::gate::{self, GATE_TEMPLATES_DIR};
 
 use super::{
     RolePlan, DEFAULT_ENGINE, DEFAULT_GITIGNORE, DEFAULT_HOST_PRIORS, DEFAULT_ROLE_TEMPLATE,
@@ -29,7 +30,17 @@ pub(super) fn write_all(coderoom_dir: &Path, roles: &[RolePlan]) -> Result<()> {
         };
         write_file(&path, &body)?;
     }
+    write_gate_templates(coderoom_dir)?;
     write_file(&coderoom_dir.join(".gitignore"), DEFAULT_GITIGNORE)?;
+    Ok(())
+}
+
+fn write_gate_templates(coderoom_dir: &Path) -> Result<()> {
+    let dir = coderoom_dir.join(GATE_TEMPLATES_DIR);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    for template in gate::default_templates() {
+        write_file(&dir.join(template.filename), template.content)?;
+    }
     Ok(())
 }
 

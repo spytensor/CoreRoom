@@ -75,7 +75,8 @@ reply.
 See [docs/architecture.md](docs/architecture.md) for the v0.1 constitution,
 [docs/v0.2-trust-and-interrupt.md](docs/v0.2-trust-and-interrupt.md) for
 the v0.2 amendment, [docs/v0.4-calm-cli-ui.md](docs/v0.4-calm-cli-ui.md)
-for the v0.4 live-surface contract, and [docs/spike-2026-05-09.md](docs/spike-2026-05-09.md)
+for the v0.4 live-surface contract, [docs/sdlc-gates.md](docs/sdlc-gates.md)
+for host-led SDLC gate ledgers, and [docs/spike-2026-05-09.md](docs/spike-2026-05-09.md)
 for the feasibility spike that grounds the whole project.
 
 ## Install
@@ -207,6 +208,9 @@ Useful commands:
 - `/allow <tool>` and `/deny <tool>` update the session permission policy
   used by Claude Code hooks. Examples: `/allow Read`, `/deny Bash`.
 - `cr prompt show <role>` prints the exact effective prompt for a role.
+- `cr gate status|validate|close` inspects SDLC gate ledgers under
+  `.coderoom/gates/`; the normal path is host-led, with commands kept as
+  debug and recovery controls.
 - `cr doctor [--fix]` detects old projects whose `shared.md` still contains
   CodeRoom protocol text that now lives in the built-in kernel.
 - `cr show [--role backend] [--tail 20] [--since YYYY-MM-DD]`, `cr cost`,

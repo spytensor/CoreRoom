@@ -7,3 +7,4 @@ Examples:
 - Preferred frameworks, libraries, and architectural boundaries.
 - Testing, migration, release, or review standards.
 - Domain vocabulary and product constraints.
+- SDLC gate customization; reusable defaults live in `.coderoom/gate-templates/`.

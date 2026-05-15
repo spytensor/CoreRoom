@@ -18,6 +18,7 @@ pub mod crep;
 pub mod detect;
 pub mod doctor;
 pub mod engines;
+pub mod gate;
 pub mod image_paths;
 pub mod init;
 pub mod output;

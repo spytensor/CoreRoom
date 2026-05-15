@@ -336,6 +336,10 @@ fn init_yes_creates_minimal_valid_layout() {
     assert!(coderoom.join(CONFIG_FILE).is_file());
     assert!(coderoom.join("shared.md").is_file());
     assert!(coderoom.join(ROLES_DIR).join("host.md").is_file());
+    assert!(coderoom
+        .join(crate::gate::GATE_TEMPLATES_DIR)
+        .join("code-review-gate.md")
+        .is_file());
     assert!(coderoom.join(".gitignore").is_file());
 }
 
@@ -502,6 +506,13 @@ fn planned_files_lists_in_render_order() {
             "/tmp/p/.coderoom/shared.md",
             "/tmp/p/.coderoom/roles/host.md",
             "/tmp/p/.coderoom/roles/backend.md",
+            "/tmp/p/.coderoom/gate-templates/tier-classify.md",
+            "/tmp/p/.coderoom/gate-templates/research-gate.md",
+            "/tmp/p/.coderoom/gate-templates/plan-gate.md",
+            "/tmp/p/.coderoom/gate-templates/plan-review-gate.md",
+            "/tmp/p/.coderoom/gate-templates/code-review-gate.md",
+            "/tmp/p/.coderoom/gate-templates/precommit-gate.md",
+            "/tmp/p/.coderoom/gate-templates/signoff-gate.md",
             "/tmp/p/.coderoom/.gitignore",
         ]
     );
