@@ -6,10 +6,10 @@
 //! `@role: <brief>`, those blocks push follow-up turns onto a FIFO worklist
 //! inside [`send_and_drain`], so chains like
 //! `user → @host → @security → @host (synthesis)` run to completion
-//! before the prompt returns. See amendment A-005 in
-//! `docs/proposed-amendments.md`: the chain has no hop-depth limit;
-//! it ends when the queue drains, a turn is interrupted, or the user
-//! halts (`Ctrl-C` × 2 / `/halt`).
+//! before the prompt returns. A per-thread dispatcher owns routing
+//! provenance, depth, and queue limits; it ends when the queue drains,
+//! a turn is interrupted, a routing limit is hit, or the user halts
+//! (`Ctrl-C` × 2 / `/halt`).
 //!
 //! Concurrent multi-role *parallel* rendering (a single `StatusRegion`
 //! shared across simultaneously-working roles) is still tracked
@@ -60,6 +60,10 @@ use splash::{print_help, print_home};
 use turn::{drain_one_turn, CapturedTurn};
 use work::{render_card, TurnWork};
 
+const DEFAULT_MAX_HOP_DEPTH: usize = 5;
+const DEFAULT_MAX_ROUTE_FAN_OUT: usize = 8;
+const DEFAULT_MAX_ROUTE_QUEUE: usize = 32;
+
 /// Bundle of every available engine adapter, constructed once per
 /// `cr start` invocation. Bundled so REPL helpers don't have to
 /// thread three separate references through every call site.
@@ -83,7 +87,7 @@ impl Adapters {
 /// Live state for a single running role inside the REPL.
 struct RunningRole {
     engine: Engine,
-    tx_user: mpsc::Sender<UserMessage>,
+    dispatcher: DispatcherHandle,
     stop_tx: Option<oneshot::Sender<StopReason>>,
     /// Turn-level cancellation channel surfaced by the adapter.
     /// Consumed by `/halt`, `/halt @role`, and the Ctrl-C-while-turn
@@ -107,6 +111,45 @@ struct RunningRole {
         reason = "kept alive only for Drop side-effects such as hook settings cleanup"
     )]
     adapter_tempfiles: Vec<NamedTempFile>,
+}
+
+/// Thin prompt boundary for a running role.
+///
+/// Adapters expose a raw mailbox when they start, but the REPL wraps it
+/// immediately. Prompt sends go through this handle so routing provenance
+/// stays in the dispatcher path instead of leaking direct `UserMessage::Prompt`
+/// sends through helper code.
+#[derive(Clone)]
+struct DispatcherHandle {
+    role: String,
+    tx_user: mpsc::Sender<UserMessage>,
+}
+
+impl DispatcherHandle {
+    fn new(role: String, tx_user: mpsc::Sender<UserMessage>) -> Self {
+        Self { role, tx_user }
+    }
+
+    async fn send_prompt(&self, prompt: String, turn_id: &str, thread_id: &str) -> Result<bool> {
+        if let Err(error) = self
+            .tx_user
+            .send(UserMessage::prompt(prompt, turn_id, thread_id))
+            .await
+        {
+            warn!(role = %self.role, %error, "user-message channel for role closed");
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn send_compact(
+        &self,
+        respond_to: oneshot::Sender<CompactResult>,
+    ) -> std::result::Result<(), mpsc::error::SendError<UserMessage>> {
+        self.tx_user
+            .send(UserMessage::compact_context(respond_to))
+            .await
+    }
 }
 
 struct SpawnContext<'a> {
@@ -637,7 +680,7 @@ async fn prompt(stdout: &mut tokio::io::Stdout) -> Result<()> {
 }
 
 fn stop_running_role(role: &str, mut running: RunningRole, reason: StopReason) {
-    drop(running.tx_user);
+    drop(running.dispatcher);
     if let Some(stop_tx) = running.stop_tx.take() {
         if stop_tx.send(reason).is_err() {
             debug!(role, "role subprocess stop channel already closed");
@@ -723,10 +766,11 @@ async fn mark_welcomed(coderoom_dir: &Path) {
 /// its turn. Each finished turn's explicit `@<peer>:` delegation lines push
 /// follow-up turns onto a FIFO worklist, so a chain like
 /// `user → @host → @security → @host (synthesis)` runs to completion
-/// without manual prodding from the user. Per amendment A-005
-/// (`docs/proposed-amendments.md`), the chain has no depth limit; it
-/// ends when the queue drains, a turn is interrupted, or the user
-/// halts (`Ctrl-C` × 2 / `/halt`). Three semantic guards still apply:
+/// without manual prodding from the user. The dispatcher assigns
+/// user-origin depth 0, increments depth for each auto-routed child,
+/// and rejects hops past [`DEFAULT_MAX_HOP_DEPTH`]. It ends when the
+/// queue drains, a turn is interrupted, a routing limit is hit, or the
+/// user halts (`Ctrl-C` × 2 / `/halt`). Three semantic guards still apply:
 ///
 /// 1. **Self-mention skip** — `@host` delegating to `@host` doesn't fire
 ///    a recursive turn; a role talking to itself is a no-op.
@@ -767,17 +811,9 @@ async fn send_and_drain(
 
     // Worklist of pending turns. The initial entry is the user's
     // direct dispatch; auto-routed follow-ups are appended below.
-    let thread_id = crate::turn::new_thread_id();
-    let mut queue: VecDeque<QueuedTurn> = VecDeque::new();
-    queue.push_back(QueuedTurn {
-        role: role.to_owned(),
-        text: text.to_owned(),
-        turn_id: crate::turn::new_turn_id(),
-        thread_id,
-        parent_turn_id: None,
-    });
+    let mut dispatcher = RouteDispatcher::new_root(role, text);
 
-    while let Some(current) = queue.pop_front() {
+    while let Some(current) = dispatcher.pop_next() {
         maybe_note_resumed_role(resumed_notice_pending, &current.role);
         publish_turn_dispatched(bus, &current).await;
         let Some(captured) = drain_one_turn_handling_ctrl_c(
@@ -800,14 +836,12 @@ async fn send_and_drain(
             // if they want to continue. If anything was queued
             // behind this turn, surface a hint so the user knows
             // those follow-ups did not silently fire.
-            if !queue.is_empty() {
+            let pending = dispatcher.pending_count();
+            if pending > 0 {
                 println!(
                     "  {} {}",
                     "↳".with(output::FADE),
-                    format!(
-                        "{} follow-up turn(s) discarded after halt — re-issue manually if needed",
-                        queue.len()
-                    )
+                    format!("{pending} follow-up turn(s) discarded after halt — re-issue manually if needed")
                     .with(output::DIM)
                     .italic(),
                 );
@@ -862,7 +896,22 @@ async fn send_and_drain(
         // line that starts with `@backend: ...` is. Each target receives the
         // block addressed to it, not the parent's whole reply.
         let width = crossterm::terminal::size().map_or(80, |(cols, _)| usize::from(cols));
-        for instruction in route_instructions {
+        let route_count = route_instructions.len();
+        for (route_index, instruction) in route_instructions.into_iter().enumerate() {
+            if !dispatcher.accepts_fan_out_index(route_index) {
+                println!(
+                    "  {} {}",
+                    "↳".with(output::FADE),
+                    format!(
+                        "skipping auto-route: @{} proposed {route_count} follow-up(s); max fan-out per turn is {}",
+                        current.role,
+                        dispatcher.max_fan_out_per_turn()
+                    )
+                    .with(output::DIM)
+                    .italic(),
+                );
+                break;
+            }
             let priors_hash = roles
                 .get(&current.role)
                 .map_or("", |running| running.priors_hash.as_str());
@@ -872,6 +921,22 @@ async fn send_and_drain(
                 &captured.turn_id,
                 &instruction.brief,
             );
+            let queued = QueuedTurn {
+                role: instruction.target.clone(),
+                text: brief,
+                turn_id: crate::turn::new_turn_id(),
+                thread_id: captured.thread_id.clone(),
+                parent_turn_id: Some(captured.turn_id.clone()),
+                depth: current.depth + 1,
+            };
+            if let Err(skip) = dispatcher.enqueue_auto_route(queued) {
+                println!(
+                    "  {} {}",
+                    "↳".with(output::FADE),
+                    skip.message().with(output::DIM).italic(),
+                );
+                continue;
+            }
             // Render the Slack/Discord-style reply pointer (#99)
             // before dispatching so the user can see *which* part of
             // the parent reply triggered this hop. The handoff
@@ -887,13 +952,6 @@ async fn send_and_drain(
                     width
                 )
             );
-            queue.push_back(QueuedTurn {
-                role: instruction.target,
-                text: brief,
-                turn_id: crate::turn::new_turn_id(),
-                thread_id: captured.thread_id.clone(),
-                parent_turn_id: Some(captured.turn_id.clone()),
-            });
         }
     }
 
@@ -907,6 +965,113 @@ struct QueuedTurn {
     turn_id: crate::turn::TurnId,
     thread_id: crate::turn::TurnId,
     parent_turn_id: Option<crate::turn::TurnId>,
+    /// Path depth within the current routing thread. User-origin turns are
+    /// depth 0; every auto-routed child is parent depth + 1.
+    depth: usize,
+}
+
+#[derive(Debug)]
+struct RouteDispatcher {
+    queue: VecDeque<QueuedTurn>,
+    max_hop_depth: usize,
+    max_fan_out_per_turn: usize,
+    max_queue_depth: usize,
+}
+
+impl RouteDispatcher {
+    fn new_root(role: &str, text: &str) -> Self {
+        let mut dispatcher = Self::with_limits(
+            DEFAULT_MAX_HOP_DEPTH,
+            DEFAULT_MAX_ROUTE_FAN_OUT,
+            DEFAULT_MAX_ROUTE_QUEUE,
+        );
+        dispatcher.queue.push_back(QueuedTurn {
+            role: role.to_owned(),
+            text: text.to_owned(),
+            turn_id: crate::turn::new_turn_id(),
+            thread_id: crate::turn::new_thread_id(),
+            parent_turn_id: None,
+            depth: 0,
+        });
+        dispatcher
+    }
+
+    fn with_limits(
+        max_hop_depth: usize,
+        max_fan_out_per_turn: usize,
+        max_queue_depth: usize,
+    ) -> Self {
+        Self {
+            queue: VecDeque::new(),
+            max_hop_depth,
+            max_fan_out_per_turn,
+            max_queue_depth,
+        }
+    }
+
+    fn pop_next(&mut self) -> Option<QueuedTurn> {
+        self.queue.pop_front()
+    }
+
+    fn pending_count(&self) -> usize {
+        self.queue.len()
+    }
+
+    fn max_fan_out_per_turn(&self) -> usize {
+        self.max_fan_out_per_turn
+    }
+
+    fn accepts_fan_out_index(&self, route_index: usize) -> bool {
+        route_index < self.max_fan_out_per_turn
+    }
+
+    fn enqueue_auto_route(&mut self, turn: QueuedTurn) -> std::result::Result<(), DispatchSkip> {
+        if turn.depth > self.max_hop_depth {
+            return Err(DispatchSkip::HopDepth {
+                target: turn.role,
+                depth: turn.depth,
+                max: self.max_hop_depth,
+            });
+        }
+        if self.queue.len() >= self.max_queue_depth {
+            return Err(DispatchSkip::QueueDepth {
+                target: turn.role,
+                queued: self.queue.len(),
+                max: self.max_queue_depth,
+            });
+        }
+        self.queue.push_back(turn);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DispatchSkip {
+    HopDepth {
+        target: String,
+        depth: usize,
+        max: usize,
+    },
+    QueueDepth {
+        target: String,
+        queued: usize,
+        max: usize,
+    },
+}
+
+impl DispatchSkip {
+    fn message(&self) -> String {
+        match self {
+            Self::HopDepth { target, depth, max } => {
+                format!("skipping auto-route to @{target}: hop depth {depth} exceeds max {max}")
+            }
+            Self::QueueDepth {
+                target,
+                queued,
+                max,
+            } => format!("skipping auto-route to @{target}: route queue is full ({queued}/{max})"),
+        }
+    }
 }
 
 async fn publish_turn_dispatched(bus: &Arc<MessageBus>, turn: &QueuedTurn) {
@@ -1213,9 +1378,9 @@ async fn drain_one_turn_handling_ctrl_c(
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
 ) -> Result<Option<CapturedTurn>> {
-    let Some((tx_user, interrupt_tx)) = roles
+    let Some((dispatcher, interrupt_tx)) = roles
         .get(role)
-        .map(|running| (running.tx_user.clone(), running.interrupt_tx.clone()))
+        .map(|running| (running.dispatcher.clone(), running.interrupt_tx.clone()))
     else {
         output::bad(format!("no such role: @{role}"));
         return Ok(None);
@@ -1223,7 +1388,7 @@ async fn drain_one_turn_handling_ctrl_c(
     let work_state = Arc::new(Mutex::new(TurnWork::new(role, host_role, text)));
 
     let drain = drain_one_turn(
-        tx_user,
+        dispatcher,
         rx,
         live_rx,
         bridge_rx,
@@ -1372,7 +1537,7 @@ async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str) {
             running.engine.as_str()
         ));
         let (tx, rx) = oneshot::channel();
-        if let Err(error) = running.tx_user.send(UserMessage::compact_context(tx)).await {
+        if let Err(error) = running.dispatcher.send_compact(tx).await {
             debug!(role = %name, %error, "compact request channel closed");
             output::bad(format!("@{name}: compact request could not be delivered"));
             continue;
@@ -1443,6 +1608,7 @@ async fn write_journal(
         turn_id: crate::turn::new_turn_id(),
         thread_id: crate::turn::new_thread_id(),
         parent_turn_id: None,
+        depth: 0,
     };
     publish_turn_dispatched(bus, &turn).await;
     let Ok(Some(captured)) = drain_one_turn_handling_ctrl_c(
@@ -1838,14 +2004,14 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         tempfiles,
     } = parts;
     spawn_event_forwarder(
-        rname,
+        rname.clone(),
         project_root.clone(),
         rx_events,
         Arc::clone(context.bus),
     );
     Ok(RunningRole {
         engine,
-        tx_user,
+        dispatcher: DispatcherHandle::new(rname, tx_user),
         stop_tx: Some(stop_tx),
         interrupt_tx,
         priors_temp,
