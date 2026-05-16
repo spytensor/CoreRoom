@@ -113,6 +113,14 @@ pub enum CrepEvent {
         /// Opaque conversation-thread id. Empty string for v0.1 log replay.
         #[serde(default)]
         thread_id: TurnId,
+        /// Conversation-level outcome the role declared for this turn
+        /// (amendment A-007). The auto-router treats anything other than
+        /// `Continue` as a terminator for the chain — `@`-mentions in
+        /// `text` are not routed. Absent on the wire defaults to
+        /// `Continue`, so v0.1 logs and adapters that don't yet parse
+        /// the `cr-status:` marker behave exactly as before.
+        #[serde(default)]
+        outcome: TurnOutcome,
     },
     /// Streaming assistant text for the current role turn. This is a
     /// broadcast-only live UI event, not a turn boundary, and must not
@@ -280,6 +288,40 @@ pub enum InterruptSource {
     CancelTimeout,
 }
 
+/// Conversation-level outcome a role declares at the end of a turn,
+/// per amendment A-007.
+///
+/// The router reads this field on [`CrepEvent::RoleSpoke`] to decide
+/// whether to fan out the reply's `@`-mentions. Anything other than
+/// [`TurnOutcome::Continue`] short-circuits routing for that turn — the
+/// reply is shown to the user, but no follow-up dispatches fire.
+///
+/// Roles opt in by ending their reply with a single line of the form
+/// `cr-status: <variant>` (parsed and stripped by adapters before the
+/// text is emitted). A missing or unrecognised marker yields
+/// [`TurnOutcome::Continue`], reproducing v0.1 / pre-A-007 behaviour
+/// exactly. This is the protocol-level handle A-005 left missing when
+/// it removed the hop-depth cap: convergence is now *expressed*, not
+/// *imposed*.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    /// Default. Route any `@`-mentions in the reply as today.
+    #[default]
+    Continue,
+    /// The role has no domain-specific input on this brief. Cheap
+    /// opt-out for off-domain peer briefs; reply is still shown but its
+    /// mentions are not routed.
+    NoIncrement,
+    /// The role considers the thread resolved. Typically emitted by a
+    /// synthesising host after merging peer findings.
+    Converged,
+    /// The role is escalating to the user (decision, missing constraint,
+    /// budget question). The chain stops; the user must drive the next
+    /// step manually.
+    NeedsUser,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,14 +352,71 @@ mod tests {
             cache_read: 17_889,
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
+            outcome: TurnOutcome::Continue,
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_spoke");
         assert_eq!(wire["mentions"], json!(["security", "frontend"]));
         assert_eq!(wire["turn_id"], "t-1");
         assert_eq!(wire["thread_id"], "th-1");
+        // Default-valued outcome still serializes (informational for `cr show`).
+        assert_eq!(wire["outcome"], "continue");
         let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
         assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn role_spoke_round_trips_every_outcome() {
+        for (variant, expected) in [
+            (TurnOutcome::Continue, "continue"),
+            (TurnOutcome::NoIncrement, "no_increment"),
+            (TurnOutcome::Converged, "converged"),
+            (TurnOutcome::NeedsUser, "needs_user"),
+        ] {
+            let event = CrepEvent::RoleSpoke {
+                role: "host".into(),
+                text: "ok".into(),
+                mentions: vec![],
+                cost_usd: 0.0,
+                cache_read: 0,
+                turn_id: "tu-1".into(),
+                thread_id: "th-1".into(),
+                outcome: variant,
+            };
+            let wire = serde_json::to_value(&event).unwrap();
+            assert_eq!(wire["outcome"], expected, "variant {variant:?}");
+            let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+            assert_eq!(event, parsed, "variant {variant:?}");
+        }
+    }
+
+    #[test]
+    fn role_spoke_legacy_wire_defaults_outcome_to_continue() {
+        // v0.1 / pre-A-007 logs have no `outcome` key. Deserialization
+        // must succeed and fall back to Continue so today's behaviour
+        // is preserved on replay.
+        let legacy = json!({
+            "type": "role_spoke",
+            "role": "backend",
+            "text": "ok",
+            "mentions": [],
+            "cost_usd": 0.0,
+            "cache_read": 0,
+            "turn_id": "tu-1",
+            "thread_id": "th-1",
+        });
+        let parsed: CrepEvent = serde_json::from_value(legacy).unwrap();
+        match parsed {
+            CrepEvent::RoleSpoke { outcome, .. } => {
+                assert_eq!(outcome, TurnOutcome::Continue);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn turn_outcome_default_is_continue() {
+        assert_eq!(TurnOutcome::default(), TurnOutcome::Continue);
     }
 
     #[test]
@@ -645,6 +744,7 @@ mod tests {
                     cache_read: 0,
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
+                    outcome: TurnOutcome::Continue,
                 },
                 "role_spoke",
             ),

@@ -412,6 +412,175 @@ with `cr start --fresh`.
 
 *(pending review)*
 
+## A-007: First-class turn outcome + pluggable dispatch policy
+
+- **Status:** proposed
+- **Filed:** 2026-05-15
+- **Touches:** A-005's "trust the model to converge" bet (this amendment supplies
+  the protocol-level handle A-005 left missing). `CrepEvent::RoleSpoke`
+  schema in `src/crep.rs`. `send_and_drain` in `src/repl.rs`. Shared and
+  role-template priors in `src/init_defaults/`.
+
+### Problem
+
+A-005 removed the hop-depth cap on the basis that frontier models converge
+on their own ("we're done here", "no further questions"). In practice the
+convergence signal only lives in natural-language reply text — and the
+auto-router has no way to read it. Three failure modes follow:
+
+- A peer with no domain-specific input still produces a turn (it has been
+  prompted to "stay inside your domain lens and contribute"), and its
+  `@host` mention drags the chain forward.
+- A host that has finished synthesising the team's input still tends to
+  end with `@user` / `@role` references that the router treats as new
+  routing requests rather than as a closing summary.
+- `From @role: ...` peer briefs are sometimes phrased as questions; the
+  receiving role re-routes back, looping A→B→A.
+
+The repair `shared.md` could offer (prose convention like "say 'no
+incremental input' to opt out") is unreliable: the same text both
+*announces* convergence and *contains* mentions that immediately undo
+the convergence. The router needs a structured signal, not a phrase.
+
+Today the only state-aware decision in `send_and_drain` is the inline
+grounding-gate (`captured.activity.looks_ungrounded()` at `repl.rs:696`),
+hardcoded between the queue pop and the mention filter. There is no seam
+to attach further routing policy without re-touching the dispatcher.
+
+### Alternatives considered
+
+1. **Re-introduce a hop-depth cap.** Revisits A-005 directly; rejected
+   there as arbitrary and as severing legitimate longer chains. Still
+   doesn't solve "peer with nothing to add still costs one turn".
+2. **Per-turn fan-out budget (≤ N peer dispatches per reply).** Cheaper
+   than a depth cap but still blunt — it caps fan-out for *every* task,
+   including ones that legitimately want three specialists. The user
+   ends up tuning a magic number.
+3. **Confirmation prompt before each follow-up hop.** Already rejected
+   in A-005 (breaks the chat illusion; user becomes the manual router).
+4. **Per-role "discussion mode" flag set by the user before dispatch.**
+   Pushes the decision out of the conversation and onto a config knob;
+   doesn't help mid-chain where the team has just discovered the task
+   is open-ended.
+5. **First-class `TurnOutcome` on `RoleSpoke` + dispatch policy trait.**
+   Accepted (this amendment). The role expresses what it just did; the
+   router reads a structured field, not prose.
+
+### Proposed change
+
+**Protocol (`src/crep.rs`):** new enum, added as an optional field on
+`RoleSpoke`:
+
+```rust
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    #[default]
+    Continue,     // route any @mentions in the reply (today's behaviour)
+    NoIncrement,  // role has nothing domain-specific to add; do not route
+    Converged,    // thread is resolved; do not route
+    NeedsUser,    // user decision required; do not route, halt chain
+}
+
+pub enum CrepEvent {
+    RoleSpoke {
+        // ... existing fields ...
+        #[serde(default)]
+        outcome: TurnOutcome,
+    },
+    // ... other variants unchanged ...
+}
+```
+
+`#[serde(default)]` keeps v0.1 logs deserialising as `Continue`; adapters
+that do not parse the marker emit `Continue` automatically.
+
+**Convention (`src/init_defaults/shared.md`):** roles may end a reply
+with a single line `cr-status: <variant>` where variant is one of
+`no_increment`, `converged`, `needs_user`. The adapter parses and strips
+the line before emitting `RoleSpoke.text`. Absent or unknown marker →
+`Continue`.
+
+**Dispatcher (`src/repl.rs`):** extract a one-method trait that owns all
+routing decisions:
+
+```rust
+trait DispatchPolicy {
+    /// Given a finished turn and a read-only view of the thread, return
+    /// the roles that should receive a follow-up dispatch. Empty vec
+    /// ends the chain.
+    fn route_after_turn(
+        &self,
+        captured: &CapturedTurn,
+        view: &ThreadView,
+    ) -> Vec<String>;
+}
+
+struct DefaultPolicy;
+
+impl DispatchPolicy for DefaultPolicy {
+    fn route_after_turn(&self, captured, view) -> Vec<String> {
+        // 1. Grounding gate first (an "ungrounded" outcome claim is itself
+        //    suspect — the role couldn't read the repo).
+        if captured.activity.looks_ungrounded() { return vec![]; }
+        // 2. Structured convergence signal.
+        match captured.outcome {
+            TurnOutcome::Continue => {}
+            _ => return vec![],
+        }
+        // 3. Today's self / unknown / duplicate filtering.
+        filter_routable_mentions(...)
+    }
+}
+```
+
+`send_and_drain` becomes a thin loop that pops the queue, drains the
+turn, and pushes whatever `policy.route_after_turn` returns. The
+grounding-gate's user-visible hint line stays where it is (we still
+print "skipping auto-route: @role had N permission denial(s)..."), but
+it is produced inside `DefaultPolicy`, not inline in the dispatcher.
+
+`ThreadView` is read-only context the policy may inspect:
+`thread_id`, `hops` (diagnostic, not a cap), `originator_role`, and a
+small ring of recent `(role, outcome)` pairs. Default policy ignores it;
+future policies (e.g. "consultation chain on a discussion-class task")
+can use it without further dispatcher changes.
+
+### Migration impact
+
+User-facing: zero by default. Roles that do not learn the convention
+keep producing `Continue` and the router behaves exactly as today.
+Roles that adopt `cr-status: no_increment` for off-domain briefs make
+the chain shorter and cheaper. Hosts that adopt `cr-status: converged`
+when synthesising close the chain even if they `@`-mentioned the user
+in the closing line.
+
+CREP wire: one new field on `RoleSpoke`, `#[serde(default)]`. v0.1
+JSONL replays deserialise unchanged. `cr show` can grep
+`jq 'select(.outcome=="converged")'` for chain endings.
+
+A-005 compatibility: this amendment does NOT reintroduce a depth cap,
+a fan-out budget, or a confirmation prompt. The user's `Ctrl-C × 2` /
+`/halt` escape hatches and the per-role budget all remain the
+structural cap. What changes is that the model now has a protocol-level
+way to express what A-005 already trusts it to express in prose.
+
+Spend: in long discussion-class chains this should reduce spend (peers
+exit cheaply with one short turn ending in `no_increment` instead of
+producing a paragraph and a re-routing mention). Code-change chains are
+unaffected — they tend to terminate naturally on tool work, not on
+discussion.
+
+Tests: `DefaultPolicy` becomes the unit-test surface for routing
+decisions previously embedded in `send_and_drain`. Existing integration
+tests around `send_and_drain` should pass unchanged because
+`Continue` + `looks_ungrounded` + `filter_routable_mentions` reproduce
+today's exact behaviour.
+
+### Decision
+
+*(pending review)*
+
 ## Implemented amendments
 
 Implemented amendments are marked inline with `implemented in vX.Y.Z`.

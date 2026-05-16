@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::adapter::UserMessage;
-use crate::crep::CrepEvent;
+use crate::crep::{CrepEvent, TurnOutcome};
 use crate::output;
 use crate::permissions::BridgeRequestSink;
 
@@ -26,6 +26,12 @@ pub(super) struct CapturedTurn {
     /// systematically denied probably produced an ungrounded reply, and
     /// its `@<peer>` mentions should not trigger fresh peer turns.
     pub(super) activity: TurnActivity,
+    /// Conversation-level outcome the role declared via `cr-status:`
+    /// (amendment A-007). The dispatcher policy reads this to decide
+    /// whether to fan out `mentions`; non-`Continue` short-circuits the
+    /// chain. Defaults to `Continue` when the adapter does not (yet)
+    /// parse the marker.
+    pub(super) outcome: TurnOutcome,
 }
 
 /// Fold noisy tool events during a live turn. Full details are still
@@ -326,6 +332,7 @@ pub(super) async fn drain_one_turn(
                             cache_read,
                             turn_id,
                             thread_id,
+                            outcome,
                             mentions: _,
                         } if spoken == role => {
                             let (cleaned, card) = {
@@ -338,6 +345,7 @@ pub(super) async fn drain_one_turn(
                                 text: cleaned.text.clone(),
                                 mentions: cleaned.mentions.clone(),
                                 activity: activity.clone(),
+                                outcome: *outcome,
                             });
                             status.clear();
                             if let Some(rendered) = render_stream_delta(
@@ -360,6 +368,7 @@ pub(super) async fn drain_one_turn(
                                     cache_read: *cache_read,
                                     turn_id: turn_id.clone(),
                                     thread_id: thread_id.clone(),
+                                    outcome: *outcome,
                                 };
                                 render_event(&rendered, host_role);
                             }

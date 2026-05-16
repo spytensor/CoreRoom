@@ -324,6 +324,7 @@ impl GeminiLoop {
                             cache_read: 0,
                             turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                             thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
+                            outcome: crate::crep::TurnOutcome::Continue,
                         })
                         .await;
                 }

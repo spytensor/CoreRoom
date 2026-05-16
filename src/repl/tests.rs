@@ -58,6 +58,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
             cache_read: 0,
             turn_id: String::new(),
             thread_id: String::new(),
+            outcome: crate::crep::TurnOutcome::Continue,
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -115,6 +116,7 @@ fn show_normalizes_legacy_cr_task_role_spoke() {
         cache_read: 0,
         turn_id: String::new(),
         thread_id: String::new(),
+        outcome: crate::crep::TurnOutcome::Continue,
     };
 
     let normalized = normalize_show_event(&event);
@@ -576,6 +578,7 @@ fn snapshot_render_event_lines() {
             cache_read: 42,
             turn_id: String::new(),
             thread_id: String::new(),
+            outcome: crate::crep::TurnOutcome::Continue,
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -633,6 +636,7 @@ fn multi_line_role_spoke_keeps_gutter_on_each_line() {
         mentions: vec![],
         turn_id: String::new(),
         thread_id: String::new(),
+        outcome: crate::crep::TurnOutcome::Continue,
     };
     let rendered = strip_ansi(&render_event_line(&event, "host"));
     insta::assert_snapshot!(rendered, @r"
@@ -823,6 +827,7 @@ fn role_spoke_renders_markdown_lite_with_wrapping() {
         mentions: vec![],
         turn_id: String::new(),
         thread_id: String::new(),
+        outcome: crate::crep::TurnOutcome::Continue,
     };
     let rendered = strip_ansi(&render_event_line_at_width(&event, "host", 48));
 
@@ -1315,7 +1320,7 @@ fn streaming_state_resets_first_line_only_after_real_content() {
 
 #[test]
 fn filter_routable_mentions_drops_self_mention() {
-    use super::filter_routable_mentions;
+    use super::policy::filter_routable_mentions;
     let known = &["host", "security", "backend"];
     let out = filter_routable_mentions(
         "security",
@@ -1327,7 +1332,7 @@ fn filter_routable_mentions_drops_self_mention() {
 
 #[test]
 fn filter_routable_mentions_drops_unknown_role() {
-    use super::filter_routable_mentions;
+    use super::policy::filter_routable_mentions;
     let known = &["host", "security"];
     let out = filter_routable_mentions(
         "host",
@@ -1348,7 +1353,7 @@ fn filter_routable_mentions_preserves_order_and_duplicates() {
     // single reply. A role mentioning `@peer` twice is two distinct
     // asks that may carry different conversational weight; dedup is
     // explicitly NOT applied at this layer.
-    use super::filter_routable_mentions;
+    use super::policy::filter_routable_mentions;
     let known = &["host", "security", "backend"];
     let out = filter_routable_mentions(
         "host",
@@ -1371,7 +1376,7 @@ fn filter_routable_mentions_preserves_order_and_duplicates() {
 
 #[test]
 fn filter_routable_mentions_handles_empty_inputs() {
-    use super::filter_routable_mentions;
+    use super::policy::filter_routable_mentions;
     assert!(filter_routable_mentions("host", &[], &["host", "security"]).is_empty());
     // No known roles → every mention is "unknown", nothing routable.
     assert!(filter_routable_mentions("host", &["security".to_owned()], &[]).is_empty());
