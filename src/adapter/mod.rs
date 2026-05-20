@@ -788,7 +788,11 @@ mod tests {
         // line so the user doesn't see a bare `cr-status:` in the
         // reply, and return Continue so the chain keeps today's
         // behaviour.
-        for malformed in ["body\ncr-status:", "body\ncr-status:   ", "body\ncr-status:\n"] {
+        for malformed in [
+            "body\ncr-status:",
+            "body\ncr-status:   ",
+            "body\ncr-status:\n",
+        ] {
             let mut text = malformed.to_owned();
             let outcome = extract_status_marker(&mut text);
             assert_eq!(
@@ -835,8 +839,8 @@ mod tests {
         // marker. An earlier `cr-status:` line stays in the body
         // verbatim — the role wrote it, the user should see it. Lock
         // the shape so a future refactor doesn't quietly change it.
-        let mut text = "Earlier work.\ncr-status: converged\n\nMore body.\ncr-status: needs_user"
-            .to_owned();
+        let mut text =
+            "Earlier work.\ncr-status: converged\n\nMore body.\ncr-status: needs_user".to_owned();
         let outcome = extract_status_marker(&mut text);
         assert_eq!(outcome, crate::crep::TurnOutcome::NeedsUser);
         assert_eq!(text, "Earlier work.\ncr-status: converged\n\nMore body.");
@@ -852,11 +856,7 @@ mod tests {
         );
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CrepEvent::RoleSpoke {
-                text,
-                outcome,
-                ..
-            } => {
+            CrepEvent::RoleSpoke { text, outcome, .. } => {
                 assert_eq!(text, "Nothing in my lens here.");
                 assert_eq!(*outcome, crate::crep::TurnOutcome::NoIncrement);
             }
