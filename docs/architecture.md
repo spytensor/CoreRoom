@@ -35,6 +35,11 @@ Concretely, v0.1 enforces this by construction:
 
 - **No autonomous execution path.** Roles propose; tool execution still
   passes through the engine's permission contract, which the wrapper gates.
+- **Narrow authority-scoped veto exception.** Starting with A-015, a role
+  whose configuration declares authority over a canonical scope may issue a
+  binding `reject` decision for a plan artifact whose `scopes` intersect that
+  authority. The veto blocks phase advancement only. It does not grant tool
+  execution, code mutation, merge, commit, or permission powers.
 - **The user is the only routing source.** Roles can `@` each other in
   their replies, but the user alone introduces new threads and can
   `/halt`, `/stop`, or `/refresh` any role at any time. (v0.2 amendment:
@@ -49,10 +54,14 @@ Concretely, v0.1 enforces this by construction:
 - **Patches are explicit and user-written.** Promoting a patch into base
   priors is always a user action (`/patch promote`, v0.2). Roles never
   rewrite their own priors.
+- **User override is explicit and audited.** A scoped veto can be overruled
+  only by an explicit user action with a reason, recorded in the gate ledger
+  and CREP audit trail. A model claim that "the user approved" is not an
+  override.
 
-In a future team-usage mode (v0.x), individual roles will be assigned a
-human `owner` who acts as the source-of-truth for that role's priors.
-That decision is logged in `docs/proposed-amendments.md`, not in v0.1.
+In v0.5 team mode, individual roles may also have a human `owner` who acts as
+the source-of-truth for that role's priors and declared authority. A-015
+accepts the principle; #184, #186, and #187 carry the implementation surface.
 
 ## Why
 

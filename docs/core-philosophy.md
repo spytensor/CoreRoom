@@ -33,13 +33,31 @@ through code that the user reviews, accepts, and commits.
 This is what `architecture.md` § Role Invariance Principle calls **role
 invariance**. Restated here as a principle, not a constraint:
 
-> Roles propose perspectives. The user is the only entity that commits.
+> Roles propose perspectives. Declared authority roles may block plan
+> advancement inside their scope. The user is the only entity that can
+> override that block or commit.
+
+A-015 accepts one narrow exception to advisory-only roles: **authority-scoped
+role veto**. A role may be declared with explicit authority scopes such as
+`deployment`, `infra`, or `secrets`. During plan review, that role may reject
+a plan whose declared scopes intersect its authority. The rejection blocks
+phase advancement; it does not edit files, run tools, merge code, or replace
+the user's judgement.
+
+Outside declared authority scopes, the original rule remains intact: roles are
+advisory viewpoints. Even inside a declared scope, the user remains the single
+accountability anchor. The user can explicitly override a veto, but the
+override must carry a reason and be recorded in the gate ledger.
 
 This phrasing matters because it tells us what is out of scope by
 construction:
 
 - No agent that "completes a task" without a user-mediated commit moment.
+- No role that executes code, edits files, or merges changes by virtue of
+  authority.
 - No role that updates its own priors.
+- No role that self-grants or expands its own authority.
+- No role veto outside the role's declared authority scopes.
 - No router that decides who participates without the user typing `@`.
 - No belief that promotes itself to long-term memory without a citation.
 

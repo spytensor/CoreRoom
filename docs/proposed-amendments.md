@@ -1022,6 +1022,100 @@ on tool work, not discussion.
 
 *(pending review)*
 
+## A-015: Authority-scoped role veto
+
+- **Status:** accepted for v0.5; implementation split across #184, #186, and
+  #187
+- **Filed:** 2026-05-22
+- **Touches:** `docs/core-philosophy.md`, `docs/architecture.md`,
+  `docs/threat-model.md`. Implementation will touch role config, phase gates,
+  role-review storage, and CREP events in follow-up issues.
+
+### Problem
+
+The locked Role Invariance Principle says roles are perspectives, not
+replacement engineers. That remains correct for code mutation, permission
+decisions, routing authority, and commits. v0.5's "virtual team" goal adds a
+different need: some roles represent domain standards that should be able to
+stop a bad plan before implementation. For example, `@sre` should be able to
+reject an `infra` plan that violates the project's deployment standard.
+
+Without an explicit amendment, that blocking power contradicts the original
+advisory-only wording. With an unbounded amendment, roles become autonomous
+approvers, which violates the core philosophy. This amendment accepts only the
+narrow middle ground.
+
+### Accepted change
+
+CodeRoom supports **authority-scoped role veto**:
+
+- A role may be declared with explicit authority scopes in validated config.
+  Initial canonical scopes are expected to include `deployment`, `infra`,
+  `secrets`, `data-policy`, `compliance`, and `dependencies`.
+- A plan artifact declares its own `scopes` in frontmatter.
+- During the plan-review phase, a role whose authority intersects the plan's
+  scopes may record `approve`, `reject`, or `needs-revision`.
+- `reject` is binding only for the intersecting scopes and only for the
+  current plan artifact SHA.
+- A binding rejection blocks phase advancement. It does not grant the role
+  tool execution, code editing, merge, commit, permission, or routing powers.
+- Outside declared authority scopes, roles remain advisory viewpoints.
+
+### Override semantics
+
+The user remains the single accountability anchor. A scoped veto can be
+overruled only by an explicit user action with a reason.
+
+CLI shape:
+
+```text
+cr gate override <thread> --role <role> --reason "<why this veto is overruled>"
+```
+
+Comment shape for workflows that ingest review comments instead of CLI input:
+
+```text
+cr-gate-override: thread=<thread> role=<role> reason="<why this veto is overruled>"
+```
+
+The implementation must record the justification in the gate ledger under the
+thread, tied to the role and the plan SHA being overruled. The intended ledger
+shape is:
+
+```text
+.coderoom/gates/<thread>/overrides/<role>.toml
+```
+
+with at least `role`, `reason`, `actor = "user"`, `timestamp`, `plan_sha`, and
+the rejected review identity. The CREP audit stream records the same decision
+as `PlanOverridden { role, reason }`. A role's prose claim that "the user
+approved" is never an override.
+
+### Migration impact
+
+Existing roles without an `authority` declaration remain pure advisory roles.
+Existing projects therefore keep their current behavior until the user opts in
+by declaring role authority and using phase-gated plan review.
+
+The config surface lands in #184. The phase state machine lands in #186. The
+plan-review binding, rejection invalidation on plan SHA change, and override
+command land in #187.
+
+### Non-goals
+
+- No autonomous role execution.
+- No role can modify code because it has authority.
+- No role can grant, expand, or edit its own authority.
+- No role can override another role's veto.
+- No authority outside canonical, validated scopes.
+- No semantic gate closure from model prose alone.
+
+### Decision
+
+Accepted by the user for v0.5 on 2026-05-22. This amendment changes the core
+principle from "roles are advisory only" to "roles are advisory except for
+explicit, audited, user-overridable vetoes inside declared authority scopes."
+
 ## Implemented amendments
 
 Implemented amendments are marked inline with `implemented in vX.Y.Z`.

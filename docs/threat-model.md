@@ -35,14 +35,14 @@ Out of scope:
 | Input or state | Trust level | Runtime use | Must not be used for |
 | --- | --- | --- | --- |
 | User keystrokes in the live REPL | Authoritative task intent for the current turn | Addressing roles, commands, permission choices, explicit `/fresh` and `/resume` actions | Hidden state changes without visible command feedback |
-| `.coderoom/config.toml` and user config | Trusted configuration after schema validation | Engine selection, model defaults, host role, permission mode | Evidence of review completion, peer consensus, or safety approval |
+| `.coderoom/config.toml` and user config | Trusted configuration after schema validation | Engine selection, model defaults, host role, permission mode, declared role owners and authority scopes | Evidence of review completion, peer consensus, or safety approval |
 | `.coderoom/shared.md`, `.coderoom/roles/*.md`, patches, journals | Project-supplied prompt input | Shape role behavior and local conventions with source headers | Redefining kernel routing syntax, gate rules, permission semantics, or provenance |
 | Engine output | Untrusted text plus adapter-parsed events | User-visible replies, explicit delegation text, WorkCard display, tool event summaries | Authoritative turn ids, thread ids, parent ids, hop depth, permission grants, gate completion, or peer consensus |
 | `.coderoom/messages.jsonl` and transcript archives | Editable audit/replay log | `cr show`, transcript citations, debugging, historical display, best-effort cost reporting | Active routing limits, permission enforcement, budget enforcement, gate close decisions, or live provenance |
 | `.coderoom/permission_policy.json` | User-editable session policy | Current allow/deny decisions after startup visibility and `/permissions` inspection | Silent approvals that are not surfaced, historical proof that a decision was attended to |
 | Engine session ids | Opaque adapter-issued resume handles | Continue engine conversations when the user accepts resume | Evidence freshness, peer agreement, review provenance, or thread lineage |
 | Runtime turn/thread state | Trusted only while owned by the live dispatcher/process | Route provenance, hop depth, parent/child relationships, queue limits | Rehydration from model text or editable logs for enforcement |
-| `.coderoom/gates/*.json` | User-editable structural ledger | Tier 1 structural completeness and explicit bypass records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
+| `.coderoom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
 
 ## Runtime Invariants
 
@@ -99,6 +99,20 @@ architecture amendment before implementation.
    but it does not write hidden `.coderoom/` review artifacts. Persistent
    evidence, cross-model review, or release sign-off belongs in Tier 1.
 
+10. Authority-scoped veto is explicit.
+    A role can block plan advancement only when all of these are true: the
+    role has a validated authority scope in configuration, the plan artifact
+    declares an intersecting scope, and the role records an explicit review
+    decision for the current plan SHA. Model prose, stale resumed context, or
+    editable logs cannot create authority, expand scope, reject a plan, or
+    override a rejection.
+
+11. User override is a command, not a claim.
+    A scoped veto can be overruled only by an explicit user command with a
+    reason. The override is recorded in the gate ledger and CREP audit trail.
+    Text emitted by a role, transcript replay, or a journal entry may explain
+    the override after the fact, but cannot substitute for it.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -111,6 +125,9 @@ role-written journals:
 - Whether a role has current-thread approval from another role.
 - Whether a reviewer is independent, blocking findings are resolved, or a
   gate can close.
+- Whether a role's authority scope applies to a plan.
+- Whether a role veto exists for the current plan SHA.
+- Whether a user override exists and carries the required justification.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.
 - Whether a resumed role's context is fresh enough for an audit or release
@@ -137,6 +154,10 @@ gates, priors, logs, or role memory.
 - Does resume behavior make stale context visible and provide a clean-start
   path?
 - Does Tier 0 stay inline unless the user explicitly asks for a ledger?
+- If role authority is involved, is the decision based on validated config,
+  declared plan scopes, and current plan SHA rather than model prose?
+- If a veto is bypassed, is there an explicit user override with a recorded
+  reason?
 
 If the answer is "no" to any item, either change the implementation or file an
 architecture amendment that explicitly moves the trust boundary.
