@@ -106,6 +106,8 @@ struct RunningRole {
     /// Auto-routed peer quotes include it so the receiver can audit which
     /// role identity produced the quoted payload.
     priors_hash: String,
+    /// Compact authority badges shown beside the live `@role` header.
+    authority_badges: String,
     #[allow(
         dead_code,
         reason = "kept alive only for Drop side-effects such as hook settings cleanup"
@@ -216,6 +218,19 @@ fn role_mentions(names: &[String]) -> String {
         .map(|name| format!("@{name}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn authority_header_suffix(cfg: &Config, role: &str) -> String {
+    cfg.roles
+        .get(role)
+        .filter(|entry| !entry.authority.is_empty())
+        .map(|entry| {
+            format!(
+                "authority: [{}]",
+                crate::role::authority_summary(&entry.authority)
+            )
+        })
+        .unwrap_or_default()
 }
 
 fn resume_guard_resume_message(names: &[String]) -> String {
@@ -1545,10 +1560,13 @@ async fn drain_one_turn_handling_ctrl_c(
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
 ) -> Result<Option<CapturedTurn>> {
-    let Some((dispatcher, interrupt_tx)) = roles
-        .get(role)
-        .map(|running| (running.dispatcher.clone(), running.interrupt_tx.clone()))
-    else {
+    let Some((dispatcher, interrupt_tx, authority_badges)) = roles.get(role).map(|running| {
+        (
+            running.dispatcher.clone(),
+            running.interrupt_tx.clone(),
+            running.authority_badges.clone(),
+        )
+    }) else {
         output::bad(format!("no such role: @{role}"));
         return Ok(None);
     };
@@ -1564,6 +1582,7 @@ async fn drain_one_turn_handling_ctrl_c(
         turn_id,
         thread_id,
         host_role,
+        &authority_badges,
         Arc::clone(&work_state),
     );
     tokio::pin!(drain);
@@ -2183,6 +2202,7 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         interrupt_tx,
         priors_temp,
         priors_hash,
+        authority_badges: authority_header_suffix(cfg, name),
         adapter_tempfiles: tempfiles,
     })
 }

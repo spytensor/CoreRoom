@@ -141,7 +141,7 @@ pub(super) fn splash_columns(width: usize, role_floor: usize) -> (usize, usize) 
 
 /// Visible width of the longest role row that will be rendered.
 /// Mirrors the layout used in `splash_role_cell`:
-///   `● ␠@{role:<role_pad+1}␠␠{engine:<6}␠·␠{ctx}␠·␠{perm}`
+///   `● ␠@{role:<role_pad+1}␠␠{engine:<6}␠·␠{ctx}␠·␠{perm}[␠·␠authority:...]`
 fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usize {
     role_names
         .iter()
@@ -159,6 +159,16 @@ fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usiz
                 .map_or(cfg.permission_mode, |role| role.permission_mode);
             let ctx = splash_context_short(engine, model);
             let (perm, _) = permission_label(engine, mode);
+            let authority = cfg
+                .roles
+                .get(*name)
+                .filter(|entry| !entry.authority.is_empty())
+                .map(|entry| {
+                    format!(
+                        "authority:{}",
+                        crate::role::authority_summary(&entry.authority).replace(", ", ",")
+                    )
+                });
             // ● + ' ' + '@' + role_pad + ' ' + ' ' + engine_pad(6) + ' ' + '·' + ' ' + ctx
             //   + ' ' + '·' + ' ' + perm
             1 + 1
@@ -172,6 +182,9 @@ fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usiz
                 + ctx.chars().count()
                 + 3
                 + perm.chars().count()
+                + authority
+                    .as_ref()
+                    .map_or(0, |badge| 3 + badge.chars().count())
         })
         .max()
         .unwrap_or(28)
@@ -308,11 +321,25 @@ fn splash_role_cell(
     let engine_short = splash_engine_short(engine);
     let ctx = splash_context_short(engine, model);
     let (perm_label, perm_color) = permission_label(engine, mode);
+    let authority = cfg
+        .roles
+        .get(name)
+        .filter(|entry| !entry.authority.is_empty())
+        .map(|entry| {
+            format!(
+                "authority:{}",
+                crate::role::authority_summary(&entry.authority).replace(", ", ",")
+            )
+        });
     let role_paint = output::role_color(name, &cfg.host_role);
     let role_token = format!("@{name}");
     let role_padded = format!("{role_token:<width$}", width = role_pad + 1);
-    let plain = format!("● {role_padded}  {engine_short:<6} · {ctx} · {perm_label}");
-    let cell = join_cells(&[
+    let plain = if let Some(authority) = &authority {
+        format!("● {role_padded}  {engine_short:<6} · {ctx} · {perm_label} · {authority}")
+    } else {
+        format!("● {role_padded}  {engine_short:<6} · {ctx} · {perm_label}")
+    };
+    let mut parts = vec![
         styled_cell("●", "●".with(role_paint)),
         plain_cell(" "),
         styled_cell(&role_padded, role_padded.as_str().with(role_paint).bold()),
@@ -329,7 +356,14 @@ fn splash_role_cell(
         styled_cell("·", "·".with(output::FADE)),
         plain_cell(" "),
         styled_cell(perm_label, perm_label.with(perm_color)),
-    ]);
+    ];
+    if let Some(authority) = &authority {
+        parts.push(plain_cell(" "));
+        parts.push(styled_cell("·", "·".with(output::FADE)));
+        parts.push(plain_cell(" "));
+        parts.push(styled_cell(authority, authority.as_str().with(output::KEY)));
+    }
+    let cell = join_cells(&parts);
     fit_cell(cell, &plain, max_width)
 }
 

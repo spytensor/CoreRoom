@@ -25,9 +25,12 @@
 //! [roles.security]
 //! engine = "codex"
 //! model = "o3"
+//! owner = "alice@example.com"
+//! authority = ["deployment", "infra", "secrets"]
 //! ```
 
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -70,14 +73,85 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RoleEntry {
     /// Engine override. `None` ⇒ use [`Config::default_engine`].
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<Engine>,
     /// Model override. `None` ⇒ use [`Config::default_model`].
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Permission mode override. `None` ⇒ use [`Config::permission_mode`].
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,
+    /// Human owner responsible for this role's priors and authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Canonical scopes where this role may issue a binding plan veto.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authority: Vec<AuthorityScope>,
+}
+
+/// Canonical authority scopes a role may be allowed to veto.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuthorityScope {
+    /// Deployment and rollout mechanics.
+    Deployment,
+    /// Infrastructure topology, runtime platform, and operations standards.
+    Infra,
+    /// Secret handling, credential storage, and sensitive runtime config.
+    Secrets,
+    /// Data retention, classification, and movement policy.
+    DataPolicy,
+    /// Compliance or regulatory constraints.
+    Compliance,
+    /// Dependency selection, updates, and supply-chain policy.
+    Dependencies,
+}
+
+impl AuthorityScope {
+    /// All accepted scope values in canonical display order.
+    pub const ALL: [Self; 6] = [
+        Self::Deployment,
+        Self::Infra,
+        Self::Secrets,
+        Self::DataPolicy,
+        Self::Compliance,
+        Self::Dependencies,
+    ];
+
+    /// Canonical kebab-case config value for this scope.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Deployment => "deployment",
+            Self::Infra => "infra",
+            Self::Secrets => "secrets",
+            Self::DataPolicy => "data-policy",
+            Self::Compliance => "compliance",
+            Self::Dependencies => "dependencies",
+        }
+    }
+
+    /// Parse a canonical config value.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|scope| scope.as_str() == value)
+    }
+
+    /// Comma-separated list of accepted config values for diagnostics.
+    #[must_use]
+    pub fn expected_values() -> String {
+        Self::ALL
+            .iter()
+            .map(|scope| scope.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+impl fmt::Display for AuthorityScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 const fn default_permission_mode() -> PermissionMode {

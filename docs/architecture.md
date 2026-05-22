@@ -166,16 +166,20 @@ Each is a one-liner with rationale. Detailed sections follow.
    it routes onward by deciding to `@` other roles itself. This is *not*
    auto-PM-router: the host's behavior is whatever its priors say; the
    wrapper just does the un-addressed-text → host mapping.
-10. **Roles are re-instantiable, not permanent.** A role's identity =
+10. **Role authority is declared, not inferred.** A role may carry an
+    `owner` and canonical `authority` scopes in `config.toml`. Unknown scopes
+    are invalid config. Missing authority means advisory-only, preserving
+    back-compat for existing roles.
+11. **Roles are re-instantiable, not permanent.** A role's identity =
     priors + patches + journal + last transcript summary. `/refresh` rebuilds
     a fresh subprocess from those files when a session degrades.
-11. **Daily journal layer.** `/journal/YYYY-MM-DD/<role>.md` is written by
+12. **Daily journal layer.** `/journal/YYYY-MM-DD/<role>.md` is written by
     the role itself at session end. Last 7 days auto-loaded into context.
-12. **Manual patch promotion in v0.1.** No automatic priors evolution.
+13. **Manual patch promotion in v0.1.** No automatic priors evolution.
     `cr review` (clustering + propose-promote) lands in v0.2.
-13. **Hard caps from day 1.** 50 patches per role, FIFO archive on overflow.
+14. **Hard caps from day 1.** 50 patches per role, FIFO archive on overflow.
     Hop-depth ≥3 across roles in one thread escalates back to user.
-14. **Default-deny on hook failure.** If the PreToolUse hook script crashes,
+15. **Default-deny on hook failure.** If the PreToolUse hook script crashes,
     the wrapper treats it as deny + alerts the user. Never silent-approve.
 
 ## CodeRoom Event Protocol (CREP)
@@ -282,7 +286,7 @@ trait EngineAdapter {
 
 ```
 .coderoom/
-├── config.toml                    # default_engine, default_model, host_role, caps
+├── config.toml                    # defaults, host_role, role owner/authority
 ├── roles/
 │   └── <role>.md                  # base priors (manual edits)
 ├── shared.md                      # priors loaded by every role
@@ -302,6 +306,18 @@ trait EngineAdapter {
 └── sessions/
     └── <role>.state.json          # current session_id, cost, inflight
 ```
+
+Role declarations live in project config:
+
+```toml
+[roles.sre]
+owner = "alice@example.com"
+authority = ["deployment", "infra", "secrets"]
+```
+
+`authority` is a canonical enum, not a free-form tag list. v0.5 accepts:
+`deployment`, `infra`, `secrets`, `data-policy`, `compliance`, and
+`dependencies`. A role without `authority` remains advisory-only.
 
 A role's effective system prompt is composed at spawn time:
 
@@ -444,11 +460,9 @@ These are real questions but answering them now adds risk without value.
   too complex for v0.1, we ship Codex roles with on-request approval
   (Codex prompts directly, our wrapper observes). Decision deferred until
   first attempt at the codex adapter.
-- **Per-role human owners (team mode).** When CodeRoom is used by a team,
-  individual roles should have a human `owner` (e.g. the security engineer
-  owns `@security`'s priors). Owner gates patch promotion and journal
-  reconciliation for that role. This concretizes the Role Invariance
-  Principle for multi-human use; v0.1 is single-user so it's deferred.
+- **Per-role human owners (team mode).** Accepted in A-015 and implemented as
+  declaration surface in v0.5. The remaining enforcement path lives in the
+  phase-gate and signoff amendments.
 - **Cross-engine cache strategy.** CC's prompt cache is per-org-key. If
   the user runs CC + Codex + Gemini, we have no shared cache. Acceptable
   for v0.1; revisit if cost becomes the dominant complaint.

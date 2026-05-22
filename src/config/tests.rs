@@ -100,6 +100,57 @@ permission_mode = "bypass"
 }
 
 #[test]
+fn role_entry_parses_owner_and_authority() {
+    let tmp = fixture(
+        r#"
+default_engine = "cc"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.backend]
+owner = "alice@example.com"
+authority = ["deployment", "infra", "secrets"]
+"#,
+    );
+
+    let cfg = Config::load_test(tmp.path()).unwrap();
+    let backend = cfg.roles.get("backend").unwrap();
+    assert_eq!(backend.owner.as_deref(), Some("alice@example.com"));
+    assert_eq!(
+        backend.authority,
+        vec![
+            AuthorityScope::Deployment,
+            AuthorityScope::Infra,
+            AuthorityScope::Secrets,
+        ]
+    );
+}
+
+#[test]
+fn unknown_authority_scope_is_rejected_loudly() {
+    let tmp = fixture(
+        r#"
+default_engine = "cc"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.backend]
+authority = ["infra", "foobar"]
+"#,
+    );
+
+    let err = Config::load_test(tmp.path()).expect_err("unknown scope should fail parse");
+    match err {
+        ConfigError::Parse { source, .. } => {
+            assert!(source.to_string().contains("foobar"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
 fn codex_role_without_permission_override_uses_bypass() {
     let tmp = fixture(
         r#"

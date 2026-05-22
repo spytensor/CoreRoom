@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::adapter::{Engine, PermissionMode};
-use crate::config::{Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use crate::config::{AuthorityScope, Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
 use crate::config_layered::ProjectConfigRaw;
 
 /// Default body for a freshly-scaffolded role priors file. Users are
@@ -59,6 +59,8 @@ pub fn add(
         } else {
             None
         },
+        owner: None,
+        authority: Vec::new(),
     };
     raw.roles.insert(name.to_owned(), entry);
     write_project_raw(&coderoom_dir, &raw)?;
@@ -165,9 +167,47 @@ pub fn list(project_root: &Path) -> Result<()> {
             .and_then(|e| e.model.as_deref())
             .or(cfg.default_model.as_deref())
             .unwrap_or("(default)");
+        let authority = entry
+            .map(|e| authority_summary(&e.authority))
+            .filter(|summary| !summary.is_empty())
+            .map_or_else(String::new, |summary| format!(" authority=[{summary}]"));
         let host_marker = if cfg.is_host(name) { " (host)" } else { "" };
-        println!("@{name:<14} engine={engine:<6} model={model}{host_marker}");
+        println!("@{name:<14} engine={engine:<6} model={model}{authority}{host_marker}");
     }
+    Ok(())
+}
+
+/// Print one role's effective identity surface.
+pub fn show(project_root: &Path, name: &str) -> Result<()> {
+    let cfg = Config::load(project_root)?;
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let entry = cfg
+        .roles
+        .get(name)
+        .with_context(|| format!("no such role: @{name}"))?;
+    let role_cfg = cfg
+        .role_config(name, &coderoom_dir)
+        .with_context(|| format!("role `{name}` is declared but has invalid config"))?;
+
+    println!("@{name}");
+    println!(
+        "  owner:           {}",
+        entry.owner.as_deref().unwrap_or("(none)")
+    );
+    println!("  engine:          {}", role_cfg.engine.as_str());
+    println!(
+        "  model:           {}",
+        role_cfg.model.as_deref().unwrap_or("(engine default)")
+    );
+    println!("  permission_mode: {}", role_cfg.permission_mode.as_str());
+    println!(
+        "  authority:       {}",
+        if entry.authority.is_empty() {
+            "(advisory only)".to_owned()
+        } else {
+            format!("[{}]", authority_summary(&entry.authority))
+        }
+    );
     Ok(())
 }
 
@@ -215,6 +255,41 @@ pub fn set_host(project_root: &Path, name: &str) -> Result<()> {
     write_project_raw(&coderoom_dir, &raw)?;
 
     println!("✓ @{name} is now the host role");
+    Ok(())
+}
+
+/// Set the human owner for an existing role.
+pub fn set_owner(project_root: &Path, name: &str, owner: &str) -> Result<()> {
+    if owner.trim().is_empty() {
+        bail!("owner must be non-empty");
+    }
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let mut raw = read_project_raw(&coderoom_dir)?;
+    let entry = raw
+        .roles
+        .get_mut(name)
+        .with_context(|| format!("no such role: @{name}"))?;
+    entry.owner = Some(owner.trim().to_owned());
+    write_project_raw(&coderoom_dir, &raw)?;
+    println!("✓ @{name} owner set to {}", owner.trim());
+    Ok(())
+}
+
+/// Replace an existing role's authority scopes.
+pub fn set_authority(project_root: &Path, name: &str, scopes: &[AuthorityScope]) -> Result<()> {
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let mut raw = read_project_raw(&coderoom_dir)?;
+    let entry = raw
+        .roles
+        .get_mut(name)
+        .with_context(|| format!("no such role: @{name}"))?;
+    let mut normalized = scopes.to_vec();
+    normalized.sort();
+    normalized.dedup();
+    entry.authority = normalized;
+    let summary = authority_summary(&entry.authority);
+    write_project_raw(&coderoom_dir, &raw)?;
+    println!("✓ @{name} authority set to [{summary}]");
     Ok(())
 }
 
@@ -324,6 +399,14 @@ fn render_role_template(name: &str, host: &str, peers: &[String]) -> String {
                     .join(", ")
             },
         )
+}
+
+pub(crate) fn authority_summary(scopes: &[AuthorityScope]) -> String {
+    scopes
+        .iter()
+        .map(|scope| scope.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

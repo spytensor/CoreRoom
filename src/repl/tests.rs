@@ -586,6 +586,8 @@ fn splash_snapshot_config() -> Config {
                     engine: Some(Engine::Cc),
                     model: Some("opus".into()),
                     permission_mode: None,
+                    owner: None,
+                    authority: Vec::new(),
                 },
             ),
             (
@@ -594,6 +596,8 @@ fn splash_snapshot_config() -> Config {
                     engine: Some(Engine::Cc),
                     model: None,
                     permission_mode: None,
+                    owner: None,
+                    authority: Vec::new(),
                 },
             ),
             (
@@ -602,6 +606,8 @@ fn splash_snapshot_config() -> Config {
                     engine: Some(Engine::Codex),
                     model: None,
                     permission_mode: Some(PermissionMode::Bypass),
+                    owner: None,
+                    authority: Vec::new(),
                 },
             ),
         ]),
@@ -1351,6 +1357,28 @@ fn streaming_state_emits_role_badge_only_on_first_chunk() {
     assert!(
         !second.contains("@security"),
         "second chunk should not reprint the role badge: {second:?}"
+    );
+}
+
+#[test]
+fn streaming_role_header_renders_authority_badges() {
+    use crate::repl::markdown::{
+        render_role_markdown_with_state_and_header_suffix, StreamMarkdownState,
+    };
+
+    let mut state = StreamMarkdownState::fresh();
+    let rendered = strip_ansi(&render_role_markdown_with_state_and_header_suffix(
+        "security",
+        "host",
+        "authority: [secrets, compliance]",
+        "Review the plan.",
+        80,
+        &mut state,
+    ));
+
+    assert!(
+        rendered.starts_with("  @security authority: [secrets, compliance]\n    "),
+        "rendered: {rendered:?}"
     );
 }
 

@@ -208,6 +208,7 @@ pub(super) async fn drain_one_turn(
     turn_id: &str,
     thread_id: &str,
     host_role: &str,
+    authority_badges: &str,
     work: Arc<Mutex<TurnWork>>,
 ) -> Result<Option<CapturedTurn>> {
     let role_prompt = format!(
@@ -279,6 +280,7 @@ pub(super) async fn drain_one_turn(
                         if let Some(rendered) = render_stream_delta(
                             role,
                             host_role,
+                            authority_badges,
                             &mut pending_delta,
                             &mut stream_md_state,
                         ) {
@@ -341,8 +343,8 @@ pub(super) async fn drain_one_turn(
                         CrepEvent::RoleSpoke {
                             role: spoken,
                             text,
-                            cost_usd,
-                            cache_read,
+                            cost_usd: _,
+                            cache_read: _,
                             turn_id,
                             thread_id,
                             outcome,
@@ -365,6 +367,7 @@ pub(super) async fn drain_one_turn(
                             if let Some(rendered) = render_stream_delta(
                                 role,
                                 host_role,
+                                authority_badges,
                                 &mut pending_delta,
                                 &mut stream_md_state,
                             ) {
@@ -376,17 +379,18 @@ pub(super) async fn drain_one_turn(
                             let already_streamed = !streamed_rendered_text.trim().is_empty()
                                 && same_streamed_text(&streamed_rendered_text, &cleaned.text);
                             if !already_streamed && !cleaned.text.trim().is_empty() {
-                                let rendered = CrepEvent::RoleSpoke {
-                                    role: spoken.clone(),
-                                    text: cleaned.text,
-                                    mentions: cleaned.mentions,
-                                    cost_usd: *cost_usd,
-                                    cache_read: *cache_read,
-                                    turn_id: turn_id.clone(),
-                                    thread_id: thread_id.clone(),
-                                    outcome: *outcome,
-                                };
-                                render_event(&rendered, host_role);
+                                let width = crossterm::terminal::size()
+                                    .map_or(80, |(cols, _)| usize::from(cols));
+                                let mut md_state = super::markdown::StreamMarkdownState::fresh();
+                                let rendered = super::markdown::render_role_markdown_with_state_and_header_suffix(
+                                    spoken,
+                                    host_role,
+                                    authority_badges,
+                                    &cleaned.text,
+                                    width,
+                                    &mut md_state,
+                                );
+                                println!("{rendered}");
                             }
                             true
                         }
@@ -479,6 +483,7 @@ fn verbose_from_value(value: Option<&str>) -> bool {
 fn render_stream_delta(
     role: &str,
     host_role: &str,
+    authority_badges: &str,
     pending: &mut String,
     state: &mut super::markdown::StreamMarkdownState,
 ) -> Option<String> {
@@ -493,9 +498,10 @@ fn render_stream_delta(
     // badge already emitted, currently-inside-a-fenced-code-block —
     // carries from chunk to chunk within the same turn.
     let width = crossterm::terminal::size().map_or(80, |(cols, _)| usize::from(cols));
-    let rendered = super::markdown::render_role_markdown_with_state(
+    let rendered = super::markdown::render_role_markdown_with_state_and_header_suffix(
         role,
         host_role,
+        authority_badges,
         &text_delta,
         width,
         state,

@@ -65,7 +65,26 @@ pub(super) fn render_role_markdown_with_state(
     width: usize,
     state: &mut StreamMarkdownState,
 ) -> String {
-    let header = format!("  {}", output::role_token(role, host_role).bold());
+    render_role_markdown_with_state_and_header_suffix(role, host_role, "", text, width, state)
+}
+
+pub(super) fn render_role_markdown_with_state_and_header_suffix(
+    role: &str,
+    host_role: &str,
+    header_suffix: &str,
+    text: &str,
+    width: usize,
+    state: &mut StreamMarkdownState,
+) -> String {
+    let header = if header_suffix.is_empty() {
+        format!("  {}", output::role_token(role, host_role).bold())
+    } else {
+        format!(
+            "  {} {}",
+            output::role_token(role, host_role).bold(),
+            header_suffix.with(output::KEY)
+        )
+    };
     let body_prefix = "    ".to_owned();
     let mut renderer = Renderer {
         width,
