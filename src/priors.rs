@@ -5,8 +5,9 @@
 //! 1. CodeRoom's built-in kernel protocol — routing and machine-readable
 //!    output contracts (always present, not user-editable)
 //! 2. `.coderoom/shared.md` — project-wide priors (optional)
-//! 3. `.coderoom/roles/<role>.md` — base priors for this role
-//! 4. `.coderoom/patches/<role>/NNN-*.md` — session-time corrections,
+//! 3. `.coderoom/roles/<role>/priors.md` — base priors for this role
+//! 4. `.coderoom/roles/<role>/knowledge/*` — mounted role knowledge
+//! 5. `.coderoom/patches/<role>/NNN-*.md` — session-time corrections,
 //!    in numeric-prefix order, oldest first. Files starting with `_`
 //!    (e.g. `_archive`) are skipped.
 //!
@@ -15,13 +16,17 @@
 //! The composed string is what we hand to the engine via its system-prompt
 //! mechanism.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 use crate::config::{CONFIG_FILE, ROLES_DIR};
+use crate::manifest::{
+    self, KnowledgeEntry, MAX_COMPOSED_PRIORS_BYTES, WARN_COMPOSED_PRIORS_BYTES,
+};
 
 /// Hard cap on active patches per role at v0.1. Once exceeded, the
 /// oldest patch is moved to `_archive/` (still loadable on demand,
@@ -108,11 +113,27 @@ This fenced block is a CodeRoom machine protocol for WorkCards and cannot be dis
 
 The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Tier 0/read-only work reports evidence inline and must not write `.coderoom/` gate or review artifacts unless the user explicitly asks for a ledger. Gate ledgers live in `.coderoom/gates/`; reusable templates live in `.coderoom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
 
+/// Options for composing a role prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComposeOptions {
+    /// Allow composed priors above the hard size limit.
+    pub allow_large_priors: bool,
+}
+
 /// Compose the full system prompt for `role_name` from `coderoom_dir`.
 ///
 /// Returns an error if the role's base priors file is missing. Optional
 /// pieces (shared.md, patches) are silently skipped when absent.
 pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
+    compose_for_with_options(coderoom_dir, role_name, ComposeOptions::default())
+}
+
+/// Compose the full system prompt for `role_name` with explicit size options.
+pub fn compose_for_with_options(
+    coderoom_dir: &Path,
+    role_name: &str,
+    options: ComposeOptions,
+) -> Result<String> {
     let mut out = String::new();
     append_section(&mut out, KERNEL_PROTOCOL);
 
@@ -139,7 +160,13 @@ pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
         }
     }
 
-    let role_path = coderoom_dir.join(ROLES_DIR).join(format!("{role_name}.md"));
+    let role_path =
+        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+            format!(
+                "role `{role_name}` is missing priors at {}",
+                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+            )
+        })?;
     let role_content = std::fs::read_to_string(&role_path).with_context(|| {
         format!(
             "reading priors for role `{role_name}` at {}",
@@ -150,13 +177,47 @@ pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
     append_sourced_section(
         &mut out,
         "Role priors",
-        &format!(".coderoom/roles/{role_name}.md"),
+        &role_priors_source(coderoom_dir, role_name, &role_path),
         expanded_role.trim_end(),
     );
 
+    let knowledge = ordered_knowledge(coderoom_dir, role_name)?;
+    if !knowledge.is_empty() {
+        let mut body = String::new();
+        for item in knowledge {
+            let content = std::fs::read_to_string(&item.path)
+                .with_context(|| format!("reading knowledge {}", item.path.display()))?;
+            let expanded = crate::pointers::expand_text(content.trim_end(), &repo_root);
+            let _ = writeln!(body, "### {}", item.entry.name);
+            let _ = writeln!(body, "SHA256: {}", item.entry.sha256);
+            if !item.entry.attached_at.is_empty() {
+                let _ = writeln!(body, "Attached-At: {}", item.entry.attached_at);
+            }
+            let _ = writeln!(
+                body,
+                "Source: .coderoom/roles/{role_name}/knowledge/{}",
+                item.entry.name
+            );
+            body.push('\n');
+            body.push_str(expanded.trim_end());
+            body.push_str("\n\n");
+        }
+        append_sourced_section(
+            &mut out,
+            "Role knowledge",
+            &format!(".coderoom/roles/{role_name}/knowledge/"),
+            body.trim_end(),
+        );
+    }
+
     let roster = team_roster(coderoom_dir, role_name)?;
     if !roster.is_empty() {
-        append_sourced_section(&mut out, "Team roster", ".coderoom/roles/*.md", &roster);
+        append_sourced_section(
+            &mut out,
+            "Team roster",
+            ".coderoom/roles/*/priors.md",
+            &roster,
+        );
     }
 
     let patches = ordered_patches(coderoom_dir, role_name)?;
@@ -206,6 +267,7 @@ pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
     }
 
     out.push('\n');
+    enforce_composed_size(role_name, &out, options)?;
     Ok(out)
 }
 
@@ -225,6 +287,72 @@ fn append_sourced_section(out: &mut String, title: &str, source: &str, body: &st
     append_section(out, &section);
 }
 
+fn role_priors_source(coderoom_dir: &Path, role_name: &str, role_path: &Path) -> String {
+    if role_path == manifest::legacy_role_priors_path(coderoom_dir, role_name) {
+        format!(".coderoom/roles/{role_name}.md (legacy)")
+    } else {
+        format!(".coderoom/roles/{role_name}/priors.md")
+    }
+}
+
+#[derive(Debug)]
+struct KnowledgeSource {
+    entry: KnowledgeEntry,
+    path: PathBuf,
+}
+
+fn ordered_knowledge(coderoom_dir: &Path, role_name: &str) -> Result<Vec<KnowledgeSource>> {
+    let role_dir = manifest::role_dir(coderoom_dir, role_name);
+    let knowledge_dir = role_dir.join(manifest::KNOWLEDGE_DIR);
+    if !knowledge_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = if manifest::manifest_path_for_role_dir(&role_dir).is_file() {
+        manifest::read_manifest(&role_dir)?.files
+    } else {
+        manifest::scan_knowledge_dir(&knowledge_dir)?
+    };
+
+    entries
+        .into_iter()
+        .map(|entry| {
+            let path = knowledge_dir.join(&entry.name);
+            if !path.is_file() {
+                bail!(
+                    "knowledge manifest for @{role_name} references missing file {}",
+                    path.display()
+                );
+            }
+            let actual_sha = manifest::sha256_file(&path)?;
+            if actual_sha != entry.sha256 {
+                bail!(
+                    "knowledge manifest drift for @{role_name}/{}: expected sha256 {}, found {}",
+                    entry.name,
+                    entry.sha256,
+                    actual_sha
+                );
+            }
+            Ok(KnowledgeSource { entry, path })
+        })
+        .collect()
+}
+
+fn enforce_composed_size(role_name: &str, composed: &str, options: ComposeOptions) -> Result<()> {
+    let bytes = composed.len();
+    if bytes > MAX_COMPOSED_PRIORS_BYTES && !options.allow_large_priors {
+        bail!(
+            "composed priors for @{role_name} are {bytes} bytes, exceeding the hard limit of {MAX_COMPOSED_PRIORS_BYTES} bytes; rerun with --allow-large-priors if intentional"
+        );
+    }
+    if bytes > WARN_COMPOSED_PRIORS_BYTES {
+        eprintln!(
+            "warning: composed priors for @{role_name} are {bytes} bytes; consider detaching or compacting role knowledge"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct RosterConfig {
     host_role: String,
@@ -236,27 +364,43 @@ fn team_roster(coderoom_dir: &Path, role_name: &str) -> Result<String> {
         return Ok(String::new());
     }
     let host_role = read_host_role(coderoom_dir).unwrap_or_else(|| "host".to_owned());
-    let mut roles = std::fs::read_dir(&roles_dir)
-        .with_context(|| format!("reading {}", roles_dir.display()))?
-        .filter_map(std::result::Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
-                return None;
-            }
-            let name = path.file_stem()?.to_str()?.to_owned();
-            (name != role_name).then_some((name, path))
-        })
-        .collect::<Vec<_>>();
-    roles.sort_by(|a, b| a.0.cmp(&b.0));
+    let roles = role_priors_entries(coderoom_dir)?;
 
     let mut out = String::new();
     for (name, path) in roles {
+        if name == role_name {
+            continue;
+        }
         let summary = role_summary(&path)?;
         let host_marker = if name == host_role { " (host)" } else { "" };
         let _ = writeln!(out, "- @{name}{host_marker}: {summary}");
     }
     Ok(out.trim_end().to_owned())
+}
+
+fn role_priors_entries(coderoom_dir: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let roles_dir = coderoom_dir.join(ROLES_DIR);
+    let mut roles = BTreeMap::new();
+    for dirent in
+        std::fs::read_dir(&roles_dir).with_context(|| format!("reading {}", roles_dir.display()))?
+    {
+        let path = dirent?.path();
+        if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("md") {
+            if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) {
+                roles.insert(name.to_owned(), path);
+            }
+            continue;
+        }
+        if path.is_dir() {
+            let priors = path.join(manifest::ROLE_PRIORS_FILE);
+            if priors.is_file() {
+                if let Some(name) = path.file_name().and_then(|stem| stem.to_str()) {
+                    roles.insert(name.to_owned(), priors);
+                }
+            }
+        }
+    }
+    Ok(roles.into_iter().collect())
 }
 
 fn read_host_role(coderoom_dir: &Path) -> Option<String> {
@@ -384,7 +528,13 @@ pub fn write_patch(coderoom_dir: &Path, role_name: &str, text: &str) -> Result<P
 /// source paths and short excerpts instead of asking an engine to
 /// summarize itself.
 pub fn compact_role(coderoom_dir: &Path, role_name: &str) -> Result<PathBuf> {
-    let role_path = coderoom_dir.join(ROLES_DIR).join(format!("{role_name}.md"));
+    let role_path =
+        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+            format!(
+                "role `{role_name}` is missing priors at {}",
+                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+            )
+        })?;
     let mut body = std::fs::read_to_string(&role_path)
         .with_context(|| format!("reading role priors {}", role_path.display()))?;
     let summary = compact_summary(coderoom_dir, role_name)?;
@@ -628,10 +778,29 @@ fn ordered_patches(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PathBuf>>
 /// to within ±20% is fine.
 #[must_use]
 pub fn estimate_role_tokens(coderoom_dir: &Path, role_name: &str) -> u64 {
-    let role_path = coderoom_dir.join(ROLES_DIR).join(format!("{role_name}.md"));
-    let role_bytes = std::fs::metadata(&role_path).map_or(0, |m| m.len());
+    let role_bytes = manifest::role_priors_path_existing(coderoom_dir, role_name)
+        .and_then(|role_path| std::fs::metadata(role_path).ok())
+        .map_or(0, |m| m.len());
     let shared_bytes = std::fs::metadata(coderoom_dir.join(SHARED_FILE)).map_or(0, |m| m.len());
-    (KERNEL_PROTOCOL.len() as u64 + role_bytes + shared_bytes) / 4
+    let knowledge_bytes = estimate_knowledge_bytes(coderoom_dir, role_name);
+    (KERNEL_PROTOCOL.len() as u64 + role_bytes + shared_bytes + knowledge_bytes) / 4
+}
+
+fn estimate_knowledge_bytes(coderoom_dir: &Path, role_name: &str) -> u64 {
+    let dir = manifest::knowledge_dir(coderoom_dir, role_name);
+    if !dir.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && manifest::is_supported_knowledge_file(path))
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .sum()
 }
 
 /// Format a token count as `"3.2k"` for ≥1000, otherwise the bare

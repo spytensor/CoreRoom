@@ -14,7 +14,7 @@ permission_mode = "ask"
 host_role = "host"
 
 # Each [roles.<name>] declares a role. The role's priors live at
-# .coderoom/roles/<name>.md. Add more by creating the .md file AND
+# .coderoom/roles/<name>/priors.md. Add more by creating that file AND
 # adding a table here. Empty tables inherit the defaults above.
 # Optional identity fields:
 # owner = "alice@example.com"

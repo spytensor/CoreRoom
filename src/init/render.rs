@@ -377,12 +377,12 @@ fn push_tree_preview(out: &mut String, coderoom_dir: &Path, plan: &[RolePlan]) {
         } else {
             "├─"
         };
-        let role_filename = format!("{}.md", role.name);
-        let role_filename_padded = format!("{role_filename:<18}");
+        let role_dir = format!("{}/", role.name);
+        let role_dir_padded = format!("{role_dir:<18}");
         let _ = writeln!(
             out,
             "│  {branch} {} {}",
-            role_filename_padded.with(role_color(&role.name)),
+            role_dir_padded.with(role_color(&role.name)),
             engine_label(role.engine).with(output::DIM),
         );
     }

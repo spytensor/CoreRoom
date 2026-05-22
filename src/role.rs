@@ -1,7 +1,7 @@
 //! `cr role add/list/rm` implementations.
 //!
 //! Each command mutates `.coderoom/config.toml` and/or
-//! `.coderoom/roles/<name>.md` with the same validation discipline that
+//! `.coderoom/roles/<name>/priors.md` with the same validation discipline that
 //! [`crate::config::Config::load`] enforces at REPL startup, so the
 //! generated state is always loadable.
 
@@ -13,6 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use crate::adapter::{Engine, PermissionMode};
 use crate::config::{AuthorityScope, Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
 use crate::config_layered::ProjectConfigRaw;
+use crate::manifest;
 
 /// Default body for a freshly-scaffolded role priors file. Users are
 /// expected to replace this with project-specific guidance.
@@ -33,7 +34,7 @@ pub(crate) struct RoleAddition {
 
 /// Add a new role. Updates `config.toml` (inserts `[roles.<name>]` with
 /// optional engine/model overrides), then creates an empty priors file
-/// at `.coderoom/roles/<name>.md` if one doesn't already exist.
+/// at `.coderoom/roles/<name>/priors.md` if one doesn't already exist.
 pub fn add(
     project_root: &Path,
     name: &str,
@@ -65,16 +66,21 @@ pub fn add(
     raw.roles.insert(name.to_owned(), entry);
     write_project_raw(&coderoom_dir, &raw)?;
 
-    let priors_path = coderoom_dir.join(ROLES_DIR).join(format!("{name}.md"));
-    if !priors_path.exists() {
-        std::fs::create_dir_all(priors_path.parent().expect("roles parent"))
-            .with_context(|| format!("creating roles dir for `{name}`"))?;
+    let priors_path = manifest::preferred_role_priors_path(&coderoom_dir, name);
+    if priors_path.exists() {
+        std::fs::create_dir_all(manifest::knowledge_dir(&coderoom_dir, name))
+            .with_context(|| format!("creating knowledge dir for `{name}`"))?;
+    } else if manifest::legacy_role_priors_path(&coderoom_dir, name).is_file() {
+        manifest::ensure_role_dir_layout(&coderoom_dir, name)
+            .with_context(|| format!("migrating legacy priors for `{name}`"))?;
+    } else {
         let peers = role_peers(&raw, name);
-        std::fs::write(
-            &priors_path,
-            render_role_template(name, &raw.host_role, &peers),
+        manifest::create_role_layout(
+            &coderoom_dir,
+            name,
+            &render_role_template(name, &raw.host_role, &peers),
         )
-        .with_context(|| format!("writing {}", priors_path.display()))?;
+        .with_context(|| format!("creating role layout for `{name}`"))?;
     }
 
     println!("✓ added role @{name}");
@@ -88,6 +94,76 @@ pub fn add(
     println!();
     println!("  edit the priors file, then `cr start` (or `/refresh @{name}` if running)");
 
+    Ok(())
+}
+
+/// Attach a local markdown or text document to a role's knowledge mount.
+pub fn attach(project_root: &Path, name: &str, source: &Path, alias: Option<&str>) -> Result<()> {
+    let name = name.strip_prefix('@').unwrap_or(name);
+    validate_name(name)?;
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let raw = read_project_raw(&coderoom_dir)?;
+    if !raw.roles.contains_key(name) {
+        bail!("no such role: @{name}");
+    }
+
+    let outcome = manifest::attach_knowledge(&coderoom_dir, name, source, alias)?;
+    if let Some(legacy) = outcome.migrated_legacy {
+        println!(
+            "migrated legacy priors {} -> {}",
+            legacy.display(),
+            manifest::preferred_role_priors_path(&coderoom_dir, name).display()
+        );
+    }
+    println!("✓ attached {} to @{name}", outcome.entry.name);
+    println!("  path:   {}", outcome.path.display());
+    println!("  sha256: {}", outcome.entry.sha256);
+    Ok(())
+}
+
+/// Detach a knowledge document from a role.
+pub fn detach(project_root: &Path, name: &str, doc_name: &str) -> Result<()> {
+    let name = name.strip_prefix('@').unwrap_or(name);
+    validate_name(name)?;
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let raw = read_project_raw(&coderoom_dir)?;
+    if !raw.roles.contains_key(name) {
+        bail!("no such role: @{name}");
+    }
+
+    let outcome = manifest::detach_knowledge(&coderoom_dir, name, doc_name)?;
+    println!("✓ detached {} from @{name}", outcome.entry.name);
+    if !outcome.removed_file {
+        println!("  file was already missing: {}", outcome.path.display());
+    }
+    Ok(())
+}
+
+/// List a role's attached knowledge documents.
+pub fn knowledge(project_root: &Path, name: &str) -> Result<()> {
+    let name = name.strip_prefix('@').unwrap_or(name);
+    validate_name(name)?;
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let raw = read_project_raw(&coderoom_dir)?;
+    if !raw.roles.contains_key(name) {
+        bail!("no such role: @{name}");
+    }
+
+    let entries = manifest::knowledge_inventory(&coderoom_dir, name)?;
+    if entries.is_empty() {
+        println!("(no knowledge attached for @{name})");
+        return Ok(());
+    }
+    println!("@{name} knowledge:");
+    println!("{:<28} {:<64} last-modified", "name", "sha256");
+    for entry in entries {
+        println!(
+            "{:<28} {:<64} {}",
+            entry.entry.name,
+            entry.entry.sha256,
+            entry.modified_at.as_deref().unwrap_or("(missing)")
+        );
+    }
     Ok(())
 }
 
@@ -119,8 +195,14 @@ pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Resul
     std::fs::create_dir_all(&roles_dir)
         .with_context(|| format!("creating {}", roles_dir.display()))?;
     for addition in &to_add {
-        let priors_path = roles_dir.join(format!("{}.md", addition.name));
-        if !priors_path.exists() {
+        let priors_path = manifest::preferred_role_priors_path(&coderoom_dir, &addition.name);
+        if priors_path.exists() {
+            std::fs::create_dir_all(manifest::knowledge_dir(&coderoom_dir, &addition.name))
+                .with_context(|| format!("creating knowledge dir for `{}`", addition.name))?;
+        } else if manifest::legacy_role_priors_path(&coderoom_dir, &addition.name).is_file() {
+            manifest::ensure_role_dir_layout(&coderoom_dir, &addition.name)
+                .with_context(|| format!("migrating legacy priors for `{}`", addition.name))?;
+        } else {
             let mut peers = raw.roles.keys().cloned().collect::<Vec<_>>();
             peers.extend(
                 to_add
@@ -129,11 +211,12 @@ pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Resul
                     .filter(|name| name != &addition.name),
             );
             peers.sort();
-            std::fs::write(
-                &priors_path,
-                render_role_template(&addition.name, &raw.host_role, &peers),
+            manifest::create_role_layout(
+                &coderoom_dir,
+                &addition.name,
+                &render_role_template(&addition.name, &raw.host_role, &peers),
             )
-            .with_context(|| format!("writing {}", priors_path.display()))?;
+            .with_context(|| format!("creating role layout for `{}`", addition.name))?;
         }
     }
 
@@ -212,7 +295,7 @@ pub fn show(project_root: &Path, name: &str) -> Result<()> {
 }
 
 /// Remove a role. Refuses if it's the configured host. Removes both the
-/// `[roles.<name>]` table and the priors file.
+/// `[roles.<name>]` table and the role priors/knowledge directory.
 pub fn rm(project_root: &Path, name: &str) -> Result<()> {
     let coderoom_dir = project_root.join(CODEROOM_DIR);
     let mut raw = read_project_raw(&coderoom_dir)?;
@@ -230,10 +313,15 @@ pub fn rm(project_root: &Path, name: &str) -> Result<()> {
     raw.roles.remove(name);
     write_project_raw(&coderoom_dir, &raw)?;
 
-    let priors_path = coderoom_dir.join(ROLES_DIR).join(format!("{name}.md"));
-    if priors_path.is_file() {
-        std::fs::remove_file(&priors_path)
-            .with_context(|| format!("removing {}", priors_path.display()))?;
+    let legacy_path = manifest::legacy_role_priors_path(&coderoom_dir, name);
+    if legacy_path.is_file() {
+        std::fs::remove_file(&legacy_path)
+            .with_context(|| format!("removing {}", legacy_path.display()))?;
+    }
+    let role_dir = manifest::role_dir(&coderoom_dir, name);
+    if role_dir.is_dir() {
+        std::fs::remove_dir_all(&role_dir)
+            .with_context(|| format!("removing {}", role_dir.display()))?;
     }
 
     println!("✓ removed @{name}");

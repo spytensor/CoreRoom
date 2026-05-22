@@ -6,10 +6,12 @@
 //! - `cr role add <name> [--engine cc|codex|gemini] [--model X]` — add a role
 //! - `cr role list`              — list configured roles
 //! - `cr role show <name>`        — show role identity and authority
+//! - `cr role attach <name> <file> [--name alias]` — mount role knowledge
+//! - `cr role knowledge <name>`   — list mounted role knowledge
 //! - `cr role set-owner <name> <owner>` — set role owner
 //! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
-//! - `cr [start] [--project PATH]` — enter the interactive REPL
+//! - `cr [start] [--project PATH] [--allow-large-priors]` — enter the REPL
 //! - `cr prompt show <role>`     — print a role's effective prompt
 //! - `cr gate ...`               — inspect SDLC gate ledgers
 //! - `cr doctor [--fix]`         — inspect CodeRoom project files
@@ -77,6 +79,9 @@ enum Cmd {
         /// facing equivalent of `claude --resume` vs no flag.
         #[arg(long)]
         fresh: bool,
+        /// Allow composed role priors above the 500KB hard limit.
+        #[arg(long)]
+        allow_large_priors: bool,
     },
     /// Replay `.coderoom/messages.jsonl` through the live renderer.
     Show {
@@ -121,7 +126,7 @@ List every `[[…]]` pointer in the role's priors file with its current \
 resolution status. Useful for spotting which anchors fell behind HEAD \
 before re-prompting.
 
-Token grammar (write these inside a role's .md file):
+Token grammar (write these inside a role's priors.md file):
 
   [[<path>#L<n>-<m>@<sha>]]   locked to a commit, line range
   [[<path>#L<n>@<sha>]]        locked single line
@@ -216,6 +221,37 @@ enum RoleCmd {
     Show {
         /// Role name to inspect.
         name: String,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Attach a markdown or text file to a role's knowledge mount.
+    Attach {
+        /// Role name to update.
+        role: String,
+        /// Local markdown or text file to copy into role knowledge.
+        file_path: PathBuf,
+        /// Alias filename to use under knowledge/.
+        #[arg(long = "name")]
+        alias: Option<String>,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Detach a knowledge file from a role.
+    Detach {
+        /// Role name to update.
+        role: String,
+        /// Knowledge filename to remove.
+        name: String,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// List a role's mounted knowledge files.
+    Knowledge {
+        /// Role name to inspect.
+        role: String,
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
@@ -332,6 +368,9 @@ enum PromptCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
+        /// Allow composed role priors above the 500KB hard limit.
+        #[arg(long)]
+        allow_large_priors: bool,
     },
 }
 
@@ -618,7 +657,8 @@ fn main() -> Result<()> {
     let needs_engine = !matches!(
         cli.command,
         Some(
-            Cmd::Config { .. }
+            Cmd::Role { .. }
+                | Cmd::Config { .. }
                 | Cmd::Prompt { .. }
                 | Cmd::Gate { .. }
                 | Cmd::Doctor { .. }
@@ -632,7 +672,7 @@ fn main() -> Result<()> {
     }
 
     match cli.command {
-        None => run_start(None, false, false),
+        None => run_start(None, false, false, false),
         Some(Cmd::Init { project, yes }) => {
             let opts = if yes {
                 coderoom::init::InitOptions::accepted_defaults()
@@ -646,7 +686,8 @@ fn main() -> Result<()> {
             project,
             yolo,
             fresh,
-        }) => run_start(project, yolo, fresh),
+            allow_large_priors,
+        }) => run_start(project, yolo, fresh, allow_large_priors),
         Some(Cmd::Show {
             project,
             role,
@@ -703,9 +744,15 @@ fn main() -> Result<()> {
 
 fn run_prompt_cmd(cmd: PromptCmd) -> Result<()> {
     match cmd {
-        PromptCmd::Show { role, project } => {
-            coderoom::prompt_cmd::show(&project_root_or_cwd(project)?, &role)
-        }
+        PromptCmd::Show {
+            role,
+            project,
+            allow_large_priors,
+        } => coderoom::prompt_cmd::show_with_options(
+            &project_root_or_cwd(project)?,
+            &role,
+            coderoom::priors::ComposeOptions { allow_large_priors },
+        ),
     }
 }
 
@@ -954,15 +1001,14 @@ fn normalize_role(role: &str) -> String {
 /// data-out with no `crate::config` or `println!` dependencies; the
 /// future Contracts / Inbox layers reuse the library half.
 fn run_pointers(project_root: &Path, role: &str) -> Result<()> {
-    use coderoom::config::{CODEROOM_DIR, ROLES_DIR};
+    use coderoom::config::CODEROOM_DIR;
     use coderoom::pointers::{
         resolve_all, status_glyph, status_word, Pointer, PointerStatus, UnresolvableReason,
     };
 
-    let priors_path = project_root
-        .join(CODEROOM_DIR)
-        .join(ROLES_DIR)
-        .join(format!("{role}.md"));
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let priors_path = coderoom::manifest::role_priors_path_existing(&coderoom_dir, role)
+        .unwrap_or_else(|| coderoom::manifest::preferred_role_priors_path(&coderoom_dir, role));
     let priors = std::fs::read_to_string(&priors_path).map_err(|e| {
         anyhow::anyhow!(
             "could not read priors for @{role} at {}: {e} \
@@ -1022,7 +1068,12 @@ fn run_pointers(project_root: &Path, role: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_start(project: Option<PathBuf>, yolo: bool, fresh: bool) -> Result<()> {
+fn run_start(
+    project: Option<PathBuf>,
+    yolo: bool,
+    fresh: bool,
+    allow_large_priors: bool,
+) -> Result<()> {
     if yolo && !confirm_yolo()? {
         return Ok(());
     }
@@ -1034,6 +1085,7 @@ fn run_start(project: Option<PathBuf>, yolo: bool, fresh: bool) -> Result<()> {
         let options = coderoom::repl::RunOptions {
             permission_mode_override: yolo.then_some(PermissionMode::Bypass),
             fresh,
+            allow_large_priors,
         };
         coderoom::repl::run_with_options(&project_root, options).await
     })
@@ -1105,6 +1157,25 @@ fn run_role_cmd(cmd: RoleCmd) -> Result<()> {
         RoleCmd::List { project } => coderoom::role::list(&project_root_or_cwd(project)?),
         RoleCmd::Show { name, project } => {
             coderoom::role::show(&project_root_or_cwd(project)?, &name)
+        }
+        RoleCmd::Attach {
+            role,
+            file_path,
+            alias,
+            project,
+        } => coderoom::role::attach(
+            &project_root_or_cwd(project)?,
+            &role,
+            &file_path,
+            alias.as_deref(),
+        ),
+        RoleCmd::Detach {
+            role,
+            name,
+            project,
+        } => coderoom::role::detach(&project_root_or_cwd(project)?, &role, &name),
+        RoleCmd::Knowledge { role, project } => {
+            coderoom::role::knowledge(&project_root_or_cwd(project)?, &role)
         }
         RoleCmd::Rm { name, project } => coderoom::role::rm(&project_root_or_cwd(project)?, &name),
         RoleCmd::Host { name, project } => {

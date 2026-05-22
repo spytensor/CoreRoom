@@ -44,8 +44,8 @@ implement the skill; the skill does not have a viewpoint.
 Skills live in a fixed three-layer directory tree, all under
 `.coderoom/skills/`, mirroring the priors layering. Role-private skills
 sit under `.coderoom/skills/roles/<role>/` rather than nested inside the
-existing `.coderoom/roles/<role>.md` priors file — this preserves the
-locked role-priors file layout from `architecture.md` § Knowledge model.
+role's `.coderoom/roles/<role>/priors.md` file. Large domain documents belong
+in the role `knowledge/` mount; skills remain executable/reference bundles.
 
 ```
 .coderoom/
@@ -58,7 +58,9 @@ locked role-priors file layout from `architecture.md` § Knowledge model.
 │   └── roles/
 │       └── <role>/            # role-private. only this role sees these.
 └── roles/
-    └── <role>.md              # unchanged. existing priors file.
+    └── <role>/
+        ├── priors.md          # role priors file.
+        └── knowledge/         # mounted domain docs.
 ```
 
 Each skill directory follows the engine's native skill format (currently a
@@ -67,8 +69,8 @@ format.
 
 ## Allowlist mechanism
 
-Each role's `.coderoom/roles/<role>.md` declares which skills it surfaces in
-its frontmatter:
+Each role's `.coderoom/roles/<role>/priors.md` declares which skills it
+surfaces in its frontmatter:
 
 ```yaml
 ---

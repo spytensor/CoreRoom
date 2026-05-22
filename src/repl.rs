@@ -164,6 +164,7 @@ struct SpawnContext<'a> {
     /// is no user available to prompt.
     permission_socket_path: Option<&'a Path>,
     permission_mode_override: Option<PermissionMode>,
+    allow_large_priors: bool,
     bus: &'a Arc<MessageBus>,
 }
 
@@ -178,6 +179,8 @@ pub struct RunOptions {
     /// wipes `.coderoom/sessions/ids/` before spawning any role
     /// (amendment A-006).
     pub fresh: bool,
+    /// Allow composed role priors above the 500KB hard limit.
+    pub allow_large_priors: bool,
 }
 
 /// REPL entry point. Loads config, spawns every declared role, forwards
@@ -403,6 +406,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
             permission_policy_path: &permission_policy_path,
             permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
             permission_mode_override: options.permission_mode_override,
+            allow_large_priors: options.allow_large_priors,
             bus: &bus,
         };
         let running = spawn_role(&spawn_context, &name).await?;
@@ -519,6 +523,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
+                    allow_large_priors: options.allow_large_priors,
                     bus: &bus,
                 };
                 refresh_role(&spawn_context, &mut roles, &role).await;
@@ -532,6 +537,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
+                    allow_large_priors: options.allow_large_priors,
                     bus: &bus,
                 };
                 handle_fresh(&spawn_context, &mut roles, project_root).await;
@@ -545,6 +551,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
+                    allow_large_priors: options.allow_large_priors,
                     bus: &bus,
                 };
                 handle_resume(
@@ -2123,11 +2130,15 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
     let coderoom_dir = context.coderoom_dir;
     let compose_dir = coderoom_dir.to_path_buf();
     let compose_role = name.to_owned();
-    let composed =
-        tokio::task::spawn_blocking(move || priors::compose_for(&compose_dir, &compose_role))
-            .await
-            .context("joining priors composer task")?
-            .with_context(|| format!("composing priors for role `{name}`"))?;
+    let compose_options = priors::ComposeOptions {
+        allow_large_priors: context.allow_large_priors,
+    };
+    let composed = tokio::task::spawn_blocking(move || {
+        priors::compose_for_with_options(&compose_dir, &compose_role, compose_options)
+    })
+    .await
+    .context("joining priors composer task")?
+    .with_context(|| format!("composing priors for role `{name}`"))?;
     let priors_hash = crate::adapter::cc::fingerprint(&composed);
     let priors_temp = writepriors_tempfile(name, &composed)
         .with_context(|| format!("staging priors for role `{name}`"))?;
