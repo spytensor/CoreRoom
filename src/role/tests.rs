@@ -50,6 +50,37 @@ fn add_persists_engine_and_model_overrides() {
 }
 
 #[test]
+fn set_owner_persists_role_owner() {
+    let tmp = fixture();
+    set_owner(tmp.path(), "host", "alice@example.com").unwrap();
+    let cfg = Config::load_test(tmp.path()).unwrap();
+    assert_eq!(
+        cfg.roles["host"].owner.as_deref(),
+        Some("alice@example.com")
+    );
+}
+
+#[test]
+fn set_authority_persists_deduped_scopes() {
+    let tmp = fixture();
+    set_authority(
+        tmp.path(),
+        "host",
+        &[
+            AuthorityScope::Infra,
+            AuthorityScope::Deployment,
+            AuthorityScope::Infra,
+        ],
+    )
+    .unwrap();
+    let cfg = Config::load_test(tmp.path()).unwrap();
+    assert_eq!(
+        cfg.roles["host"].authority,
+        vec![AuthorityScope::Deployment, AuthorityScope::Infra]
+    );
+}
+
+#[test]
 fn add_many_creates_roles_in_one_loadable_batch() {
     let tmp = fixture();
     let added = add_many(

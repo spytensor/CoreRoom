@@ -5,6 +5,9 @@
 //! - `cr init [--project PATH]`  — bootstrap `.coderoom/` in a fresh project
 //! - `cr role add <name> [--engine cc|codex|gemini] [--model X]` — add a role
 //! - `cr role list`              — list configured roles
+//! - `cr role show <name>`        — show role identity and authority
+//! - `cr role set-owner <name> <owner>` — set role owner
+//! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH]` — enter the interactive REPL
 //! - `cr prompt show <role>`     — print a role's effective prompt
@@ -19,6 +22,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use coderoom::adapter::{Engine, PermissionMode};
+use coderoom::config::AuthorityScope;
 use coderoom::config_cmd::LayerTarget;
 use coderoom::gate::{
     ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, ReviewInput,
@@ -208,6 +212,14 @@ enum RoleCmd {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// Show a role's effective identity and authority.
+    Show {
+        /// Role name to inspect.
+        name: String,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
     /// Remove a role (refuses for the configured host).
     Rm {
         /// Role name to remove.
@@ -220,6 +232,27 @@ enum RoleCmd {
     Host {
         /// Role name to make host.
         name: String,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Set the human owner for a role.
+    SetOwner {
+        /// Role name to update.
+        name: String,
+        /// Owner email or handle.
+        owner: String,
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Replace the authority scopes for a role.
+    SetAuthority {
+        /// Role name to update.
+        name: String,
+        /// Canonical scopes such as deployment, infra, secrets.
+        #[arg(value_parser = parse_authority_scope, num_args = 1..)]
+        scopes: Vec<AuthorityScope>,
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
@@ -528,6 +561,15 @@ fn parse_permission_mode(s: &str) -> Result<PermissionMode, String> {
             "unknown permission mode `{other}` — valid: ask, auto, bypass"
         )),
     }
+}
+
+fn parse_authority_scope(s: &str) -> Result<AuthorityScope, String> {
+    AuthorityScope::parse(s).ok_or_else(|| {
+        format!(
+            "unknown authority scope `{s}`; expected one of: {}",
+            AuthorityScope::expected_values()
+        )
+    })
 }
 
 fn parse_gate_tier(s: &str) -> Result<GateTier, String> {
@@ -1061,9 +1103,22 @@ fn run_role_cmd(cmd: RoleCmd) -> Result<()> {
             coderoom::role::add(&root, &name, engine, model.as_deref())
         }
         RoleCmd::List { project } => coderoom::role::list(&project_root_or_cwd(project)?),
+        RoleCmd::Show { name, project } => {
+            coderoom::role::show(&project_root_or_cwd(project)?, &name)
+        }
         RoleCmd::Rm { name, project } => coderoom::role::rm(&project_root_or_cwd(project)?, &name),
         RoleCmd::Host { name, project } => {
             coderoom::role::set_host(&project_root_or_cwd(project)?, &name)
         }
+        RoleCmd::SetOwner {
+            name,
+            owner,
+            project,
+        } => coderoom::role::set_owner(&project_root_or_cwd(project)?, &name, &owner),
+        RoleCmd::SetAuthority {
+            name,
+            scopes,
+            project,
+        } => coderoom::role::set_authority(&project_root_or_cwd(project)?, &name, &scopes),
     }
 }
