@@ -62,6 +62,9 @@ dirs = "6.0"
 # Pattern matching
 regex = "1.10"
 
+# SHA tracking for role knowledge manifests.
+sha2 = "0.10"
+
 # Used by the REPL to stage composed priors for spawned roles. Also
 # pulled in by tests (a regular dep is visible there too).
 tempfile = "3.10"

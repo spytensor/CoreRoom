@@ -31,7 +31,13 @@ fn add_creates_role_entry_and_priors_file() {
     let coderoom = tmp.path().join(CODEROOM_DIR);
     let cfg = Config::load_test(tmp.path()).unwrap();
     assert!(cfg.roles.contains_key("backend"));
-    let priors = fs::read_to_string(coderoom.join(ROLES_DIR).join("backend.md")).unwrap();
+    let priors = fs::read_to_string(
+        coderoom
+            .join(ROLES_DIR)
+            .join("backend")
+            .join(crate::manifest::ROLE_PRIORS_FILE),
+    )
+    .unwrap();
     assert!(priors.contains("@backend"));
     assert!(priors.contains("@host"));
     assert!(!priors.contains("{ROLE}"));
@@ -47,6 +53,58 @@ fn add_persists_engine_and_model_overrides() {
     let entry = cfg.roles.get("security").unwrap();
     assert_eq!(entry.engine, Some(Engine::Codex));
     assert_eq!(entry.model.as_deref(), Some("o3"));
+}
+
+#[test]
+fn attach_migrates_legacy_priors_and_writes_manifest() {
+    let tmp = fixture();
+    let source = tmp.path().join("runbook.md");
+    fs::write(&source, "DEPLOYMENT_RUNBOOK").unwrap();
+
+    attach(tmp.path(), "host", &source, Some("deployment.md")).unwrap();
+
+    let coderoom = tmp.path().join(CODEROOM_DIR);
+    assert!(!coderoom.join(ROLES_DIR).join("host.md").exists());
+    assert!(coderoom
+        .join(ROLES_DIR)
+        .join("host")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
+        .is_file());
+    let knowledge_path = coderoom
+        .join(ROLES_DIR)
+        .join("host")
+        .join(crate::manifest::KNOWLEDGE_DIR)
+        .join("deployment.md");
+    assert_eq!(
+        fs::read_to_string(&knowledge_path).unwrap(),
+        "DEPLOYMENT_RUNBOOK"
+    );
+    let manifest = crate::manifest::read_manifest(&coderoom.join(ROLES_DIR).join("host")).unwrap();
+    assert_eq!(manifest.files.len(), 1);
+    assert_eq!(manifest.files[0].name, "deployment.md");
+    assert_eq!(
+        manifest.files[0].sha256,
+        crate::manifest::sha256_file(&knowledge_path).unwrap()
+    );
+}
+
+#[test]
+fn detach_removes_manifest_entry_and_file() {
+    let tmp = fixture();
+    let source = tmp.path().join("runbook.md");
+    fs::write(&source, "DEPLOYMENT_RUNBOOK").unwrap();
+    attach(tmp.path(), "host", &source, Some("deployment.md")).unwrap();
+
+    detach(tmp.path(), "host", "deployment.md").unwrap();
+
+    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let role_dir = coderoom.join(ROLES_DIR).join("host");
+    assert!(!role_dir
+        .join(crate::manifest::KNOWLEDGE_DIR)
+        .join("deployment.md")
+        .exists());
+    let manifest = crate::manifest::read_manifest(&role_dir).unwrap();
+    assert!(manifest.files.is_empty());
 }
 
 #[test]
@@ -108,13 +166,15 @@ fn add_many_creates_roles_in_one_loadable_batch() {
         .path()
         .join(CODEROOM_DIR)
         .join(ROLES_DIR)
-        .join("backend.md")
+        .join("backend")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
     assert!(tmp
         .path()
         .join(CODEROOM_DIR)
         .join(ROLES_DIR)
-        .join("security.md")
+        .join("security")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
 }
 
@@ -196,8 +256,8 @@ fn rm_removes_role_and_priors() {
         .path()
         .join(CODEROOM_DIR)
         .join(ROLES_DIR)
-        .join("backend.md")
-        .is_file());
+        .join("backend")
+        .exists());
 }
 
 #[test]

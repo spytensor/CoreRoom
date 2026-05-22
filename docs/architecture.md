@@ -288,7 +288,12 @@ trait EngineAdapter {
 .coderoom/
 ├── config.toml                    # defaults, host_role, role owner/authority
 ├── roles/
-│   └── <role>.md                  # base priors (manual edits)
+│   └── <role>/
+│       ├── priors.md              # base priors (manual edits)
+│       ├── knowledge/             # mounted role-domain documents
+│       │   ├── internal-stack.md
+│       │   └── deployment-runbook.md
+│       └── .knowledge-manifest.toml # file list, SHA-256, attached-at
 ├── shared.md                      # priors loaded by every role
 ├── patches/
 │   └── <role>/
@@ -325,10 +330,29 @@ A role's effective system prompt is composed at spawn time:
 <built-in CodeRoom kernel protocol>
 <shared.md project-wide priors>
 <role priors>
+<role knowledge documents>
 <team roster: one-paragraph blurb per other role; host is marked>
 <active patches in numeric order>
 <journal entries from last 7 days for this role>
 ```
+
+Role priors live in `.coderoom/roles/<role>/priors.md`. Legacy
+`.coderoom/roles/<role>.md` files remain loadable with a deprecation warning
+and are migrated automatically the first time `cr role attach` mutates that
+role. Mounted knowledge files live under `knowledge/` and are copied in with:
+
+```bash
+cr role attach sre ./docs/deployment-runbook.md --name deployment-runbook.md
+cr role knowledge sre
+cr role detach sre deployment-runbook.md
+```
+
+The manifest records each mounted file's name, SHA-256, and attached-at
+timestamp. Prompt composition uses manifest order when present, otherwise
+alphabetical filename order. If a manifest entry points at a missing file or
+the SHA no longer matches, composition fails loudly. Composed priors warn above
+100KB and hard-error above 500KB unless the caller passes
+`--allow-large-priors`.
 
 The built-in kernel is not copied into `.coderoom/`. It owns the routing
 syntax (`@role: <brief>` delegation lines), peer brief envelope (`<<<peer-quote ...>>>>`,
@@ -350,8 +374,8 @@ The team roster explicitly marks which role is host so non-host roles can
 escalate back to the user via `@<host>` when they need direction.
 
 `~/.coderoom/roles/` holds global role templates that a `cr role add backend`
-can scaffold from. Project-level `.coderoom/roles/<role>.md` extends or
-overrides the template.
+can scaffold from. Project-level `.coderoom/roles/<role>/priors.md` extends
+or overrides the template.
 
 ### Patches
 

@@ -53,8 +53,9 @@ delegation line like `@x: <brief>` in its reply.
   responsibilities; long procedures and reference material belong in
   the underlying engine's skills or project docs, not every role prompt.
 - **Layered prompt contract.** CodeRoom's routing and WorkCard protocol is a
-  built-in kernel layer; `.coderoom/shared.md` and `roles/<role>.md` stay
-  user-owned project and role standards.
+  built-in kernel layer; `.coderoom/shared.md`,
+  `roles/<role>/priors.md`, and `roles/<role>/knowledge/` stay user-owned
+  project and role standards.
 - **Daily journals.** Every role writes an end-of-session log with cited
   evidence. Auto-loaded for the next 7 days.
 - **Patches.** `/patch <role> "..."` saves a session-time correction; the
@@ -169,7 +170,7 @@ that engine's own CLI and try again.
 ```bash
 cd your-project
 cr                              # setup if needed, then enter the room
-$EDITOR .coderoom/roles/host.md # optional: give @host real priors
+$EDITOR .coderoom/roles/host/priors.md # optional: give @host real priors
 
 cr › hello
 [@host ready · model=claude-opus-4-7]

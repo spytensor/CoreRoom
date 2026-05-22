@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use crate::adapter::Engine;
 use crate::config::{CONFIG_FILE, ROLES_DIR};
 use crate::gate::{self, GATE_TEMPLATES_DIR};
+use crate::manifest;
 
 use super::{
     RolePlan, DEFAULT_ENGINE, DEFAULT_GITIGNORE, DEFAULT_HOST_PRIORS, DEFAULT_ROLE_TEMPLATE,
@@ -13,16 +14,19 @@ use super::{
 };
 
 /// Materialize the `.coderoom/` skeleton on disk. Each role gets a
-/// templated priors file with `{ROLE}` substituted.
+/// directory with a templated `priors.md` file and empty `knowledge/`.
 pub(super) fn write_all(coderoom_dir: &Path, roles: &[RolePlan]) -> Result<()> {
-    let roles_dir = coderoom_dir.join(ROLES_DIR);
-    std::fs::create_dir_all(&roles_dir)
-        .with_context(|| format!("creating {}", roles_dir.display()))?;
+    let role_root = coderoom_dir.join(ROLES_DIR);
+    std::fs::create_dir_all(&role_root)
+        .with_context(|| format!("creating {}", role_root.display()))?;
 
     write_file(&coderoom_dir.join(CONFIG_FILE), &render_config(roles))?;
     write_file(&coderoom_dir.join("shared.md"), DEFAULT_SHARED_PRIORS)?;
     for role in roles {
-        let path = roles_dir.join(format!("{}.md", role.name));
+        let role_dir = role_root.join(&role.name);
+        std::fs::create_dir_all(role_dir.join(manifest::KNOWLEDGE_DIR))
+            .with_context(|| format!("creating {}", role_dir.display()))?;
+        let path = role_dir.join(manifest::ROLE_PRIORS_FILE);
         let body = if role.name == "host" {
             DEFAULT_HOST_PRIORS.to_string()
         } else {
@@ -91,7 +95,7 @@ fn render_config(roles: &[RolePlan]) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "# Per-role overrides. Priors live in .coderoom/roles/<name>.md."
+        "# Per-role overrides. Priors live in .coderoom/roles/<name>/priors.md."
     );
     for role in roles {
         let _ = writeln!(out, "[roles.{}]", role.name);

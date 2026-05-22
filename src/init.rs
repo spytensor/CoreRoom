@@ -205,7 +205,8 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     );
     println!(
         "  {}",
-        "next: cr start   ·   edit .coderoom/roles/<role>.md when you want deeper priors".dim()
+        "next: cr start   ·   edit .coderoom/roles/<role>/priors.md when you want deeper priors"
+            .dim()
     );
     Ok(())
 }
@@ -269,7 +270,7 @@ pub fn offer_role_expansion(project_root: &Path, cfg: &Config) -> Result<bool> {
     );
     println!(
         "  {}",
-        "review .coderoom/roles/<role>.md when you want deeper project priors".dark_grey()
+        "review .coderoom/roles/<role>/priors.md when you want deeper project priors".dark_grey()
     );
     Ok(true)
 }
@@ -433,7 +434,11 @@ fn planned_files(coderoom_dir: &Path, roles: &[RolePlan]) -> Vec<PathBuf> {
     ];
     let roles_dir = coderoom_dir.join(ROLES_DIR);
     for role in roles {
-        paths.push(roles_dir.join(format!("{}.md", role.name)));
+        paths.push(
+            roles_dir
+                .join(&role.name)
+                .join(crate::manifest::ROLE_PRIORS_FILE),
+        );
     }
     let gate_templates_dir = coderoom_dir.join(crate::gate::GATE_TEMPLATES_DIR);
     for template in crate::gate::default_templates() {
@@ -490,7 +495,7 @@ fn print_auto_intro(scan: &detect::ProjectScan) {
     );
     println!(
         "  {}",
-        "edit .coderoom/roles/<role>.md later to give each role real priors.".dark_grey()
+        "edit .coderoom/roles/<role>/priors.md later to give each role real priors.".dark_grey()
     );
     println!();
 }

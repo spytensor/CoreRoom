@@ -67,7 +67,7 @@ Architecture sections describe each in isolation. They cohere as a system:
 
 | Guardrail                           | Defends against                                                                       | Mechanism                                                                                                |
 | ----------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Role partitioning                   | `CLAUDE.md` bloat, attention dilution, "this rule only matters to X" non-expressivity | Each role is its own subprocess with its own priors file                                                 |
+| Role partitioning                   | `CLAUDE.md` bloat, attention dilution, "this rule only matters to X" non-expressivity | Each role is its own subprocess with its own priors file and mounted knowledge                           |
 | Citation-mandatory journals         | Self-promoted belief, hallucination drift across sessions                             | Journal entries require a transcript anchor or repo file path; rejected otherwise                        |
 | Pointer SHA anchors                 | Anchor rot — priors quoting code that has moved or changed                            | `[[path#L10-20@sha]]` resolves to current git content at spawn; staleness surfaced by `cr pointers`      |
 | Locked architecture plus amendments | Design drift across months of implementation                                          | `architecture.md` is locked; new ideas land first in `proposed-amendments.md`, then code                 |

@@ -208,9 +208,9 @@ will create:
 ├─ config.toml              3 roles
 ├─ shared.md                project-wide priors
 ├─ roles/
-│  ├─ host.md            claude-code
-│  ├─ backend.md         claude-code
-│  └─ security.md        codex
+│  ├─ host/              claude-code
+│  ├─ backend/           claude-code
+│  └─ security/          codex
 └─ .gitignore
 
   role           engine       focus
@@ -335,7 +335,11 @@ fn init_yes_creates_minimal_valid_layout() {
     assert!(coderoom.is_dir());
     assert!(coderoom.join(CONFIG_FILE).is_file());
     assert!(coderoom.join("shared.md").is_file());
-    assert!(coderoom.join(ROLES_DIR).join("host.md").is_file());
+    assert!(coderoom
+        .join(ROLES_DIR)
+        .join("host")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
+        .is_file());
     assert!(coderoom
         .join(crate::gate::GATE_TEMPLATES_DIR)
         .join("code-review-gate.md")
@@ -472,8 +476,16 @@ fn detected_stack_creates_extra_roles_in_config() {
     assert!(cfg.roles.contains_key("security"));
 
     let coderoom = tmp.path().join(CODEROOM_DIR);
-    assert!(coderoom.join(ROLES_DIR).join("backend.md").is_file());
-    assert!(coderoom.join(ROLES_DIR).join("security.md").is_file());
+    assert!(coderoom
+        .join(ROLES_DIR)
+        .join("backend")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
+        .is_file());
+    assert!(coderoom
+        .join(ROLES_DIR)
+        .join("security")
+        .join(crate::manifest::ROLE_PRIORS_FILE)
+        .is_file());
 }
 
 #[test]
@@ -486,7 +498,8 @@ fn role_template_substitutes_role_name() {
         tmp.path()
             .join(CODEROOM_DIR)
             .join(ROLES_DIR)
-            .join("backend.md"),
+            .join("backend")
+            .join(crate::manifest::ROLE_PRIORS_FILE),
     )
     .unwrap();
     // Template's `{ROLE}` placeholder should be replaced.
@@ -519,8 +532,8 @@ fn planned_files_lists_in_render_order() {
         vec![
             "/tmp/p/.coderoom/config.toml",
             "/tmp/p/.coderoom/shared.md",
-            "/tmp/p/.coderoom/roles/host.md",
-            "/tmp/p/.coderoom/roles/backend.md",
+            "/tmp/p/.coderoom/roles/host/priors.md",
+            "/tmp/p/.coderoom/roles/backend/priors.md",
             "/tmp/p/.coderoom/gate-templates/tier-classify.md",
             "/tmp/p/.coderoom/gate-templates/research-gate.md",
             "/tmp/p/.coderoom/gate-templates/plan-gate.md",

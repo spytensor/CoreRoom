@@ -5,7 +5,8 @@
 //! ```text
 //! .coderoom/
 //! ├── config.toml             # this file
-//! ├── roles/<name>.md         # per-role base priors
+//! ├── roles/<name>/priors.md  # per-role base priors
+//! ├── roles/<name>/knowledge/ # mounted domain documents
 //! ├── shared.md               # priors loaded by every role (optional)
 //! ├── patches/<role>/...      # session-time corrections
 //! └── journal/YYYY-MM-DD/...  # daily learnings, role-written
@@ -232,7 +233,8 @@ impl Config {
     /// 1. TOML parses into the documented shape.
     /// 2. `host_role` is one of the declared roles.
     /// 3. Every declared role has a priors file at
-    ///    `.coderoom/roles/<role>.md`.
+    ///    `.coderoom/roles/<role>/priors.md`, with legacy
+    ///    `.coderoom/roles/<role>.md` still accepted.
     pub fn load(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
         // Delegate to the layered loader. Production code resolves
         // the user-config path from $XDG_CONFIG_HOME / ~/.config etc.;
@@ -258,7 +260,7 @@ impl Config {
 
         for name in self.roles.keys() {
             let priors = priors_path_for(coderoom_dir, name);
-            if !priors.exists() {
+            if !priors.is_file() {
                 return Err(ConfigError::MissingPriors {
                     role: name.clone(),
                     expected: priors,
@@ -323,9 +325,10 @@ impl Config {
 }
 
 /// Path where the priors file for `role` lives, given the project's
-/// `.coderoom/` directory.
+/// `.coderoom/` directory. The directory layout is preferred, while
+/// legacy flat `.md` files remain accepted for back compatibility.
 fn priors_path_for(coderoom_dir: &Path, role: &str) -> PathBuf {
-    coderoom_dir.join(ROLES_DIR).join(format!("{role}.md"))
+    crate::manifest::role_priors_path_for_config(coderoom_dir, role)
 }
 
 #[cfg(test)]

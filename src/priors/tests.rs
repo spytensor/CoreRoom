@@ -2,23 +2,25 @@ use super::*;
 use crate::config::CODEROOM_DIR;
 use pretty_assertions::assert_eq;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 /// Create a `.coderoom/` skeleton with a single role's base priors.
 fn fixture(role: &str, role_body: &str) -> TempDir {
     let tmp = TempDir::new().unwrap();
     let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    fs::write(
-        coderoom.join(ROLES_DIR).join(format!("{role}.md")),
-        role_body,
-    )
-    .unwrap();
+    write_role(&coderoom, role, role_body);
     tmp
 }
 
 fn coderoom_of(tmp: &TempDir) -> PathBuf {
     tmp.path().join(CODEROOM_DIR)
+}
+
+fn write_role(coderoom: &Path, role: &str, role_body: &str) {
+    let role_dir = coderoom.join(ROLES_DIR).join(role);
+    fs::create_dir_all(role_dir.join(crate::manifest::KNOWLEDGE_DIR)).unwrap();
+    fs::write(role_dir.join(crate::manifest::ROLE_PRIORS_FILE), role_body).unwrap();
 }
 
 fn assert_order(haystack: &str, earlier: &str, later: &str) {
@@ -40,10 +42,119 @@ fn role_only_no_optional_pieces() {
     let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
     assert!(composed.starts_with("# CodeRoom kernel protocol"));
     assert!(composed.contains("Authority: protocol"));
-    assert!(composed.contains("Source: .coderoom/roles/backend.md"));
+    assert!(composed.contains("Source: .coderoom/roles/backend/priors.md"));
     assert_order(&composed, "# CodeRoom kernel protocol", "## Role priors");
     assert_order(&composed, "## Role priors", "BACKEND_PRIORS");
     assert!(composed.contains("```cr-task"));
+}
+
+#[test]
+fn legacy_role_priors_still_load_with_warning_source() {
+    let tmp = TempDir::new().unwrap();
+    let coderoom = tmp.path().join(CODEROOM_DIR);
+    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    fs::write(coderoom.join(ROLES_DIR).join("backend.md"), "LEGACY_PRIORS").unwrap();
+
+    let composed = compose_for(&coderoom, "backend").unwrap();
+    assert!(composed.contains("LEGACY_PRIORS"));
+    assert!(composed.contains("Source: .coderoom/roles/backend.md (legacy)"));
+}
+
+#[test]
+fn compose_includes_manifest_knowledge_in_manifest_order() {
+    let tmp = fixture("backend", "BACKEND_PRIORS");
+    let coderoom = coderoom_of(&tmp);
+    let role_dir = coderoom.join(ROLES_DIR).join("backend");
+    let knowledge_dir = role_dir.join(crate::manifest::KNOWLEDGE_DIR);
+    let b_path = knowledge_dir.join("b-runbook.md");
+    let a_path = knowledge_dir.join("a-stack.md");
+    fs::write(&b_path, "B_RUNBOOK").unwrap();
+    fs::write(&a_path, "A_STACK").unwrap();
+    crate::manifest::write_manifest(
+        &role_dir,
+        &crate::manifest::KnowledgeManifest {
+            files: vec![
+                crate::manifest::KnowledgeEntry {
+                    name: "b-runbook.md".to_owned(),
+                    sha256: crate::manifest::sha256_file(&b_path).unwrap(),
+                    attached_at: "2026-05-22T00:00:00Z".to_owned(),
+                },
+                crate::manifest::KnowledgeEntry {
+                    name: "a-stack.md".to_owned(),
+                    sha256: crate::manifest::sha256_file(&a_path).unwrap(),
+                    attached_at: "2026-05-22T00:00:01Z".to_owned(),
+                },
+            ],
+        },
+    )
+    .unwrap();
+
+    let composed = compose_for(&coderoom, "backend").unwrap();
+    assert!(composed.contains("## Role knowledge"));
+    assert!(composed.contains("SHA256:"));
+    assert!(composed.contains("B_RUNBOOK"));
+    assert!(composed.contains("A_STACK"));
+    assert_order(&composed, "### b-runbook.md", "### a-stack.md");
+}
+
+#[test]
+fn compose_scans_unmanifested_knowledge_alphabetically() {
+    let tmp = fixture("backend", "BACKEND_PRIORS");
+    let coderoom = coderoom_of(&tmp);
+    let knowledge_dir = coderoom
+        .join(ROLES_DIR)
+        .join("backend")
+        .join(crate::manifest::KNOWLEDGE_DIR);
+    fs::write(knowledge_dir.join("z.txt"), "Z_DOC").unwrap();
+    fs::write(knowledge_dir.join("a.md"), "A_DOC").unwrap();
+
+    let composed = compose_for(&coderoom, "backend").unwrap();
+    assert_order(&composed, "### a.md", "### z.txt");
+}
+
+#[test]
+fn compose_errors_on_knowledge_manifest_sha_drift() {
+    let tmp = fixture("backend", "BACKEND_PRIORS");
+    let coderoom = coderoom_of(&tmp);
+    let role_dir = coderoom.join(ROLES_DIR).join("backend");
+    let knowledge_dir = role_dir.join(crate::manifest::KNOWLEDGE_DIR);
+    fs::write(knowledge_dir.join("runbook.md"), "CURRENT").unwrap();
+    crate::manifest::write_manifest(
+        &role_dir,
+        &crate::manifest::KnowledgeManifest {
+            files: vec![crate::manifest::KnowledgeEntry {
+                name: "runbook.md".to_owned(),
+                sha256: "0".repeat(64),
+                attached_at: "2026-05-22T00:00:00Z".to_owned(),
+            }],
+        },
+    )
+    .unwrap();
+
+    let err = compose_for(&coderoom, "backend").expect_err("sha mismatch should fail");
+    assert!(format!("{err:#}").contains("manifest drift"));
+}
+
+#[test]
+fn compose_hard_errors_above_size_limit_unless_overridden() {
+    let tmp = fixture(
+        "backend",
+        &"x".repeat(crate::manifest::MAX_COMPOSED_PRIORS_BYTES + 1),
+    );
+    let coderoom = coderoom_of(&tmp);
+
+    let err = compose_for(&coderoom, "backend").expect_err("large priors should fail");
+    assert!(format!("{err:#}").contains("--allow-large-priors"));
+
+    let composed = compose_for_with_options(
+        &coderoom,
+        "backend",
+        ComposeOptions {
+            allow_large_priors: true,
+        },
+    )
+    .unwrap();
+    assert!(composed.contains("## Role priors"));
 }
 
 #[test]
@@ -103,20 +214,12 @@ fn compose_includes_team_roster_for_peer_roles() {
     let tmp = fixture("backend", "# Backend\n\nOwns APIs.");
     let coderoom = coderoom_of(&tmp);
     fs::write(coderoom.join(CONFIG_FILE), "host_role = \"host\"\n").unwrap();
-    fs::write(
-        coderoom.join(ROLES_DIR).join("host.md"),
-        "# Host\n\nRoutes work.",
-    )
-    .unwrap();
-    fs::write(
-        coderoom.join(ROLES_DIR).join("security.md"),
-        "# Security\n\nReviews risk.",
-    )
-    .unwrap();
+    write_role(&coderoom, "host", "# Host\n\nRoutes work.");
+    write_role(&coderoom, "security", "# Security\n\nReviews risk.");
 
     let composed = compose_for(&coderoom, "backend").unwrap();
     assert!(composed.contains("## Team roster"));
-    assert!(composed.contains("Source: .coderoom/roles/*.md"));
+    assert!(composed.contains("Source: .coderoom/roles/*/priors.md"));
     assert!(composed.contains("@host (host): Routes work."));
     assert!(composed.contains("@security: Reviews risk."));
     assert!(!composed.contains("@backend:"));
@@ -479,12 +582,7 @@ fn compose_for_expands_pointer_tokens_with_repo_content() {
     // satisfies the "at least one anchor signal" grammar requirement
     // without us having to hard-code the commit id in the fixture.
     let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    fs::write(
-        coderoom.join(ROLES_DIR).join("backend.md"),
-        "Watch:\n[[watched.rs#L1]]\n",
-    )
-    .unwrap();
+    write_role(&coderoom, "backend", "Watch:\n[[watched.rs#L1]]\n");
 
     let composed = compose_for(&coderoom, "backend").unwrap();
     // The pointer expanded to a code block carrying line 1's content.
@@ -503,12 +601,7 @@ fn compose_for_surfaces_unresolvable_pointer_inline() {
     // pointer would defeat the priors-author's intent of "this
     // matters" without telling the model anything was missing.
     let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    fs::write(
-        coderoom.join(ROLES_DIR).join("backend.md"),
-        "Reference:\n[[gone.rs@deadbeef]]\n",
-    )
-    .unwrap();
+    write_role(&coderoom, "backend", "Reference:\n[[gone.rs@deadbeef]]\n");
 
     let composed = compose_for(&coderoom, "backend").unwrap();
     // The pointer's status surfaces in the composed prompt so the
