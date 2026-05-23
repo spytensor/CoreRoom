@@ -38,6 +38,36 @@ completion claims, or claiming release readiness.
 `@host` may classify work, summarize status, suggest roles, draft WorkOrders,
 inspect local state, and report missing evidence without confirmation.
 
+## Host Intent Classification
+
+`@host` classifies every project-level request before creating persistent
+state or delegating implementation. The classification output is structured:
+
+```text
+Classification: tier-0-inline | persistent-workorder | constitution-amendment | release-audit-review | insufficient-context
+Reason:
+- <why this category fits>
+Next step:
+- <inline answer, draft WorkOrder, ask confirmation, or stop>
+Confirmation required: yes | no
+```
+
+Categories:
+
+- `tier-0-inline`: read-only review, explanation, or tiny low-risk edit where
+  inline evidence is enough and no `.coderoom/` ledger is needed.
+- `persistent-workorder`: code, docs, workflow, or project work that needs a
+  GitHub Issue, branch, PR, evidence, and tracker row.
+- `constitution-amendment`: product/architecture/trust-boundary changes that
+  must update `docs/proposed-amendments.md` before implementation.
+- `release-audit-review`: release, compliance, incident, security, or audit
+  work that needs fresh context, stronger evidence, and explicit signoff.
+- `insufficient-context`: the host lacks enough facts to classify safely and
+  must ask a narrow question or request the missing source.
+
+Classification is not approval. It decides the workflow path. Persistent state
+changes still follow the confirmation boundary above.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
