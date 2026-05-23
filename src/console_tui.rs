@@ -24,6 +24,7 @@ use ratatui::{Frame, Terminal};
 
 use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
+use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
     ConversationVisibility, CoreRoomSnapshot, DirtyState, HealthSeverity, StatusState,
     WorkLifecycle,
@@ -174,10 +175,94 @@ fn render_body(
             .split(area)
     };
 
-    render_conversation(frame, chunks[0], snapshot);
+    render_center(frame, chunks[0], snapshot);
     if let Some(rail) = right_rail.filter(|_| has_rail) {
         render_right_rail(frame, chunks[1], rail);
     }
+}
+
+fn render_center(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(11), Constraint::Min(8)])
+        .split(area);
+    let overview = build_console_overview(snapshot);
+    render_overview(frame, chunks[0], &overview);
+    render_conversation(frame, chunks[1], snapshot);
+}
+
+fn render_overview(frame: &mut Frame<'_>, area: Rect, overview: &ConsoleOverview) {
+    let header = &overview.header;
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Host ", label_style()),
+            Span::raw(format!("@{}  ", header.host_role)),
+            Span::styled("Branch ", label_style()),
+            Span::raw(header.branch.clone()),
+            Span::raw("  "),
+            dirty_span(header.dirty_state),
+        ]),
+        Line::from(vec![
+            Span::styled("Phase ", label_style()),
+            Span::raw(header.phase.clone()),
+            Span::raw("  "),
+            Span::styled("Tracker ", label_style()),
+            Span::raw(format!("#{}", header.tracker_issue)),
+            Span::raw("  "),
+            Span::styled("GitHub ", label_style()),
+            Span::raw(format!(
+                "{} issues / {} PRs / {} failing",
+                header.open_issues, header.open_pull_requests, header.failing_checks
+            )),
+        ]),
+        Line::raw(""),
+    ];
+    for pulse in &overview.pulses {
+        lines.push(pulse_line(pulse));
+    }
+    if let Some(alert) = overview.alerts.first() {
+        lines.push(Line::from(vec![
+            Span::styled("Alert ", Style::default().fg(Color::Red)),
+            Span::raw(alert.title.clone()),
+            Span::styled(
+                format!(" [{}]", alert.source),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Overview"))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn pulse_line(pulse: &OverviewPulse) -> Line<'_> {
+    Line::from(vec![
+        Span::styled(
+            format!("{:<10}", pulse.label),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::raw(format!("total {:>2}  ", pulse.total)),
+        Span::styled(
+            format!("ok {:>2}  ", pulse.ok),
+            Style::default().fg(Color::Green),
+        ),
+        Span::styled(
+            format!("warn {:>2}  ", pulse.warn),
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!("block {:>2}  ", pulse.blocking),
+            Style::default().fg(Color::Red),
+        ),
+        Span::styled(
+            format!("unknown {:>2}", pulse.unknown),
+            Style::default().fg(Color::Gray),
+        ),
+    ])
 }
 
 fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
@@ -194,18 +279,6 @@ fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSna
             Style::default().fg(Color::DarkGray),
         ),
     ]));
-    for work in snapshot.work.iter().take(3) {
-        lines.push(Line::from(vec![
-            Span::styled(work.id.clone(), Style::default().fg(Color::Cyan)),
-            Span::raw(" "),
-            Span::styled(
-                lifecycle_label(work.lifecycle),
-                status_style(work.tracker_state),
-            ),
-            Span::raw(" "),
-            Span::raw(work.title.clone()),
-        ]));
-    }
     lines.push(Line::raw(""));
     for turn in snapshot.conversation.public_turns.iter().filter(|turn| {
         matches!(
@@ -400,19 +473,6 @@ impl Drop for ConsoleTerminalGuard {
     fn drop(&mut self) {
         let _ = write_leave_commands(io::stdout());
         let _ = terminal::disable_raw_mode();
-    }
-}
-
-fn lifecycle_label(state: WorkLifecycle) -> &'static str {
-    match state {
-        WorkLifecycle::NotStarted => "not-started",
-        WorkLifecycle::Ready => "ready",
-        WorkLifecycle::InProgress => "in-progress",
-        WorkLifecycle::InReview => "in-review",
-        WorkLifecycle::FailedCi => "failed-ci",
-        WorkLifecycle::Blocked => "blocked",
-        WorkLifecycle::MergedTrackerStale => "merged-tracker-stale",
-        WorkLifecycle::Closed => "closed",
     }
 }
 
