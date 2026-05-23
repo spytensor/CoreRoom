@@ -1,0 +1,17 @@
+schemaVersion = 1
+status = "incomplete"
+workOrder = "WO-0210"
+githubIssue = 210
+branch = "feat/v0.6-210-evidence-packet-model"
+gateThread = "thread-evidence-packet"
+rollback = "TBD"
+unverifiedItems = ["PR number and CI status are not available yet."]
+
+[[changedFiles]]
+path = "src/evidence_packet.rs"
+summary = "Draft Evidence Packet model."
+
+[trackerUpdate]
+trackerIssue = 202
+checkboxUpdated = false
+evidenceLedgerUpdated = false

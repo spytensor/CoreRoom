@@ -19,6 +19,7 @@ pub mod crep;
 pub mod detect;
 pub mod doctor;
 pub mod engines;
+pub mod evidence_packet;
 pub mod gate;
 pub mod image_paths;
 pub mod init;

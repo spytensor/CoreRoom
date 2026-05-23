@@ -223,6 +223,60 @@ also produces a warning.
 Target roles must be included in the source's `visibleRoles`. No role receives
 every source by default.
 
+## Evidence Packets
+
+Evidence Packets are WorkOrder-scoped completion records stored under
+`.coderoom/evidence/<workOrder>.toml`. They let `@host` generate PR-ready
+summaries from structured evidence instead of trusting model prose.
+
+The persisted Evidence Packet schema uses camelCase keys:
+
+```toml
+schemaVersion = 1
+status = "complete"
+workOrder = "WO-0204"
+githubIssue = 204
+branch = "feat/v0.6-204-host-authority-protocol"
+pullRequest = 220
+gateThread = "thread-host-protocol"
+rollback = "Revert PR #220; no migration included."
+unverifiedItems = ["No CI API polling in v0.6; status copied from PR checks."]
+
+[[changedFiles]]
+path = "docs/sdlc-gates.md"
+summary = "Document host authority protocol."
+
+[[commandsRun]]
+command = "cargo test role::tests --quiet"
+result = "pass"
+evidence = "role tests passed"
+
+[[testResults]]
+name = "GitHub CI"
+result = "pass"
+evidence = "rustfmt, shellcheck, clippy, macOS tests, Ubuntu tests passed"
+
+[[roleReviews]]
+role = "host"
+decision = "accepted"
+evidence = "A-017 accepted by user"
+
+[[risks]]
+level = "low"
+description = "Docs and priors only; no state migration."
+
+[trackerUpdate]
+trackerIssue = 202
+checkboxUpdated = true
+evidenceLedgerUpdated = true
+milestoneAcUpdated = ["M-AC-2"]
+```
+
+Completion requires structured evidence for changed files, commands, tests,
+role reviews, risks, rollback, PR binding, tracker checkbox, and Evidence
+Ledger updates. Missing evidence keeps the packet `incomplete`. `unverifiedItems`
+must explicitly name what was not checked.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline

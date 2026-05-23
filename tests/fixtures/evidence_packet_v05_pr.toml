@@ -1,0 +1,38 @@
+schemaVersion = 1
+status = "complete"
+workOrder = "WO-0204"
+githubIssue = 204
+branch = "feat/v0.6-204-host-authority-protocol"
+pullRequest = 220
+gateThread = "thread-host-protocol"
+rollback = "Revert PR #220; no migration included."
+unverifiedItems = ["No CI API polling in v0.6; status copied from PR checks."]
+
+[[changedFiles]]
+path = "docs/sdlc-gates.md"
+summary = "Document host authority protocol."
+
+[[commandsRun]]
+command = "cargo test role::tests --quiet"
+result = "pass"
+evidence = "role tests passed"
+
+[[testResults]]
+name = "GitHub CI"
+result = "pass"
+evidence = "rustfmt, shellcheck, clippy, macOS tests, Ubuntu tests passed"
+
+[[roleReviews]]
+role = "host"
+decision = "accepted"
+evidence = "A-017 accepted by user"
+
+[[risks]]
+level = "low"
+description = "Docs and priors only; no state migration."
+
+[trackerUpdate]
+trackerIssue = 202
+checkboxUpdated = true
+evidenceLedgerUpdated = true
+milestoneAcUpdated = ["M-AC-2"]
