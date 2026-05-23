@@ -18,6 +18,7 @@ pub mod console_layout;
 pub mod console_projection;
 pub mod console_snapshot;
 pub mod console_state;
+pub mod console_tui;
 pub mod context_pack;
 pub mod conversation_visibility;
 pub mod cost;

@@ -12,6 +12,7 @@
 //! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH] [--allow-large-priors]` — enter the REPL
+//! - `cr console --snapshot PATH` — enter the v0.9 read-only full-screen console
 //! - `cr prompt show <role>`     — print a role's effective prompt
 //! - `cr lock`                   — regenerate `.coreroom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
@@ -107,6 +108,12 @@ enum Cmd {
         /// Allow composed role priors above the 500KB hard limit.
         #[arg(long)]
         allow_large_priors: bool,
+    },
+    /// Enter the v0.9 read-only full-screen console from a snapshot file.
+    Console {
+        /// TOML CoreRoomSnapshot file to render.
+        #[arg(long)]
+        snapshot: PathBuf,
     },
     /// Replay `.coreroom/messages.jsonl` through the live renderer.
     Show {
@@ -750,6 +757,7 @@ fn main() -> Result<()> {
                 | Cmd::Config { .. }
                 | Cmd::Prompt { .. }
                 | Cmd::Gate { .. }
+                | Cmd::Console { .. }
                 | Cmd::Doctor { .. }
                 | Cmd::Update
                 | Cmd::Upgrade
@@ -793,6 +801,7 @@ fn main() -> Result<()> {
             fresh,
             allow_large_priors,
         }) => run_start(project, yolo, fresh, allow_large_priors),
+        Some(Cmd::Console { snapshot }) => coreroom::console_tui::run_snapshot_console(&snapshot),
         Some(Cmd::Show {
             project,
             role,
