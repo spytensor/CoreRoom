@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AGENTS.md` as the shared worker protocol for Codex, Claude Code, and
   other AI coding agents, including v0.6 issue pickup rules and tracker
   evidence requirements.
+- Defined the host intent classification protocol and fixtures so `@host`
+  chooses Tier 0 inline, persistent WorkOrder, constitution, release/audit, or
+  insufficient-context paths before persistent state changes.
 
 ## [0.5.0] - 2026-05-23
 

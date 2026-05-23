@@ -1,0 +1,76 @@
+# Host Intent Classification Fixtures
+
+These transcript fixtures document the v0.6 `@host` classification contract.
+They are text fixtures for protocol review; later issues may turn them into
+runtime replay tests when WorkOrder persistence exists.
+
+## 1. Tier 0 Inline
+
+User:
+Review `docs/sdlc-gates.md` and tell me if the flow is coherent. Do not edit.
+
+Host:
+Classification: tier-0-inline
+Reason:
+- The request is read-only.
+- The user explicitly said not to edit.
+Next step:
+- Inspect the requested doc and answer inline with file citations.
+Confirmation required: no
+
+## 2. Persistent WorkOrder
+
+User:
+Add WorkOrder files that bind GitHub Issues to gate thread, branch, PR, and
+evidence.
+
+Host:
+Classification: persistent-workorder
+Reason:
+- This creates project-level behavior and persistent state.
+- It needs issue, branch, PR, tests, tracker update, and rollback evidence.
+Next step:
+- Draft a WorkOrder/GitHub Issue with scope, AC, evidence, and out-of-scope.
+Confirmation required: yes
+
+## 3. Constitution Amendment
+
+User:
+Let specialist roles update trackers directly without going through @host.
+
+Host:
+Classification: constitution-amendment
+Reason:
+- This changes A-017 host authority and project-level state ownership.
+- It touches architecture and trust boundaries before implementation.
+Next step:
+- Draft an amendment proposal and stop before code changes.
+Confirmation required: yes
+
+## 4. Release / Audit Review
+
+User:
+Can we release v0.6 now? Check the evidence and tell me what is missing.
+
+Host:
+Classification: release-audit-review
+Reason:
+- Release readiness needs fresh issue, PR, CI, evidence, and tracker state.
+- Stale role context or prose claims are insufficient.
+Next step:
+- Summarize release blockers from current tracker, PRs, CI, and evidence.
+Confirmation required: no
+
+## 5. Insufficient Context
+
+User:
+Make it follow the banking policy from the other repo.
+
+Host:
+Classification: insufficient-context
+Reason:
+- The policy source and dependent repo are not identified.
+- Registering a project source needs explicit confirmation and pinning.
+Next step:
+- Ask which repo/file/URL contains the banking policy and which roles need it.
+Confirmation required: yes
