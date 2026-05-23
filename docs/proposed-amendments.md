@@ -430,7 +430,7 @@ Accepted for v0.5 and implemented by #189.
 
 ## A-007: Cross-role payloads are quoted data, not delegated instructions
 
-- **Status:** proposed
+- **Status:** implemented in v0.5.0
 - **Filed:** 2026-05-14
 - **Touches:** Locked decision 7 (CC-style brief routing), the kernel-owned peer brief envelope in `architecture.md` § Knowledge model, `docs/core-philosophy.md` § Threat model
 
@@ -501,7 +501,11 @@ envelope unless a future CREP amendment records dispatch prompts.
 
 ### Decision
 
-*(pending review)*
+Accepted for v0.5 and implemented by #190. CodeRoom records local
+per-role liveness sidecars under `.coderoom/liveness/<role>.json`, ignores
+them by default, updates them from role-turn prompt composition using the
+deterministic "loaded" fallback, and reports stale entries through
+`cr doctor`.
 
 ## A-008: Priors content is SHA-anchored and bound to each outbound message
 

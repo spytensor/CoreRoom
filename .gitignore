@@ -23,6 +23,7 @@
 /.coderoom/transcripts/
 /.coderoom/messages.jsonl
 /.coderoom/sessions/
+/.coderoom/liveness/
 
 # This repo IS coderoom's source — devs running `cr start` here for
 # dogfooding will auto-bootstrap a `.coderoom/` whose roles/configs

@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use crate::adapter::{Engine, PermissionMode};
 use crate::config::{AuthorityScope, Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
 use crate::config_layered::ProjectConfigRaw;
-use crate::manifest;
+use crate::{liveness, manifest};
 
 /// Default body for a freshly-scaffolded role priors file. Users are
 /// expected to replace this with project-specific guidance.
@@ -140,7 +140,7 @@ pub fn detach(project_root: &Path, name: &str, doc_name: &str) -> Result<()> {
 }
 
 /// List a role's attached knowledge documents.
-pub fn knowledge(project_root: &Path, name: &str) -> Result<()> {
+pub fn knowledge(project_root: &Path, name: &str, with_liveness: bool) -> Result<()> {
     let name = name.strip_prefix('@').unwrap_or(name);
     validate_name(name)?;
     let coderoom_dir = project_root.join(CODEROOM_DIR);
@@ -154,17 +154,52 @@ pub fn knowledge(project_root: &Path, name: &str) -> Result<()> {
         println!("(no knowledge attached for @{name})");
         return Ok(());
     }
+    let liveness_doc = if with_liveness {
+        Some(liveness::read(&coderoom_dir, name)?)
+    } else {
+        None
+    };
+
     println!("@{name} knowledge:");
-    println!("{:<28} {:<64} last-modified", "name", "sha256");
-    for entry in entries {
+    if with_liveness {
         println!(
-            "{:<28} {:<64} {}",
-            entry.entry.name,
-            entry.entry.sha256,
-            entry.modified_at.as_deref().unwrap_or("(missing)")
+            "{:<28} {:>6} {:<20} {:<64} last-modified",
+            "name", "hits", "last-loaded", "sha256"
         );
+    } else {
+        println!("{:<28} {:<64} last-modified", "name", "sha256");
+    }
+    for entry in entries {
+        if let Some(doc) = &liveness_doc {
+            let segment = doc
+                .segments
+                .get(&liveness::knowledge_segment_path(name, &entry.entry.name));
+            let hits = segment.map_or(0, |segment| segment.hit_count);
+            let last_loaded = segment
+                .and_then(|segment| segment.last_matched_at.as_deref())
+                .unwrap_or("-");
+            println!(
+                "{:<28} {:>6} {:<20} {:<64} {}",
+                entry.entry.name,
+                hits,
+                truncate_timestamp(last_loaded),
+                entry.entry.sha256,
+                entry.modified_at.as_deref().unwrap_or("(missing)")
+            );
+        } else {
+            println!(
+                "{:<28} {:<64} {}",
+                entry.entry.name,
+                entry.entry.sha256,
+                entry.modified_at.as_deref().unwrap_or("(missing)")
+            );
+        }
     }
     Ok(())
+}
+
+fn truncate_timestamp(value: &str) -> &str {
+    value.get(..20).unwrap_or(value)
 }
 
 /// Add several roles in one config write. Priors files are created

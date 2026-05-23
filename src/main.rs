@@ -7,7 +7,7 @@
 //! - `cr role list`              — list configured roles
 //! - `cr role show <name>`        — show role identity and authority
 //! - `cr role attach <name> <file> [--name alias]` — mount role knowledge
-//! - `cr role knowledge <name>`   — list mounted role knowledge
+//! - `cr role knowledge <name> [--with-liveness]` — list mounted role knowledge
 //! - `cr role set-owner <name> <owner>` — set role owner
 //! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
@@ -16,7 +16,7 @@
 //! - `cr lock`                   — regenerate `.coderoom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
 //! - `cr gate ...`               — inspect SDLC gate ledgers
-//! - `cr doctor [--fix]`         — inspect CodeRoom project files
+//! - `cr doctor [--fix] [--stale-days N]` — inspect CodeRoom project files
 //! - `cr show [--role ROLE] [--since YYYY-MM-DD] [--tail N]` — replay events
 //! - `cr cost [--since YYYY-MM-DD]` — summarize reported engine spend
 
@@ -198,6 +198,9 @@ switch to `@HEAD` when you've reviewed the new content.")]
         /// Apply exact safe fixes.
         #[arg(long)]
         fix: bool,
+        /// Priors liveness stale threshold.
+        #[arg(long, default_value_t = coderoom::liveness::DEFAULT_STALE_DAYS)]
+        stale_days: i64,
     },
     /// Check the npm registry for a newer `cr` and report the diff.
     /// Read-only — does not touch the installed binary. Run
@@ -280,6 +283,9 @@ enum RoleCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
+        /// Include local liveness telemetry for each mounted file.
+        #[arg(long)]
+        with_liveness: bool,
     },
     /// Remove a role (refuses for the configured host).
     Rm {
@@ -809,9 +815,13 @@ fn main() -> Result<()> {
         Some(Cmd::Config { command }) => run_config_cmd(command),
         Some(Cmd::Prompt { command }) => run_prompt_cmd(command),
         Some(Cmd::Gate { command }) => run_gate_cmd(command),
-        Some(Cmd::Doctor { project, fix }) => {
+        Some(Cmd::Doctor {
+            project,
+            fix,
+            stale_days,
+        }) => {
             let root = project_root_or_cwd(project)?;
-            coderoom::doctor::run(&root, coderoom::doctor::DoctorOptions { fix })
+            coderoom::doctor::run(&root, coderoom::doctor::DoctorOptions { fix, stale_days })
         }
         Some(Cmd::Update) => coderoom::update::check(),
         Some(Cmd::Upgrade) => coderoom::update::upgrade(),
@@ -850,7 +860,10 @@ fn run_prompt_cmd(cmd: PromptCmd) -> Result<()> {
         } => coderoom::prompt_cmd::show_with_options(
             &project_root_or_cwd(project)?,
             &role,
-            coderoom::priors::ComposeOptions { allow_large_priors },
+            coderoom::priors::ComposeOptions {
+                allow_large_priors,
+                ..Default::default()
+            },
         ),
     }
 }
@@ -1430,9 +1443,11 @@ fn run_role_cmd(cmd: RoleCmd) -> Result<()> {
             name,
             project,
         } => coderoom::role::detach(&project_root_or_cwd(project)?, &role, &name),
-        RoleCmd::Knowledge { role, project } => {
-            coderoom::role::knowledge(&project_root_or_cwd(project)?, &role)
-        }
+        RoleCmd::Knowledge {
+            role,
+            project,
+            with_liveness,
+        } => coderoom::role::knowledge(&project_root_or_cwd(project)?, &role, with_liveness),
         RoleCmd::Rm { name, project } => coderoom::role::rm(&project_root_or_cwd(project)?, &name),
         RoleCmd::Host { name, project } => {
             coderoom::role::set_host(&project_root_or_cwd(project)?, &name)

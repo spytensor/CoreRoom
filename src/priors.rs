@@ -123,6 +123,8 @@ The runtime appends the current `turn_id` and `thread_id` to each prompt. For co
 pub struct ComposeOptions {
     /// Allow composed priors above the hard size limit.
     pub allow_large_priors: bool,
+    /// Record loaded priors segments in local liveness telemetry.
+    pub record_liveness: bool,
 }
 
 /// One content-addressed layer that contributes to a role's identity lock.
@@ -344,6 +346,10 @@ pub fn compose_for_with_options(
 
     out.push('\n');
     enforce_composed_size(role_name, &out, options)?;
+    if options.record_liveness {
+        let layers = lock_layers_for_role(coderoom_dir, role_name)?;
+        crate::liveness::record_loaded(coderoom_dir, role_name, &layers)?;
+    }
     Ok(out)
 }
 
