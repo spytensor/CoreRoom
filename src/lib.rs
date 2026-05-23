@@ -29,6 +29,7 @@ pub mod init;
 pub mod liveness;
 pub mod lock;
 pub mod manifest;
+pub mod observation;
 pub mod output;
 pub(crate) mod peer_quote;
 pub mod permissions;

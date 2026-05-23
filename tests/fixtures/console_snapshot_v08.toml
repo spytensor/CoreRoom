@@ -193,12 +193,46 @@ title = "Merged work cannot be claimed complete while tracker evidence is stale"
 source = "work:WO-0206"
 nextAction = "Update tracker checkbox and Evidence Ledger before closure."
 
+[[alerts.observations]]
+id = "obs-wo-0206-tracker-stale"
+summary = "PR #222 is represented as merged but the tracker row remains stale."
+authority = "evidence-packet"
+
+[alerts.observations.freshness]
+state = "unknown"
+missingReason = "Fixture models stale tracker behavior without live GitHub polling."
+
+[[alerts.observations.citations]]
+kind = "evidence-claim"
+workOrder = "WO-0206"
+evidencePacket = "WO-0206"
+commit = "fixture-merged-commit"
+source = "tracker:#202"
+
 [[alerts]]
 id = "mock-source-stale"
 severity = "warn"
 title = "README console mock must be regenerated from current snapshot model"
 source = "source:readme-console-mock"
 nextAction = "Handle in #250 after view model fixtures are stable."
+
+[[alerts.observations]]
+id = "obs-readme-console-mock-stale"
+summary = "Generated README console mock predates the current snapshot contract."
+authority = "source-graph"
+
+[alerts.observations.freshness]
+state = "stale"
+observedAt = "2026-05-23T20:00:00Z"
+maxAgeSeconds = 3600
+
+[[alerts.observations.citations]]
+kind = "source-drift"
+sourceId = "readme-console-mock"
+pin = "stash:wip-v0.9-console-mockup"
+findingKind = "file-hash-changed"
+trustLevel = "generated"
+observedAt = "2026-05-23T20:00:00Z"
 
 [layout]
 primaryPane = "conversation"

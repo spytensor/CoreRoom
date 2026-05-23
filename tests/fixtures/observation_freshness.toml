@@ -1,0 +1,82 @@
+[[observations]]
+id = "obs-github-ci-fresh"
+summary = "GitHub CI checks for PR #271 were observed directly from GitHub."
+authority = "github"
+
+[observations.freshness]
+state = "fresh"
+observedAt = "2026-05-23T20:10:01Z"
+maxAgeSeconds = 3600
+
+[[observations.citations]]
+kind = "github"
+issue = 242
+pullRequest = 271
+checkUrl = "https://github.com/spytensor/CoreRoom/actions/runs/26342351379/job/77546466831"
+headSha = "938b8f2ce4375bc881a675ca69ec05e5d09752ac"
+observedAt = "2026-05-23T20:10:01Z"
+
+[[observations]]
+id = "obs-local-validation-fresh"
+summary = "Local validation passed but is explicitly not GitHub CI."
+authority = "local-validation"
+
+[observations.freshness]
+state = "fresh"
+observedAt = "2026-05-23T20:07:00Z"
+maxAgeSeconds = 3600
+
+[[observations.citations]]
+kind = "local-validation"
+command = "cargo test --test console_snapshot_test --quiet"
+result = "pass"
+runner = "local-codex-worktree"
+observedAt = "2026-05-23T20:07:00Z"
+
+[[observations]]
+id = "obs-source-drift-stale"
+summary = "Generated console mock source drifted from the pinned fixture."
+authority = "source-graph"
+
+[observations.freshness]
+state = "stale"
+observedAt = "2026-05-23T20:00:00Z"
+maxAgeSeconds = 1800
+
+[[observations.citations]]
+kind = "source-drift"
+sourceId = "readme-console-mock"
+pin = "stash:wip-v0.9-console-mockup"
+findingKind = "file-hash-changed"
+trustLevel = "generated"
+observedAt = "2026-05-23T20:00:00Z"
+
+[[observations]]
+id = "obs-evidence-freshness-missing"
+summary = "Evidence packet claim exists but did not capture a freshness timestamp."
+authority = "evidence-packet"
+
+[observations.freshness]
+state = "missing"
+missingReason = "Evidence Packet was written before observation timestamps existed."
+
+[[observations.citations]]
+kind = "evidence-claim"
+workOrder = "WO-0243"
+evidencePacket = "WO-0243"
+missingFreshness = "Packet has no observedAt timestamp."
+
+[[observations]]
+id = "obs-generated-unknown"
+summary = "Generated README image freshness is unknown until #250 regenerates it."
+authority = "generated"
+
+[observations.freshness]
+state = "unknown"
+missingReason = "Generated image currently lives in a stash and has no committed artifact timestamp."
+
+[[observations.citations]]
+kind = "generated"
+artifact = "docs/images/control-room-console.png"
+source = "stash:wip-v0.9-console-mockup"
+missingFreshness = "Artifact is not committed yet."

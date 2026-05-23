@@ -6,6 +6,8 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::observation::Observation;
+
 /// Current console snapshot schema version.
 pub const CONSOLE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
@@ -531,13 +533,23 @@ pub struct HealthSignal {
     /// Recommended next action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_action: Option<String>,
+    /// Observations/citations that make this signal explainable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<Observation>,
 }
 
 impl HealthSignal {
     fn validate(&self) -> Result<()> {
         ensure_nonempty("alert.id", &self.id)?;
         ensure_nonempty("alert.title", &self.title)?;
-        ensure_nonempty("alert.source", &self.source)
+        ensure_nonempty("alert.source", &self.source)?;
+        if self.observations.is_empty() {
+            bail!("alert `{}` must include at least one observation", self.id);
+        }
+        for observation in &self.observations {
+            observation.validate()?;
+        }
+        Ok(())
     }
 }
 
