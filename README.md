@@ -1,9 +1,9 @@
 # CodeRoom
 
-> A coordination shell for multi-role agent CLI sessions in a single chat-style
-> terminal. Each role is a separate `claude` / `codex` / `gemini` subprocess,
-> loaded with its own priors, addressed via `@`-mention. Cross-role messages
-> route automatically.
+> Engineering Control Room for AI-assisted software delivery: a host-led
+> multi-agent CLI that coordinates `claude` / `codex` / `gemini` roles through
+> GitHub issue discipline, SDLC gates, role priors, and evidence-based PR
+> workflow.
 
 [![CI](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -23,6 +23,10 @@
 > `cr init --preset team`, role owners and scoped authority, role
 > knowledge mounts, plan sign-off vetoes, Claude hook scaffolding,
 > priors locking, and stale-priors liveness checks.
+> **v0.6.0** is being designed as the Engineering Control Room turn:
+> `@host` becomes the user-facing engineering control role, with GitHub
+> issue driven work, dependency context, evidence packets, and mandatory
+> tracker closure.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -32,15 +36,22 @@ conventions, one-off compliance rules, and decisions buried in commit messages
 or comments, one file forces three problems: bloat, attention dilution, and
 no way to express "this rule only matters to backend".
 
-CodeRoom partitions organizational knowledge by role. Each role is a separate
-agent CLI subprocess loaded with its own priors. The user `@`-mentions roles
-to address them. Cross-role routing happens when one role writes an explicit
+CodeRoom partitions organizational knowledge by role, then makes `@host` the
+user-facing control point for turning intent into scoped work, review, evidence,
+and completion. Each specialist role is a separate agent CLI subprocess loaded
+with its own priors. Cross-role routing happens when one role writes an explicit
 delegation line like `@x: <brief>` in its reply.
 
 ## What you get
 
 - **Role-pinned engines.** `@backend` can run on `claude`, `@security` on
   `codex`, `@frontend` on `gemini`. No other tool does this today.
+- **Host-led engineering control.** `@host` is the front door for intake,
+  classification, role delegation, gate progression, evidence collection, and
+  tracker closure.
+- **GitHub issue discipline.** Work that needs persistence belongs in issues,
+  branches, PRs, validation evidence, and milestone trackers, not transient
+  chat claims.
 - **One chat stream, not split panes.** Single message log per project,
   colored by role.
 - **Short role priors by default.** Generated roles start with compact
@@ -72,8 +83,10 @@ hook scaffolding, [docs/architecture.md](docs/architecture.md) for the v0.1 cons
 the v0.2 amendment, [docs/v0.4-calm-cli-ui.md](docs/v0.4-calm-cli-ui.md)
 for the v0.4 live-surface contract, [docs/threat-model.md](docs/threat-model.md)
 for routing / permission / resume trust boundaries, [docs/sdlc-gates.md](docs/sdlc-gates.md)
-for host-led SDLC gate ledgers, and [docs/spike-2026-05-09.md](docs/spike-2026-05-09.md)
-for the feasibility spike that grounds the whole project.
+for host-led SDLC gate ledgers, [docs/proposed-amendments.md](docs/proposed-amendments.md)
+for accepted positioning and architecture amendments, and
+[docs/spike-2026-05-09.md](docs/spike-2026-05-09.md) for the feasibility spike
+that grounds the whole project.
 
 ## Install
 

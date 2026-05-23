@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Reframed public positioning toward an Engineering Control Room for
+  AI-assisted software delivery. v0.6 keeps the existing `codeRoom` repo,
+  `cr` binary, and `@spytensor/coderoom` package while documenting the product
+  direction and deferring any rename implementation to v0.7.
+
 ## [0.5.0] - 2026-05-23
 
 ### Added
