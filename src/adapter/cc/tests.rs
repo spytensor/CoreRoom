@@ -9,7 +9,7 @@ fn fingerprint_is_stable_for_same_input() {
     let a = fingerprint("hello world");
     let b = fingerprint("hello world");
     assert_eq!(a, b);
-    assert!(a.starts_with("dh1:"));
+    assert!(a.starts_with("sha256:"));
 }
 
 #[test]
@@ -53,6 +53,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
         dedupe_work_title_for_turn(
             CrepEvent::WorkTitle {
                 role: "security".into(),
+                priors_hash: String::new(),
                 title: "Scan permissions".into(),
                 turn_id: "t-1".into(),
                 thread_id: "th-1".into(),
@@ -65,6 +66,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
     assert!(dedupe_work_title_for_turn(
         CrepEvent::WorkTitle {
             role: "security".into(),
+            priors_hash: String::new(),
             title: "Scan permissions again".into(),
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
@@ -77,6 +79,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
         dedupe_work_title_for_turn(
             CrepEvent::RoleSpoke {
                 role: "security".into(),
+                priors_hash: String::new(),
                 text: "done".into(),
                 mentions: vec![],
                 cost_usd: 0.0,
@@ -98,6 +101,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
         dedupe_work_title_for_turn(
             CrepEvent::WorkTitle {
                 role: "security".into(),
+            priors_hash: String::new(),
                 title: "Next turn".into(),
                 turn_id: "t-2".into(),
                 thread_id: "th-1".into(),
@@ -114,6 +118,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
         dedupe_work_title_for_turn(
             CrepEvent::WorkTitle {
                 role: "security".into(),
+                priors_hash: String::new(),
                 title: "Reused turn id".into(),
                 turn_id: "t-1".into(),
                 thread_id: "th-1".into(),
@@ -367,6 +372,7 @@ fn translate_assistant_text_yields_work_title_before_tool_use() {
         events[0],
         CrepEvent::WorkTitle {
             role: "security".into(),
+            priors_hash: String::new(),
             title: "Inspect permissions".into(),
             turn_id: String::new(),
             thread_id: String::new(),

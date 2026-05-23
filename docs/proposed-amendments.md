@@ -308,7 +308,7 @@ should keep that in mind.
 
 ## A-006: Resume the prior session by default; `--fresh` opts out
 
-- **Status:** proposed
+- **Status:** implemented in v0.5.0
 - **Filed:** 2026-05-11
 - **Touches:** v0.1 implicit behaviour: each `cr start` was a fresh engine session per role. README "Quickstart" and "Useful commands". Adapter contract (`RoleConfig`).
 
@@ -426,7 +426,7 @@ with `cr start --fresh`.
 
 ### Decision
 
-*(pending review)*
+Accepted for v0.5 and implemented by #189.
 
 ## A-007: Cross-role payloads are quoted data, not delegated instructions
 

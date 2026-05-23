@@ -943,6 +943,7 @@ async fn approval_response_with_event(
         let _ = events
             .send(CrepEvent::PermissionDenied {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_name: tool.to_owned(),
                 tool_input: input.clone(),
                 reason: reason.to_owned(),
@@ -1090,6 +1091,7 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
             }
             Some(CrepEvent::ToolCallProposed {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_name: "Bash".to_owned(),
                 tool_input: Value::Object(tool_input),
                 tool_use_id: call_id,
@@ -1128,6 +1130,7 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
                 );
             Some(CrepEvent::ToolCallExecuted {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_use_id: call_id,
                 ok,
                 output_summary: summary.chars().take(200).collect(),
@@ -1147,6 +1150,7 @@ fn codex_notification_to_event(role: &str, value: &Value) -> Option<CrepEvent> {
             }
             Some(CrepEvent::RoleOutputDelta {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 text_delta: delta.to_owned(),
                 sequence: msg.get("sequence").and_then(Value::as_u64).unwrap_or(0),
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
@@ -1360,6 +1364,7 @@ async fn write_loop(
                             .events
                             .send(CrepEvent::RoleSessionUpdated {
                                 role: runtime.base.role.clone(),
+                                priors_hash: String::new(),
                                 session_id: next_thread_id,
                             })
                             .await;
@@ -1412,6 +1417,7 @@ async fn write_loop(
                     .events
                     .send(CrepEvent::RoleSpoke {
                         role: runtime.base.role.clone(),
+                        priors_hash: String::new(),
                         text,
                         mentions: Vec::new(),
                         cost_usd: 0.0,
@@ -1442,6 +1448,7 @@ fn turn_interrupted_event(
     };
     CrepEvent::TurnInterrupted {
         role: role.to_owned(),
+        priors_hash: String::new(),
         turn_id: turn_id.to_owned(),
         thread_id: thread_id.to_owned(),
         source: crate::crep::InterruptSource::UserHalt,
@@ -1632,6 +1639,7 @@ async fn wait_child(
     let _ = events
         .send(CrepEvent::RoleStopped {
             role,
+            priors_hash: String::new(),
             reason,
             turn_id: None,
         })

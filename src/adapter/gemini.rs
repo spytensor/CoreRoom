@@ -290,6 +290,7 @@ impl GeminiLoop {
                         .events
                         .send(CrepEvent::TurnInterrupted {
                             role: self.role.clone(),
+                            priors_hash: String::new(),
                             turn_id: turn_id.clone(),
                             thread_id: thread_id.clone(),
                             source: crate::crep::InterruptSource::UserHalt,
@@ -316,6 +317,7 @@ impl GeminiLoop {
                         .events
                         .send(CrepEvent::RoleSpoke {
                             role: self.role.clone(),
+                            priors_hash: String::new(),
                             text: format!("[gemini error: {error}]"),
                             mentions: Vec::new(),
                             cost_usd: 0.0,
@@ -333,6 +335,7 @@ impl GeminiLoop {
             .events
             .send(CrepEvent::RoleStopped {
                 role: self.role,
+                priors_hash: String::new(),
                 reason: stop_reason,
                 turn_id: None,
             })
@@ -352,6 +355,7 @@ impl GeminiLoop {
             .events
             .send(CrepEvent::RoleSessionUpdated {
                 role: self.role.clone(),
+                priors_hash: String::new(),
                 session_id,
             })
             .await;
@@ -629,6 +633,7 @@ async fn process_gemini_stream_line(
                     .unwrap_or_else(|| parse_state.delta_sequence.saturating_add(1));
                 let _ = events.try_send(CrepEvent::RoleOutputDelta {
                     role: role.to_owned(),
+                    priors_hash: String::new(),
                     text_delta: content.to_owned(),
                     sequence: parse_state.delta_sequence,
                     turn_id: turn_ids.turn_id.clone(),
@@ -837,6 +842,7 @@ fn gemini_tool_use_to_event(
 ) -> CrepEvent {
     CrepEvent::ToolCallProposed {
         role: role.to_owned(),
+        priors_hash: String::new(),
         tool_name: value
             .get("tool_name")
             .and_then(serde_json::Value::as_str)
@@ -875,6 +881,7 @@ fn gemini_tool_result_to_event(
         .unwrap_or("gemini tool completed");
     CrepEvent::ToolCallExecuted {
         role: role.to_owned(),
+        priors_hash: String::new(),
         tool_use_id,
         ok,
         output_summary: truncate(summary, TOOL_OUTPUT_SUMMARY_MAX_CHARS),
@@ -962,6 +969,7 @@ mod tests {
             vec![
                 CrepEvent::ToolCallProposed {
                     role: "backend".into(),
+                    priors_hash: String::new(),
                     tool_name: "Read".into(),
                     tool_input: serde_json::json!({"file_path": "README.md"}),
                     tool_use_id: "read-1".into(),
@@ -970,6 +978,7 @@ mod tests {
                 },
                 CrepEvent::ToolCallExecuted {
                     role: "backend".into(),
+                    priors_hash: String::new(),
                     tool_use_id: "read-1".into(),
                     ok: true,
                     output_summary: "hello".into(),
@@ -978,6 +987,7 @@ mod tests {
                 },
                 CrepEvent::RoleOutputDelta {
                     role: "backend".into(),
+                    priors_hash: String::new(),
                     text_delta: "Done".into(),
                     sequence: 1,
                     turn_id: "tu-1".into(),

@@ -340,6 +340,7 @@ fn init_yes_creates_minimal_valid_layout() {
     let coderoom = tmp.path().join(CODEROOM_DIR);
     assert!(coderoom.is_dir());
     assert!(coderoom.join(CONFIG_FILE).is_file());
+    assert!(coderoom.join(crate::lock::LOCK_FILE).is_file());
     assert!(coderoom.join("shared.md").is_file());
     assert!(coderoom
         .join(ROLES_DIR)
@@ -564,6 +565,7 @@ fn planned_files_lists_in_render_order() {
         display,
         vec![
             "/tmp/p/.coderoom/config.toml",
+            "/tmp/p/.coderoom/priors.lock",
             "/tmp/p/.coderoom/shared.md",
             "/tmp/p/.coderoom/roles/host/priors.md",
             "/tmp/p/.coderoom/roles/backend/priors.md",

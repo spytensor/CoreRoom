@@ -266,6 +266,7 @@ mod tests {
 
         let event = CrepEvent::RoleOutputDelta {
             role: "backend".into(),
+            priors_hash: String::new(),
             text_delta: "partial".into(),
             sequence: 1,
             turn_id: String::new(),
@@ -317,6 +318,7 @@ mod tests {
         let valid = serde_json::to_string(&sample_event("ok")).unwrap();
         let stopped = serde_json::to_string(&CrepEvent::RoleStopped {
             role: "ok".to_owned(),
+            priors_hash: String::new(),
             reason: StopReason::Completed,
             turn_id: None,
         })

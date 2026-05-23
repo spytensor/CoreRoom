@@ -20,6 +20,7 @@ pub(super) struct CapturedTurn {
     pub(super) text: String,
     pub(super) turn_id: crate::turn::TurnId,
     pub(super) thread_id: crate::turn::TurnId,
+    pub(super) priors_hash: String,
     /// Tool-call activity observed during this drain. Used by
     /// `send_and_drain` to gate auto-routing — a turn whose tools were
     /// systematically denied probably produced an ungrounded reply, and
@@ -344,6 +345,7 @@ pub(super) async fn drain_one_turn(
                     let done = match &event {
                         CrepEvent::RoleSpoke {
                             role: spoken,
+                            priors_hash,
                             text,
                             cost_usd: _,
                             cache_read: _,
@@ -363,6 +365,7 @@ pub(super) async fn drain_one_turn(
                                 text: cleaned.text.clone(),
                                 turn_id: turn_id.clone(),
                                 thread_id: thread_id.clone(),
+                                priors_hash: priors_hash.clone(),
                                 activity: activity.clone(),
                                 outcome: *outcome,
                                 phase_block: phase_block.clone(),

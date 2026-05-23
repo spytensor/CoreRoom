@@ -120,6 +120,7 @@ fn render_show_event(event: &CrepEvent, host_role: &str) {
 pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
     let CrepEvent::RoleSpoke {
         role,
+        priors_hash,
         text,
         mentions,
         cost_usd,
@@ -138,6 +139,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
     if let Some(title) = extracted.title {
         events.push(CrepEvent::WorkTitle {
             role: role.clone(),
+            priors_hash: priors_hash.clone(),
             title,
             turn_id: turn_id.clone(),
             thread_id: thread_id.clone(),
@@ -147,6 +149,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
     if !body.is_empty() {
         events.push(CrepEvent::RoleSpoke {
             role: role.clone(),
+            priors_hash: priors_hash.clone(),
             text: body,
             mentions: mentions.clone(),
             cost_usd: *cost_usd,
