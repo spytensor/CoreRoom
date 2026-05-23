@@ -1,0 +1,137 @@
+[[cases]]
+name = "allowed-classification"
+expectedRule = "no-confirmation"
+expectedOutcome = "allowed"
+expectedConfirmation = "not-required"
+expectedCanExecute = true
+
+[cases.request]
+id = "HA-0215-classify"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "classify-user-intent"
+target = "user-request"
+reason = "Classify user intent before persistent state changes."
+
+[[cases]]
+name = "confirmation-required-issue-create"
+expectedRule = "confirmation-required"
+expectedOutcome = "confirmation-required"
+expectedConfirmation = "required-pending"
+expectedCanExecute = false
+
+[cases.request]
+id = "HA-0215-issue"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "create-github-issue"
+target = "WO-0215"
+reason = "Create a GitHub Issue from a WorkOrder draft."
+
+[cases.request.inputs]
+workOrder = "WO-0215"
+tracker = "#213"
+
+[[cases]]
+name = "confirmed-tracker-update"
+expectedRule = "confirmation-required"
+expectedOutcome = "allowed"
+expectedConfirmation = "confirmed"
+expectedCanExecute = true
+
+[cases.request]
+id = "HA-0215-tracker"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "update-tracker"
+target = "#213"
+reason = "Update tracker checkbox and Evidence Ledger after merge."
+confirmedBy = "user"
+rollbackHint = "Restore the previous #213 row."
+
+[cases.request.inputs]
+issue = "#215"
+pr = "#230"
+
+[[cases]]
+name = "denied-specialist-execute"
+expectedRule = "forbidden"
+expectedOutcome = "forbidden"
+expectedConfirmation = "denied"
+expectedCanExecute = false
+expectedFinding = "non-host"
+
+[cases.request]
+id = "HA-0215-specialist"
+actorRole = "engineer"
+hostRole = "host"
+intent = "execute"
+kind = "update-tracker"
+target = "#213"
+reason = "Specialist attempts to close tracker directly."
+confirmedBy = "user"
+
+[[cases]]
+name = "blocked-needs-human-input"
+expectedRule = "confirmation-required"
+expectedOutcome = "blocked"
+expectedConfirmation = "required-pending"
+expectedCanExecute = false
+expectedFinding = "blocked-needs-human-input"
+
+[cases.request]
+id = "HA-0215-blocked"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "prepare-pr-evidence-summary"
+target = "PR #230"
+reason = "Prepare PR evidence summary after checks finish."
+
+[cases.request.attempt]
+attempts = 1
+sessionAgeTurns = 1
+repeatedActionCount = 0
+blocker = "CI has not produced check results yet."
+
+[[cases]]
+name = "repeated-action-circuit-breaker"
+expectedRule = "confirmation-required"
+expectedOutcome = "failed"
+expectedConfirmation = "denied"
+expectedCanExecute = false
+expectedFinding = "circuit-breaker"
+
+[cases.request]
+id = "HA-0215-loop"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "update-tracker"
+target = "#213"
+reason = "Repeated tracker update attempt."
+confirmedBy = "user"
+
+[cases.request.attempt]
+attempts = 1
+sessionAgeTurns = 1
+repeatedActionCount = 4
+
+[[cases]]
+name = "human-only-constitution"
+expectedRule = "human-only"
+expectedOutcome = "human-only"
+expectedConfirmation = "human-only"
+expectedCanExecute = false
+
+[cases.request]
+id = "HA-0215-constitution"
+actorRole = "host"
+hostRole = "host"
+intent = "execute"
+kind = "change-constitution"
+target = "A-018"
+reason = "Constitution changes are human-owned."

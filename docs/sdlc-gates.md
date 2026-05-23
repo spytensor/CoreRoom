@@ -313,6 +313,33 @@ model prose as authority. The lifecycle is structural:
 This mirrors the Hermes-style checkpoint rule: worker output or a merged PR is
 not final until `@host` verifies evidence and closes the tracker row.
 
+## v0.7 Host Action Layer
+
+`@host` owns project-level actions through a structured action layer. The user
+interface remains conversational; the action layer is an internal execution,
+audit, and recovery surface.
+
+| Action category | Rule |
+| --- | --- |
+| classify user intent | no confirmation |
+| create or bind GitHub Issue | confirmation required |
+| bind WorkOrder to issue/branch/PR/gate/tracker | confirmation required |
+| register or refresh source | confirmation required |
+| build ContextPack | confirmation required |
+| collect Evidence Packet | no confirmation |
+| prepare PR evidence summary | confirmation required |
+| update tracker checkbox or Evidence Ledger | confirmation required |
+| request human input when blocked | no confirmation |
+| override role veto or claim release readiness | confirmation required |
+| change constitution | human-only |
+| replace GitHub facts or mutate silently | forbidden |
+
+Non-host roles may propose project-level actions, but they cannot execute them.
+Every action evaluation emits an audit event with actor, target, input facts,
+decision, confirmation status, output, safety findings, and rollback hint.
+Safety controls must report stale sessions, blocked human-input paths, repeated
+action warnings, and circuit-breaker failures before `@host` claims progress.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
