@@ -4,6 +4,14 @@ CodeRoom's SDLC gate support is host-first. Users can ask for work normally;
 the host role is expected to classify the work, initialize a gate when needed,
 delegate review, and close the gate before claiming completion.
 
+Starting with A-017, this is part of the wider host-led engineering control
+protocol. `@host` is the highest in-room authority for project-level workflow:
+it owns intake, WorkOrder proposal, source/context discovery, delegation, gate
+progression, evidence collection, tracker updates, and final status summary.
+The user remains the final owner. Specialist roles may advise or block within
+declared authority scopes, but they do not bypass `@host` for gate closure or
+completion claims.
+
 Gate evidence is structural, not semantic approval. For the trust boundaries
 that reviews must preserve, see `docs/threat-model.md`.
 
@@ -18,6 +26,17 @@ that reviews must preserve, see `docs/threat-model.md`.
 - `.coderoom/gate-templates/*.md` stores reusable gate prompts.
 
 Ledgers are structural evidence. They do not approve correctness.
+
+## Host Confirmation Boundary
+
+The happy path is conversational, but persistent state changes still need
+explicit confirmation. `@host` must ask before creating or binding GitHub
+Issues, updating milestone trackers, registering or refreshing project sources,
+overriding role vetoes, moving Tier 1 work into implementation, preparing PR
+completion claims, or claiming release readiness.
+
+`@host` may classify work, summarize status, suggest roles, draft WorkOrders,
+inspect local state, and report missing evidence without confirmation.
 
 ## Tier 0 / Read-Only Boundary
 
