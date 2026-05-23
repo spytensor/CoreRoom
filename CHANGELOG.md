@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the v0.6 WorkOrder model for binding host-led work to GitHub Issues,
   gate threads, branches, PRs, tracker rows, and required evidence without
   silently mutating GitHub issue bodies.
+- Added the v0.6 Source Registry model for pinned project files, repos, URL
+  snapshots, policy docs, API specs, and design references with trust,
+  visibility, owner, purpose, and no-silent-refresh semantics.
 
 ## [0.5.0] - 2026-05-23
 

@@ -45,6 +45,7 @@ Out of scope:
 | Runtime turn/thread state | Trusted only while owned by the live dispatcher/process | Route provenance, hop depth, parent/child relationships, queue limits | Rehydration from model text or editable logs for enforcement |
 | `.coderoom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
 | `.coderoom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
+| `.coderoom/source-registry.toml` | User-editable project context catalog after schema validation | Pinned source ids, source kind, trust level, owner, visible roles, purpose, and refresh policy for future ContextPacks | Proof that remote content is fresh, source content is safe, role knowledge was updated, or a source may refresh silently |
 
 ## Runtime Invariants
 
@@ -129,6 +130,13 @@ architecture amendment before implementation.
     must not silently mutate the issue body, labels, milestone, or comments.
     Completion still depends on external evidence and tracker closure.
 
+14. Source Registry is pinned context, not prompt memory.
+    Project sources must carry pins, trust levels, owners, visible roles,
+    purpose, and refresh policy before they can be used for WorkOrder context.
+    Registering or re-pinning a source requires confirmation. Remote and
+    external sources must never silently refresh. Adding a source does not
+    mount it into role knowledge or make it part of a ContextPack.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -146,6 +154,7 @@ role-written journals:
 - Whether a user override exists and carries the required justification.
 - Whether the host has confirmed a persistent state change.
 - Whether a WorkOrder GitHub Issue binding was confirmed by the user.
+- Whether a source registration or re-pin was confirmed by the user.
 - Whether a tracker row or Evidence Ledger update is complete.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.

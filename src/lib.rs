@@ -32,6 +32,7 @@ pub mod priors;
 pub mod prompt_cmd;
 pub mod repl;
 pub mod role;
+pub mod source_registry;
 pub mod turn;
 pub mod update;
 mod work;

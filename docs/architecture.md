@@ -361,6 +361,7 @@ trait EngineAdapter {
 │       └── reviews/<role>.toml    # authority plan review for a plan SHA
 ├── work-orders/
 │   └── WO-0001.toml               # host-led binding to issue/gate/PR/tracker
+├── source-registry.toml           # pinned project sources for future contexts
 ├── transcripts/
 │   └── YYYY-MM-DD/
 │       └── <role>-<session>.jsonl # raw CREP archive (grep, not auto-loaded)
