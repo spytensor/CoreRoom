@@ -14,6 +14,7 @@ pub mod config;
 pub mod config_cmd;
 pub mod config_layered;
 pub mod console_health;
+pub mod console_layout;
 pub mod console_projection;
 pub mod console_snapshot;
 pub mod console_state;
