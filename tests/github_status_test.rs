@@ -1,6 +1,6 @@
 //! GitHub-native WorkOrder lifecycle fixtures.
 
-use coderoom::github_status::{
+use coreroom::github_status::{
     derive_github_work_order_status, GitHubWorkOrderFacts, WorkOrderLifecycle,
 };
 use serde::Deserialize;

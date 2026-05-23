@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 
 const CLAUDE_DIR: &str = ".claude";
 const SETTINGS_FILE: &str = "settings.json";
-const MARKER_FILE: &str = ".coderoom-managed.json";
+const MARKER_FILE: &str = ".coreroom-managed.json";
 const HOOK_COMMAND: &str =
-    "cr __coderoom-hook-decision --mode ask --policy-file .coderoom/permission_policy.json";
-const CODE_ROOM_HOOK_SENTINEL: &str = "__coderoom-hook-decision";
+    "cr __coreroom-hook-decision --mode ask --policy-file .coreroom/permission_policy.json";
+const CODE_ROOM_HOOK_SENTINEL: &str = "__coreroom-hook-decision";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClaudeHookInstall {
@@ -44,7 +44,7 @@ pub(super) fn install_or_upgrade(project_root: &Path) -> Result<ClaudeHookInstal
             .with_context(|| format!("parsing {}", settings_path.display()))?,
         None => json!({}),
     };
-    merge_coderoom_hook(&mut settings)?;
+    merge_coreroom_hook(&mut settings)?;
     let rendered = format!("{}\n", serde_json::to_string_pretty(&settings)?);
     let (settings_status, backup_path) =
         write_settings_if_changed(&settings_path, existing.as_deref(), &rendered)?;
@@ -107,14 +107,14 @@ fn backup_path(path: &Path) -> PathBuf {
 
 fn marker_value() -> Value {
     json!({
-        "generated_by": "codeRoom",
+        "generated_by": "CoreRoom",
         "safe_to_edit": true,
         "docs": "docs/getting-started.md#claude-code-hooks",
         "managed_files": [".claude/settings.json"]
     })
 }
 
-fn merge_coderoom_hook(settings: &mut Value) -> Result<()> {
+fn merge_coreroom_hook(settings: &mut Value) -> Result<()> {
     let Some(settings_object) = settings.as_object_mut() else {
         bail!("cannot merge .claude/settings.json: root JSON value must be an object");
     };
@@ -129,12 +129,12 @@ fn merge_coderoom_hook(settings: &mut Value) -> Result<()> {
         bail!("cannot merge .claude/settings.json: `hooks.PreToolUse` must be an array");
     };
 
-    remove_existing_coderoom_hooks(entries)?;
+    remove_existing_coreroom_hooks(entries)?;
     entries.push(desired_pretooluse_entry());
     Ok(())
 }
 
-fn remove_existing_coderoom_hooks(entries: &mut Vec<Value>) -> Result<()> {
+fn remove_existing_coreroom_hooks(entries: &mut Vec<Value>) -> Result<()> {
     let mut retained = Vec::with_capacity(entries.len());
     for mut entry in std::mem::take(entries) {
         let Some(object) = entry.as_object_mut() else {
@@ -148,7 +148,7 @@ fn remove_existing_coderoom_hooks(entries: &mut Vec<Value>) -> Result<()> {
         let Some(hook_array) = hooks.as_array_mut() else {
             bail!("cannot merge .claude/settings.json: PreToolUse entry `hooks` must be an array");
         };
-        hook_array.retain(|hook| !is_coderoom_hook(hook));
+        hook_array.retain(|hook| !is_coreroom_hook(hook));
         if !hook_array.is_empty() {
             retained.push(entry);
         }
@@ -157,7 +157,7 @@ fn remove_existing_coderoom_hooks(entries: &mut Vec<Value>) -> Result<()> {
     Ok(())
 }
 
-fn is_coderoom_hook(hook: &Value) -> bool {
+fn is_coreroom_hook(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
         .is_some_and(|command| command.contains(CODE_ROOM_HOOK_SENTINEL))
@@ -180,7 +180,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn merge_preserves_existing_hooks_and_replaces_old_coderoom_hook() {
+    fn merge_preserves_existing_hooks_and_replaces_old_coreroom_hook() {
         let mut settings = json!({
             "hooks": {
                 "PreToolUse": [
@@ -188,14 +188,14 @@ mod tests {
                         "matcher": "Bash",
                         "hooks": [
                             {"type": "command", "command": "echo keep"},
-                            {"type": "command", "command": "old-cr __coderoom-hook-decision"}
+                            {"type": "command", "command": "old-cr __coreroom-hook-decision"}
                         ]
                     }
                 ]
             }
         });
 
-        merge_coderoom_hook(&mut settings).unwrap();
+        merge_coreroom_hook(&mut settings).unwrap();
 
         let entries = settings["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(entries.len(), 2);
@@ -206,7 +206,7 @@ mod tests {
             .any(|hook| hook["command"] == "echo keep"));
         assert_eq!(
             entries[1]["hooks"][0]["command"],
-            "cr __coderoom-hook-decision --mode ask --policy-file .coderoom/permission_policy.json"
+            "cr __coreroom-hook-decision --mode ask --policy-file .coreroom/permission_policy.json"
         );
     }
 }

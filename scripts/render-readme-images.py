@@ -412,7 +412,7 @@ def right_rail(draw: ScaledDraw) -> None:
     draw_text(draw, (x, 441), "close", WHITE, FONT)
     draw_text(draw, (x + 26, 474), "blocks on missing proof", MUTED, SMALL)
     draw_text(draw, (x + 26, 508), "bypass requires reason", MUTED, SMALL)
-    draw_text(draw, (x + 26, 542), "templates live in .coderoom", MUTED, SMALL)
+    draw_text(draw, (x + 26, 542), "templates live in .coreroom", MUTED, SMALL)
 
     draw_text(draw, (x, 586), "context tools", YELLOW, TITLE)
     draw_text(draw, (x, 633), "/compact", WHITE, FONT)

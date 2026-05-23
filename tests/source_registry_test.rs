@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::source_registry::{
+use coreroom::config::COREROOM_DIR;
+use coreroom::source_registry::{
     load_source_registry, save_source_registry, ProjectSource, RefreshPolicy, SourceKind,
     SourceRegistrationPlan, SourceRegistry, SourceTrustLevel, SOURCE_REGISTRY_FILE,
 };
@@ -32,7 +32,7 @@ fn source_registry_roundtrips_local_repo_doc_and_url_snapshot() {
     let path = save_source_registry(tmp.path(), &registry).expect("save");
     assert_eq!(
         path,
-        tmp.path().join(CODEROOM_DIR).join(SOURCE_REGISTRY_FILE)
+        tmp.path().join(COREROOM_DIR).join(SOURCE_REGISTRY_FILE)
     );
 
     let content = fs::read_to_string(&path).expect("content");

@@ -4,7 +4,7 @@
 //! role in a session. Durable [`CrepEvent`]s are:
 //!
 //! 1. Serialized to one line of JSON.
-//! 2. Appended to the on-disk log at `.coderoom/messages.jsonl`.
+//! 2. Appended to the on-disk log at `.coreroom/messages.jsonl`.
 //! 3. Broadcast to all live subscribers (the REPL renderer, future patch
 //!    detectors, transcript writers, etc.).
 //!
@@ -106,7 +106,7 @@ impl MessageBus {
         std_file.lock_exclusive().map_err(|e| {
             std::io::Error::new(
                 e.kind(),
-                "another `cr` process is already attached to .coderoom/messages.jsonl in this \
+                "another `cr` process is already attached to .coreroom/messages.jsonl in this \
                  project; close the other session before starting a new one",
             )
         })?;

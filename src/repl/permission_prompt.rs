@@ -69,7 +69,7 @@ pub(super) async fn handle_request(sink: BridgeRequestSink, host_role: &str) -> 
         Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
         Err(error) => {
             output::bad(format!("permission prompt failed: {error:#}"));
-            BridgeResponse::deny("CodeRoom prompt failed; defaulting to deny")
+            BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
         }
     };
     paint_outcome(&request.role, host_role, &response);
@@ -90,7 +90,7 @@ pub(super) fn handle_request_blocking(sink: BridgeRequestSink, host_role: &str) 
         Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
         Err(error) => {
             output::bad(format!("permission prompt failed: {error:#}"));
-            BridgeResponse::deny("CodeRoom prompt failed; defaulting to deny")
+            BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
         }
     };
     paint_outcome(&request.role, host_role, &response);

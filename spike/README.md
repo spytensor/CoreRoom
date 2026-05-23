@@ -1,4 +1,4 @@
-# CodeRoom — feasibility spike scripts
+# CoreRoom — feasibility spike scripts
 
 Three live tests that the architecture in `docs/spike-2026-05-09.md` depends on.
 Run them in order. Each is self-contained and uses a `mktemp` sandbox so it
@@ -15,7 +15,7 @@ Total: under $0.50, under 2 minutes wall-clock.
 ## How to run
 
 ```bash
-cd /home/chaojiezhu/codes/codeRoom/spike
+cd /home/chaojiezhu/codes/CoreRoom/spike
 
 bash L1-permission-deny.sh ; echo "L1 exit: $?"
 bash L2-stream-injection.sh ; echo "L2 exit: $?"

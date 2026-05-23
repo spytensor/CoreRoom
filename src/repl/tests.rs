@@ -377,30 +377,30 @@ fn parse_compact_with_role_or_all() {
 #[tokio::test]
 async fn first_run_marker_round_trip() {
     let tmp = tempfile::tempdir().unwrap();
-    let coderoom = tmp.path().to_path_buf();
+    let coreroom = tmp.path().to_path_buf();
     // No marker yet → first run
-    assert!(is_first_run(&coderoom));
-    mark_welcomed(&coderoom).await;
+    assert!(is_first_run(&coreroom));
+    mark_welcomed(&coreroom).await;
     // Marker present → not first run
-    assert!(!is_first_run(&coderoom));
+    assert!(!is_first_run(&coreroom));
     // Idempotent: second mark is a no-op (same path, same content)
-    mark_welcomed(&coderoom).await;
-    assert!(!is_first_run(&coderoom));
+    mark_welcomed(&coreroom).await;
+    assert!(!is_first_run(&coreroom));
 }
 
 #[test]
 fn ensure_permission_policy_creates_file_and_gitignore_rule() {
     let tmp = tempfile::tempdir().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(&coderoom).unwrap();
-    std::fs::write(coderoom.join(".gitignore"), "messages.jsonl\n").unwrap();
-    let policy_path = coderoom.join("permission_policy.json");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(&coreroom).unwrap();
+    std::fs::write(coreroom.join(".gitignore"), "messages.jsonl\n").unwrap();
+    let policy_path = coreroom.join("permission_policy.json");
 
     ensure_permission_policy(&policy_path).unwrap();
     ensure_permission_policy(&policy_path).unwrap();
 
     assert!(policy_path.is_file());
-    let ignore = std::fs::read_to_string(coderoom.join(".gitignore")).unwrap();
+    let ignore = std::fs::read_to_string(coreroom.join(".gitignore")).unwrap();
     assert!(ignore.contains("messages.jsonl"));
     assert_eq!(
         ignore
@@ -510,7 +510,7 @@ fn strip_ansi(s: &str) -> String {
 fn splash_top_and_bottom_have_exact_frame_width() {
     for width in [60usize, 70, 80] {
         let title = join_cells(&[
-            styled_cell("codeRoom", "codeRoom".with(output::SPLASH_FRAME).bold()),
+            styled_cell("CoreRoom", "CoreRoom".with(output::SPLASH_FRAME).bold()),
             plain_cell(" "),
             styled_cell("v9.9.9", "v9.9.9".with(output::SPLASH_VERSION)),
         ]);
@@ -628,7 +628,7 @@ fn snapshot_boot_dashboard_at_80() {
     let rendered = strip_ansi(&render_home_at_width(
         &cfg,
         tmp.path(),
-        Path::new("/repo/codeRoom"),
+        Path::new("/repo/CoreRoom"),
         false,
         80,
         Some("Ada"),
@@ -636,17 +636,17 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.5.0 ────────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.7.0 ────────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
 │ ● @backend   cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
 │ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
 │ ● @security  codex  · default · bypass                                       │
-│                                         what's new in 0.5.0                  │
-│  3.3k  base tokens loaded               • team preset creates host/engineer… │
-│ /repo/codeRoom                          • role authority and plan sign-off … │
-│                                         • knowledge mounts, priors lock, an… │
+│                                         what's new in 0.7.0                  │
+│  3.3k  base tokens loaded               • CoreRoom rename is complete acros… │
+│ /repo/CoreRoom                          • GitHub-native WorkOrders derive s… │
+│                                         • source graph and status rollup ke… │
 │                                                                              │
 │                                         /help for commands                   │
 │                                                                              │
@@ -673,7 +673,7 @@ fn boot_dashboard_shows_active_gate_phase() {
 
     let rendered = strip_ansi(&render_home_at_width(
         &cfg,
-        &tmp.path().join(crate::config::CODEROOM_DIR),
+        &tmp.path().join(crate::config::COREROOM_DIR),
         tmp.path(),
         false,
         80,
@@ -1136,7 +1136,7 @@ fn turn_activity_permission_denied_event_folds_into_denied_count() {
         priors_hash: String::new(),
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "src/main.rs"}),
-        reason: "denied by CodeRoom".into(),
+        reason: "denied by CoreRoom".into(),
         turn_id: String::new(),
         thread_id: String::new(),
     };

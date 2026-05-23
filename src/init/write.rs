@@ -13,15 +13,15 @@ use super::{
     DEFAULT_SHARED_PRIORS,
 };
 
-/// Materialize the `.coderoom/` skeleton on disk. Each role gets a
+/// Materialize the `.coreroom/` skeleton on disk. Each role gets a
 /// directory with a templated `priors.md` file and empty `knowledge/`.
-pub(super) fn write_all(coderoom_dir: &Path, roles: &[RolePlan]) -> Result<()> {
-    let role_root = coderoom_dir.join(ROLES_DIR);
+pub(super) fn write_all(coreroom_dir: &Path, roles: &[RolePlan]) -> Result<()> {
+    let role_root = coreroom_dir.join(ROLES_DIR);
     std::fs::create_dir_all(&role_root)
         .with_context(|| format!("creating {}", role_root.display()))?;
 
-    write_file(&coderoom_dir.join(CONFIG_FILE), &render_config(roles))?;
-    write_file(&coderoom_dir.join("shared.md"), DEFAULT_SHARED_PRIORS)?;
+    write_file(&coreroom_dir.join(CONFIG_FILE), &render_config(roles))?;
+    write_file(&coreroom_dir.join("shared.md"), DEFAULT_SHARED_PRIORS)?;
     for role in roles {
         let role_dir = role_root.join(&role.name);
         std::fs::create_dir_all(role_dir.join(manifest::KNOWLEDGE_DIR))
@@ -34,13 +34,13 @@ pub(super) fn write_all(coderoom_dir: &Path, roles: &[RolePlan]) -> Result<()> {
         };
         write_file(&path, &body)?;
     }
-    write_gate_templates(coderoom_dir)?;
-    write_file(&coderoom_dir.join(".gitignore"), DEFAULT_GITIGNORE)?;
+    write_gate_templates(coreroom_dir)?;
+    write_file(&coreroom_dir.join(".gitignore"), DEFAULT_GITIGNORE)?;
     Ok(())
 }
 
-fn write_gate_templates(coderoom_dir: &Path) -> Result<()> {
-    let dir = coderoom_dir.join(GATE_TEMPLATES_DIR);
+fn write_gate_templates(coreroom_dir: &Path) -> Result<()> {
+    let dir = coreroom_dir.join(GATE_TEMPLATES_DIR);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     for template in gate::default_templates() {
         write_file(&dir.join(template.filename), template.content)?;
@@ -71,7 +71,7 @@ fn render_config(roles: &[RolePlan]) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "# CodeRoom project config. See https://github.com/spytensor/codeRoom for docs."
+        "# CoreRoom project config. See https://github.com/spytensor/CoreRoom for docs."
     );
     let _ = writeln!(out);
     let _ = writeln!(out, "# Engine used by any role that doesn't override.");
@@ -95,7 +95,7 @@ fn render_config(roles: &[RolePlan]) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "# Per-role overrides. Priors live in .coderoom/roles/<name>/priors.md."
+        "# Per-role overrides. Priors live in .coreroom/roles/<name>/priors.md."
     );
     for role in roles {
         let _ = writeln!(out, "[roles.{}]", role.name);

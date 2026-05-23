@@ -12,9 +12,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use coderoom::adapter::gemini::GeminiAdapter;
-use coderoom::adapter::{Engine, EngineAdapter, PermissionMode, RoleConfig, UserMessage};
-use coderoom::crep::CrepEvent;
+use coreroom::adapter::gemini::GeminiAdapter;
+use coreroom::adapter::{Engine, EngineAdapter, PermissionMode, RoleConfig, UserMessage};
+use coreroom::crep::CrepEvent;
 use tokio::time::timeout;
 
 #[tokio::test]

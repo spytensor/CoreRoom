@@ -1,4 +1,4 @@
-# CodeRoom Color Specification — v0.1
+# CoreRoom Color Specification — v0.1
 
 > **Status:** v0.1, locked. Adjustments from the cross-validation pass on
 > 2026-05-09 are integrated. Further changes go through
@@ -131,7 +131,7 @@ left of the line, followed by two spaces:
 (npm / pnpm / cargo convention):
 
 ```
-✓ patched @backend → .coderoom/patches/...
+✓ patched @backend → .coreroom/patches/...
   applies to next /refresh; current session unchanged
 ```
 
@@ -310,7 +310,7 @@ expected to emit empty SGR in those environments. Glyphs (`✓` `✗` `↳`)
 remain so `grep`/`tee` consumers retain structure.
 
 **Diagnostics**: startup terminal probing is opt-in. Use
-`CODEROOM_TERMINAL_PROBE=1 cr` when collecting a color-rendering report.
+`COREROOM_TERMINAL_PROBE=1 cr` when collecting a color-rendering report.
 
 **Out of scope for v0.1**: actively quantizing to 256 colors when
 `COLORTERM != "truecolor"`. crossterm emits 24-bit SGR even on 256-color

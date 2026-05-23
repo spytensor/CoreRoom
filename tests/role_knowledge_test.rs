@@ -4,14 +4,14 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
-use coderoom::config::{CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use coreroom::config::{CONFIG_FILE, COREROOM_DIR, ROLES_DIR};
 
 fn fixture() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).expect("roles dir");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(coreroom.join(ROLES_DIR)).expect("roles dir");
     fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 permission_mode = "ask"
@@ -21,7 +21,7 @@ host_role = "coral"
 "#,
     )
     .expect("config");
-    fs::write(coderoom.join(ROLES_DIR).join("coral.md"), "CORAL_PRIORS").expect("legacy priors");
+    fs::write(coreroom.join(ROLES_DIR).join("coral.md"), "CORAL_PRIORS").expect("legacy priors");
     tmp
 }
 
@@ -48,9 +48,9 @@ fn role_knowledge_cli_attach_list_compose_and_detach() {
         .stdout(predicate::str::contains("attached payload.md"))
         .stdout(predicate::str::contains("sha256:"));
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    assert!(!coderoom.join(ROLES_DIR).join("coral.md").exists());
-    assert!(coderoom
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    assert!(!coreroom.join(ROLES_DIR).join("coral.md").exists());
+    assert!(coreroom
         .join(ROLES_DIR)
         .join("coral")
         .join("priors.md")
@@ -97,7 +97,7 @@ fn role_knowledge_cli_attach_list_compose_and_detach() {
         .success()
         .stdout(predicate::str::contains("detached payload.md"));
 
-    assert!(!coderoom
+    assert!(!coreroom
         .join(ROLES_DIR)
         .join("coral")
         .join("knowledge")

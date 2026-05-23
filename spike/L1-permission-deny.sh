@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-SANDBOX="$(mktemp -d -t coderoom-L1-XXXXXX)"
+SANDBOX="$(mktemp -d -t coreroom-L1-XXXXXX)"
 trap 'echo "sandbox: $SANDBOX"' EXIT
 
 cat > "$SANDBOX/deny-bash.sh" <<EOF
@@ -84,7 +84,7 @@ echo
 # Heuristic: the cwd path leaks into the response only if pwd actually ran.
 # Match for /tmp/, /home/, or path-like substring as evidence the tool ran.
 LEAKED=0
-if echo "$RESULT_TEXT" | grep -qE '(/home/|/tmp/coderoom)'; then
+if echo "$RESULT_TEXT" | grep -qE '(/home/|/tmp/coreroom)'; then
   LEAKED=1
 fi
 

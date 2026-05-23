@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::source_registry::{ProjectSource, SourceKind, SourceRegistry, SourceTrustLevel};
 
-/// Subdirectory inside `.coderoom/` that stores ContextPacks.
+/// Subdirectory inside `.coreroom/` that stores ContextPacks.
 pub const CONTEXT_PACKS_DIR: &str = "context-packs";
 
 /// Current persisted ContextPack schema version.
@@ -202,7 +202,7 @@ pub struct ConfirmedContextPack {
     pub confirmed_by: String,
 }
 
-/// Save a ContextPack under `.coderoom/context-packs/<id>.toml`.
+/// Save a ContextPack under `.coreroom/context-packs/<id>.toml`.
 pub fn save_context_pack(
     project_root: &Path,
     registry: &SourceRegistry,
@@ -234,7 +234,7 @@ pub fn load_context_pack(path: &Path, registry: &SourceRegistry) -> Result<Conte
 pub fn context_pack_path(project_root: &Path, id: &str) -> Result<PathBuf> {
     validate_context_pack_id(id)?;
     Ok(project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(CONTEXT_PACKS_DIR)
         .join(format!("{id}.toml")))
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # L3 — verify codex's mcp-server mode: speak JSON-RPC over stdio,
-# initialize, and list tools. This is how CodeRoom's wrapper would
+# initialize, and list tools. This is how CoreRoom's wrapper would
 # drive Codex — same shape as we'd use for any other MCP-speaking
 # engine.
 #
@@ -23,14 +23,14 @@
 
 set -euo pipefail
 
-SANDBOX="$(mktemp -d -t coderoom-L3-XXXXXX)"
+SANDBOX="$(mktemp -d -t coreroom-L3-XXXXXX)"
 trap 'echo "sandbox: $SANDBOX"' EXIT
 
 INPUT="$SANDBOX/rpc-in.jsonl"
 OUTPUT="$SANDBOX/rpc-out.jsonl"
 
 cat > "$INPUT" <<'EOF'
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"coderoom-spike","version":"0.0.1"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"coreroom-spike","version":"0.0.1"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 EOF

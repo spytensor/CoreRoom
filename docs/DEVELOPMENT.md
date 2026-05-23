@@ -56,7 +56,7 @@ cargo test --test cc_adapter_smoke -- --ignored
 Permission guard: default tests cover the policy classifier and the CC
 stdin pacing regression. Before changing hook behavior, run the ignored
 Claude smoke manually with a low-value prompt and inspect
-`.coderoom/messages.jsonl` for `tool_call_proposed`,
+`.coreroom/messages.jsonl` for `tool_call_proposed`,
 `permission_denied`, and `tool_call_executed` events.
 
 ## Spike harness
@@ -86,7 +86,7 @@ CI runs `shellcheck` on these scripts; keep them lint-clean.
 src/
 ├── main.rs              # `cr` binary entry; thin clap dispatcher
 ├── lib.rs               # library root (re-exports stable public API)
-├── crep.rs              # CodeRoom Event Protocol — typed event enum
+├── crep.rs              # CoreRoom Event Protocol — typed event enum
 └── adapter/
     ├── mod.rs           # EngineAdapter trait, RoleHandle
     ├── cc.rs            # Claude Code adapter
@@ -169,29 +169,29 @@ A row that wraps is a regression even if the test suite is green.
 
 ### Tracing logs
 
-CodeRoom uses `tracing` for structured logs. Enable verbose output:
+CoreRoom uses `tracing` for structured logs. Enable verbose output:
 
 ```bash
-RUST_LOG=coderoom=debug cr start
-RUST_LOG=coderoom::adapter::cc=trace cr start   # one module only
+RUST_LOG=coreroom=debug cr start
+RUST_LOG=coreroom::adapter::cc=trace cr start   # one module only
 ```
 
 ### Inspecting a session's event stream
 
-The message bus appends to `.coderoom/messages.jsonl` in your project.
+The message bus appends to `.coreroom/messages.jsonl` in your project.
 Tail it from another terminal while `cr start` is running:
 
 ```bash
-tail -f .coderoom/messages.jsonl | jq .
+tail -f .coreroom/messages.jsonl | jq .
 ```
 
 ### Reproducing a stuck role
 
 If `@backend` looks frozen:
 
-1. Check `.coderoom/sessions/backend.state.json` — does it show an
+1. Check `.coreroom/sessions/backend.state.json` — does it show an
    in-flight tool call?
-2. Tail `.coderoom/transcripts/<today>/backend-<session>.jsonl` —
+2. Tail `.coreroom/transcripts/<today>/backend-<session>.jsonl` —
    what was the last raw event from the engine?
 3. `/refresh backend` rebuilds the role from priors + patches +
    journal; this is the recommended escape hatch, not killing the

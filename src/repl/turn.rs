@@ -37,14 +37,14 @@ pub(super) struct CapturedTurn {
 }
 
 /// Fold noisy tool events during a live turn. Full details are still
-/// persisted in `.coderoom/messages.jsonl`; this keeps the terminal
+/// persisted in `.coreroom/messages.jsonl`; this keeps the terminal
 /// focused on the user's prompt and the role's final answer.
 #[derive(Debug, Default, Clone)]
 pub(super) struct TurnActivity {
     pub(super) proposed: usize,
     pub(super) completed: usize,
     pub(super) failed: usize,
-    /// Subset of `failed`: tool calls rejected by CodeRoom's permission
+    /// Subset of `failed`: tool calls rejected by CoreRoom's permission
     /// hook (cc) or refused by the codex/gemini bridge. Tracked
     /// separately so the grounding gate can distinguish "all tools
     /// denied → role hallucinated a reply" from "tests failed but role
@@ -327,7 +327,7 @@ pub(super) async fn drain_one_turn(
                         // (rendered once on first tool, again on turn
                         // end with all steps) and the live status
                         // spinner already convey. Fold them by default;
-                        // `CODEROOM_VERBOSE_TOOLS=1` opts back in to the
+                        // `COREROOM_VERBOSE_TOOLS=1` opts back in to the
                         // full audit stream. `cr show` always replays
                         // the full event log.
                         status.clear();
@@ -473,11 +473,11 @@ pub(super) async fn drain_one_turn(
 }
 
 /// Whether the user opted into the full per-tool trace stream via the
-/// `CODEROOM_VERBOSE_TOOLS` env var. Any non-empty value enables it.
+/// `COREROOM_VERBOSE_TOOLS` env var. Any non-empty value enables it.
 /// Checked once per turn-drain so a session can change behavior between
 /// turns without restarting the REPL.
 fn verbose_tools_enabled() -> bool {
-    verbose_from_value(std::env::var("CODEROOM_VERBOSE_TOOLS").ok().as_deref())
+    verbose_from_value(std::env::var("COREROOM_VERBOSE_TOOLS").ok().as_deref())
 }
 
 /// Pure decision so the env-var read can stay a one-liner while the
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn verbose_gate_empty_string_means_folded() {
-        // An empty value (`CODEROOM_VERBOSE_TOOLS=`) is the same as
+        // An empty value (`COREROOM_VERBOSE_TOOLS=`) is the same as
         // unset — users sometimes export with no value to "clear" it
         // and we shouldn't surprise them with verbose output.
         assert!(!verbose_from_value(Some("")));

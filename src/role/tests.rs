@@ -3,14 +3,14 @@ use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
 
-/// Build a `.coderoom/` skeleton with one role (host) so the
+/// Build a `.coreroom/` skeleton with one role (host) so the
 /// commands have a valid starting point.
 fn fixture() -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 host_role = "host"
@@ -19,7 +19,7 @@ host_role = "host"
 "#,
     )
     .unwrap();
-    fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host priors").unwrap();
+    fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host priors").unwrap();
     tmp
 }
 
@@ -28,11 +28,11 @@ fn add_creates_role_entry_and_priors_file() {
     let tmp = fixture();
     add(tmp.path(), "backend", None, None).unwrap();
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     let cfg = Config::load_test(tmp.path()).unwrap();
     assert!(cfg.roles.contains_key("backend"));
     let priors = fs::read_to_string(
-        coderoom
+        coreroom
             .join(ROLES_DIR)
             .join("backend")
             .join(crate::manifest::ROLE_PRIORS_FILE),
@@ -63,14 +63,14 @@ fn attach_migrates_legacy_priors_and_writes_manifest() {
 
     attach(tmp.path(), "host", &source, Some("deployment.md")).unwrap();
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    assert!(!coderoom.join(ROLES_DIR).join("host.md").exists());
-    assert!(coderoom
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    assert!(!coreroom.join(ROLES_DIR).join("host.md").exists());
+    assert!(coreroom
         .join(ROLES_DIR)
         .join("host")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
-    let knowledge_path = coderoom
+    let knowledge_path = coreroom
         .join(ROLES_DIR)
         .join("host")
         .join(crate::manifest::KNOWLEDGE_DIR)
@@ -79,7 +79,7 @@ fn attach_migrates_legacy_priors_and_writes_manifest() {
         fs::read_to_string(&knowledge_path).unwrap(),
         "DEPLOYMENT_RUNBOOK"
     );
-    let manifest = crate::manifest::read_manifest(&coderoom.join(ROLES_DIR).join("host")).unwrap();
+    let manifest = crate::manifest::read_manifest(&coreroom.join(ROLES_DIR).join("host")).unwrap();
     assert_eq!(manifest.files.len(), 1);
     assert_eq!(manifest.files[0].name, "deployment.md");
     assert_eq!(
@@ -97,8 +97,8 @@ fn detach_removes_manifest_entry_and_file() {
 
     detach(tmp.path(), "host", "deployment.md").unwrap();
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    let role_dir = coderoom.join(ROLES_DIR).join("host");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    let role_dir = coreroom.join(ROLES_DIR).join("host");
     assert!(!role_dir
         .join(crate::manifest::KNOWLEDGE_DIR)
         .join("deployment.md")
@@ -164,14 +164,14 @@ fn add_many_creates_roles_in_one_loadable_batch() {
     assert_eq!(cfg.roles["security"].engine, Some(Engine::Codex));
     assert!(tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(ROLES_DIR)
         .join("backend")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
     assert!(tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(ROLES_DIR)
         .join("security")
         .join(crate::manifest::ROLE_PRIORS_FILE)
@@ -197,7 +197,7 @@ fn add_many_skips_existing_roles() {
 #[test]
 fn add_many_preserves_existing_config_text() {
     let tmp = fixture();
-    let config_path = tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE);
+    let config_path = tmp.path().join(COREROOM_DIR).join(CONFIG_FILE);
     fs::write(
         &config_path,
         r#"# keep this comment
@@ -254,7 +254,7 @@ fn rm_removes_role_and_priors() {
     assert!(!cfg.roles.contains_key("backend"));
     assert!(!tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(ROLES_DIR)
         .join("backend")
         .exists());

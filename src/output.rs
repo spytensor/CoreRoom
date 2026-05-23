@@ -197,13 +197,13 @@ fn terminal_probe_line_from(term: &str, colorterm: &str) -> String {
         || term_lower.contains("truecolor")
         || term_lower.contains("24bit");
     format!(
-        "coderoom terminal: TERM={term} COLORTERM={colorterm} truecolor={}",
+        "coreroom terminal: TERM={term} COLORTERM={colorterm} truecolor={}",
         if truecolor { "yes" } else { "no" }
     )
 }
 
 fn terminal_probe_enabled() -> bool {
-    std::env::var("CODEROOM_TERMINAL_PROBE").is_ok_and(|value| terminal_probe_enabled_from(&value))
+    std::env::var("COREROOM_TERMINAL_PROBE").is_ok_and(|value| terminal_probe_enabled_from(&value))
 }
 
 fn terminal_probe_enabled_from(value: &str) -> bool {

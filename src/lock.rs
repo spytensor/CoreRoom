@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, CODEROOM_DIR};
+use crate::config::{Config, COREROOM_DIR};
 use crate::priors::{self, ComposeOptions};
 
-/// File name of the priors lock inside `.coderoom/`.
+/// File name of the priors lock inside `.coreroom/`.
 pub const LOCK_FILE: &str = "priors.lock";
 
 const LOCK_VERSION: u32 = 1;
@@ -47,7 +47,7 @@ pub struct LockedLayer {
     pub sha256: String,
 }
 
-/// Verification result for `.coderoom/priors.lock`.
+/// Verification result for `.coreroom/priors.lock`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyReport {
     /// Lock path that was checked.
@@ -64,25 +64,25 @@ impl VerifyReport {
     }
 }
 
-/// Return the lock-file path for a `.coderoom/` directory.
+/// Return the lock-file path for a `.coreroom/` directory.
 #[must_use]
-pub fn lock_path(coderoom_dir: &Path) -> PathBuf {
-    coderoom_dir.join(LOCK_FILE)
+pub fn lock_path(coreroom_dir: &Path) -> PathBuf {
+    coreroom_dir.join(LOCK_FILE)
 }
 
 /// Generate the current lock data for every configured role.
-pub fn generate(coderoom_dir: &Path, options: ComposeOptions) -> Result<PriorsLock> {
-    let project_root = coderoom_dir
+pub fn generate(coreroom_dir: &Path, options: ComposeOptions) -> Result<PriorsLock> {
+    let project_root = coreroom_dir
         .parent()
         .map_or_else(|| Path::new(".").to_path_buf(), Path::to_path_buf);
     let cfg = Config::load(&project_root)
         .with_context(|| format!("loading config in {}", project_root.display()))?;
-    generate_for_config(coderoom_dir, &cfg, options)
+    generate_for_config(coreroom_dir, &cfg, options)
 }
 
 /// Generate lock data for an already-loaded config.
 pub fn generate_for_config(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     cfg: &Config,
     options: ComposeOptions,
 ) -> Result<PriorsLock> {
@@ -91,9 +91,9 @@ pub fn generate_for_config(
 
     let mut roles = BTreeMap::new();
     for role in role_names {
-        let composed = priors::compose_for_with_options(coderoom_dir, role, options)
+        let composed = priors::compose_for_with_options(coreroom_dir, role, options)
             .with_context(|| format!("composing priors for @{role}"))?;
-        let layers = priors::lock_layers_for_role(coderoom_dir, role)
+        let layers = priors::lock_layers_for_role(coreroom_dir, role)
             .with_context(|| format!("collecting priors lock layers for @{role}"))?
             .into_iter()
             .map(|layer| LockedLayer {
@@ -118,47 +118,47 @@ pub fn generate_for_config(
 }
 
 /// Write a freshly generated lock file.
-pub fn write(coderoom_dir: &Path, options: ComposeOptions) -> Result<PriorsLock> {
-    let lock = generate(coderoom_dir, options)?;
-    write_lock(coderoom_dir, &lock)?;
+pub fn write(coreroom_dir: &Path, options: ComposeOptions) -> Result<PriorsLock> {
+    let lock = generate(coreroom_dir, options)?;
+    write_lock(coreroom_dir, &lock)?;
     Ok(lock)
 }
 
-/// Write `lock` to `.coderoom/priors.lock`.
-pub fn write_lock(coderoom_dir: &Path, lock: &PriorsLock) -> Result<()> {
-    let path = lock_path(coderoom_dir);
+/// Write `lock` to `.coreroom/priors.lock`.
+pub fn write_lock(coreroom_dir: &Path, lock: &PriorsLock) -> Result<()> {
+    let path = lock_path(coreroom_dir);
     let rendered = toml::to_string_pretty(lock).context("serializing priors lock")?;
     std::fs::write(&path, rendered).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
 
-/// Read `.coderoom/priors.lock`.
-pub fn read(coderoom_dir: &Path) -> Result<PriorsLock> {
-    let path = lock_path(coderoom_dir);
+/// Read `.coreroom/priors.lock`.
+pub fn read(coreroom_dir: &Path) -> Result<PriorsLock> {
+    let path = lock_path(coreroom_dir);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
 /// Verify lock entries against current on-disk priors content.
-pub fn verify(coderoom_dir: &Path, options: ComposeOptions) -> Result<VerifyReport> {
-    let path = lock_path(coderoom_dir);
+pub fn verify(coreroom_dir: &Path, options: ComposeOptions) -> Result<VerifyReport> {
+    let path = lock_path(coreroom_dir);
     if !path.is_file() {
         return Ok(VerifyReport {
             lock_path: path,
             drifts: vec![format!(
                 "{} is missing; run `cr lock` to create it",
-                display_from_coderoom(coderoom_dir, LOCK_FILE)
+                display_from_coreroom(coreroom_dir, LOCK_FILE)
             )],
         });
     }
 
-    let expected = read(coderoom_dir)?;
-    let current = generate(coderoom_dir, options)?;
-    Ok(compare_locks(coderoom_dir, &expected, &current))
+    let expected = read(coreroom_dir)?;
+    let current = generate(coreroom_dir, options)?;
+    Ok(compare_locks(coreroom_dir, &expected, &current))
 }
 
-fn compare_locks(coderoom_dir: &Path, expected: &PriorsLock, current: &PriorsLock) -> VerifyReport {
+fn compare_locks(coreroom_dir: &Path, expected: &PriorsLock, current: &PriorsLock) -> VerifyReport {
     let mut drifts = Vec::new();
     if expected.version != current.version {
         drifts.push(format!(
@@ -195,7 +195,7 @@ fn compare_locks(coderoom_dir: &Path, expected: &PriorsLock, current: &PriorsLoc
     }
 
     VerifyReport {
-        lock_path: lock_path(coderoom_dir),
+        lock_path: lock_path(coreroom_dir),
         drifts,
     }
 }
@@ -238,10 +238,10 @@ fn layer_map(layers: &[LockedLayer]) -> BTreeMap<String, &LockedLayer> {
         .collect()
 }
 
-fn display_from_coderoom(coderoom_dir: &Path, name: &str) -> String {
-    let file = coderoom_dir.join(name);
-    if coderoom_dir.file_name().and_then(|s| s.to_str()) == Some(CODEROOM_DIR) {
-        format!(".coderoom/{name}")
+fn display_from_coreroom(coreroom_dir: &Path, name: &str) -> String {
+    let file = coreroom_dir.join(name);
+    if coreroom_dir.file_name().and_then(|s| s.to_str()) == Some(COREROOM_DIR) {
+        format!(".coreroom/{name}")
     } else {
         file.display().to_string()
     }

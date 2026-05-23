@@ -18,9 +18,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use coderoom::adapter::cc::CcAdapter;
-use coderoom::adapter::{Engine, EngineAdapter, PermissionMode, RoleConfig, UserMessage};
-use coderoom::crep::CrepEvent;
+use coreroom::adapter::cc::CcAdapter;
+use coreroom::adapter::{Engine, EngineAdapter, PermissionMode, RoleConfig, UserMessage};
+use coreroom::crep::CrepEvent;
 use tokio::time::timeout;
 
 #[tokio::test]

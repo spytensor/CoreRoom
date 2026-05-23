@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::context_pack::ContextPack;
 use crate::source_registry::{ProjectSource, SourceKind, SourceTrustLevel};
 
-/// File inside `.coderoom/` that stores the source graph.
+/// File inside `.coreroom/` that stores the source graph.
 pub const SOURCE_GRAPH_FILE: &str = "source-graph.toml";
 
 /// Current persisted Source Graph schema version.
@@ -642,7 +642,7 @@ pub struct SourceGraphEvidenceCitation {
     pub reason: String,
 }
 
-/// Save a Source Graph to `.coderoom/source-graph.toml`.
+/// Save a Source Graph to `.coreroom/source-graph.toml`.
 pub fn save_source_graph(project_root: &Path, graph: &SourceGraph) -> Result<PathBuf> {
     graph.validate()?;
     let path = source_graph_path(project_root);
@@ -668,7 +668,7 @@ pub fn load_source_graph(path: &Path) -> Result<SourceGraph> {
 
 /// Return the canonical Source Graph path for a project root.
 pub fn source_graph_path(project_root: &Path) -> PathBuf {
-    project_root.join(CODEROOM_DIR).join(SOURCE_GRAPH_FILE)
+    project_root.join(COREROOM_DIR).join(SOURCE_GRAPH_FILE)
 }
 
 fn role_set(roles: &[String]) -> BTreeSet<&str> {

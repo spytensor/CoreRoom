@@ -2,8 +2,8 @@
 
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::evidence_packet::{
+use coreroom::config::COREROOM_DIR;
+use coreroom::evidence_packet::{
     evidence_packet_path, load_evidence_packet, save_evidence_packet, ChangedFileEvidence,
     CommandEvidence, EvidencePacket, EvidenceResult, EvidenceStatus, RiskEvidence,
     RoleReviewEvidence, TestResultEvidence, TrackerUpdateEvidence, EVIDENCE_DIR,
@@ -18,7 +18,7 @@ fn evidence_packet_roundtrips_v05_pr_example() {
     assert_eq!(
         path,
         tmp.path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(EVIDENCE_DIR)
             .join("WO-0204.toml")
     );
@@ -88,7 +88,7 @@ fn evidence_packet_fixtures_cover_complete_and_incomplete() {
 
 fn complete_packet() -> EvidencePacket {
     EvidencePacket {
-        schema_version: coderoom::evidence_packet::EVIDENCE_PACKET_SCHEMA_VERSION,
+        schema_version: coreroom::evidence_packet::EVIDENCE_PACKET_SCHEMA_VERSION,
         status: EvidenceStatus::Complete,
         work_order: "WO-0204".to_owned(),
         github_issue: 204,

@@ -3,16 +3,16 @@
 > Engineering Control Room for AI Agents: a host-led, GitHub-gated system for
 > AI-assisted software engineering change.
 
-[![CI](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml)
+[![CI](https://github.com/spytensor/CoreRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/CoreRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ![CoreRoom startup dashboard](docs/images/boot-dashboard.png)
 
 ![CoreRoom role work cards](docs/images/work-cards.png)
 
-> **Status: v0.5.0 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.7.0 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
-> directly, guides setup when `.coderoom/` is missing, and shows the
+> directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
 > adds host-led SDLC gate ledgers and live `/compact <role|all>` for
 > supported engines. **v0.4.4** fixes legacy config compatibility for
@@ -24,8 +24,9 @@
 > **v0.6.0** introduced the host-led Engineering Control Room turn:
 > `@host` becomes the user-facing engineering control role, with GitHub
 > issue driven work, dependency context, evidence packets, and mandatory
-> tracker closure. **v0.7.0** starts the staged CoreRoom rename while keeping
-> `cr` stable.
+> tracker closure. **v0.7.0** completes the CoreRoom rename across the repo,
+> Rust crate, npm package, release artifacts, state directory, and environment
+> variables while keeping the short `cr` command stable.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -57,7 +58,7 @@ delegation line like `@x: <brief>` in its reply.
   responsibilities; long procedures and reference material belong in
   the underlying engine's skills or project docs, not every role prompt.
 - **Layered prompt contract.** CoreRoom's routing and WorkCard protocol is a
-  built-in kernel layer; `.coderoom/shared.md`,
+  built-in kernel layer; `.coreroom/shared.md`,
   `roles/<role>/priors.md`, and `roles/<role>/knowledge/` stay user-owned
   project and role standards.
 - **Daily journals.** Every role writes an end-of-session log with cited
@@ -98,17 +99,12 @@ That's it. `cr` is now on your PATH. Same install story as
 `@anthropic-ai/claude-code`, `@openai/codex`, and `@google/gemini-cli` —
 which CoreRoom drives.
 
-The staged v0.7 rename targets `@spytensor/coreroom`; the legacy
-`@spytensor/coderoom` package remains the compatibility spelling during the
-rename window.
-
 If `cr` conflicts with an existing command in your environment, npm also
-installs `coreroom` as a long-form alias and `croom` as a legacy alias for the
-same binary.
+installs `coreroom` as a long-form alias for the same binary.
 
 The npm package is a thin wrapper: on install, its postinstall script
 downloads the right pre-built binary for your platform from the
-matching [GitHub Release](https://github.com/spytensor/codeRoom/releases)
+matching [GitHub Release](https://github.com/spytensor/CoreRoom/releases)
 and verifies its SHA-256. Supported platforms: linux + macOS, x86_64 and
 aarch64.
 
@@ -120,18 +116,17 @@ cr upgrade  # install and verify the latest npm package
 ```
 
 `cr start` also checks for updates in the background at most once per day.
-Disable that with `COREROOM_NO_UPDATE_CHECK=1`, legacy
-`CODEROOM_NO_UPDATE_CHECK=1`, or
+Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 `[updates] check_on_start = false` in user config.
 
 <details>
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.5.0
+TAG=v0.7.0
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-curl -fsSL "https://github.com/spytensor/codeRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
+curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
   | tar -xz
 sudo mv "cr-${TAG}-${OS}-${ARCH}/cr" /usr/local/bin/
 cr --version
@@ -147,8 +142,8 @@ distro-shipped `rustc` is usually too old (we depend on `edition2024`
 in the wider ecosystem).
 
 ```bash
-git clone https://github.com/spytensor/codeRoom
-cd codeRoom
+git clone https://github.com/spytensor/CoreRoom
+cd CoreRoom
 cargo build --release
 sudo cp target/release/cr /usr/local/bin/
 ```
@@ -183,7 +178,7 @@ that engine's own CLI and try again.
 ```bash
 cd your-project
 cr                              # setup if needed, then enter the room
-$EDITOR .coderoom/roles/host/priors.md # optional: give @host real priors
+$EDITOR .coreroom/roles/host/priors.md # optional: give @host real priors
 
 cr › hello
 [@host ready · model=claude-opus-4-7]
@@ -195,7 +190,7 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr` and `cr start` both enter the room; if `.coderoom/` is missing, an
+- `cr` and `cr start` both enter the room; if `.coreroom/` is missing, an
   interactive terminal gets the guided setup first.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
@@ -232,7 +227,7 @@ Useful commands:
   `/allow Read`, `/deny Bash`.
 - `cr prompt show <role>` prints the exact effective prompt for a role.
 - `cr gate status|phase|role-review|override|validate|close` inspects and
-  advances SDLC gate ledgers under `.coderoom/gates/`; the normal path is
+  advances SDLC gate ledgers under `.coreroom/gates/`; the normal path is
   host-led, with commands kept as debug and recovery controls. Tier 0/read-only
   reviews stay inline unless the user explicitly asks for a ledger.
 - `cr doctor [--fix]` detects old projects whose `shared.md` still contains
@@ -246,7 +241,7 @@ Useful commands:
   role spawn so anchors don't rot; see `cr pointers --help` for the grammar.
 - Live turns fold internal tool traces into one activity summary; `cr show`
   replays the full event log when you need to audit what happened. Set
-  `CODEROOM_VERBOSE_TOOLS=1` to opt the live REPL back into the full
+  `COREROOM_VERBOSE_TOOLS=1` to opt the live REPL back into the full
   per-tool trace stream when you need it inline.
 - Permission prompts appear only while a decision is needed. Successful
   once-only allows clear the prompt and stay out of the chat stream; session

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::config::{Config, CODEROOM_DIR};
+use crate::config::{Config, COREROOM_DIR};
 use crate::priors::{self, ComposeOptions};
 
 /// Render the effective prompt for `role` exactly as the REPL would compose it.
@@ -21,9 +21,9 @@ pub fn render_with_options(
     let role = role.strip_prefix('@').unwrap_or(role);
     let cfg = load_config(project_root)?;
     if !cfg.roles.contains_key(role) {
-        bail!("role `{role}` is not declared in .coderoom/config.toml");
+        bail!("role `{role}` is not declared in .coreroom/config.toml");
     }
-    priors::compose_for_with_options(&project_root.join(CODEROOM_DIR), role, options)
+    priors::compose_for_with_options(&project_root.join(COREROOM_DIR), role, options)
 }
 
 #[cfg(not(test))]
@@ -58,10 +58,10 @@ mod tests {
 
     fn fixture() -> TempDir {
         let tmp = TempDir::new().unwrap();
-        let coderoom = tmp.path().join(CODEROOM_DIR);
-        fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+        let coreroom = tmp.path().join(COREROOM_DIR);
+        fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
         fs::write(
-            coderoom.join(CONFIG_FILE),
+            coreroom.join(CONFIG_FILE),
             r#"
 default_engine = "cc"
 permission_mode = "ask"
@@ -73,7 +73,7 @@ host_role = "host"
         )
         .unwrap();
         for (role, body) in [("host", "HOST_PRIORS"), ("backend", "BACKEND_PRIORS")] {
-            let role_dir = coderoom.join(ROLES_DIR).join(role);
+            let role_dir = coreroom.join(ROLES_DIR).join(role);
             fs::create_dir_all(role_dir.join(crate::manifest::KNOWLEDGE_DIR)).unwrap();
             fs::write(role_dir.join(crate::manifest::ROLE_PRIORS_FILE), body).unwrap();
         }
@@ -84,9 +84,9 @@ host_role = "host"
     fn render_accepts_at_prefixed_role() {
         let tmp = fixture();
         let prompt = render(tmp.path(), "@backend").unwrap();
-        assert!(prompt.contains("# CodeRoom kernel protocol"));
+        assert!(prompt.contains("# CoreRoom kernel protocol"));
         assert!(prompt.contains("BACKEND_PRIORS"));
-        assert!(prompt.contains("Source: .coderoom/roles/backend/priors.md"));
+        assert!(prompt.contains("Source: .coreroom/roles/backend/priors.md"));
     }
 
     #[test]

@@ -1,12 +1,12 @@
-//! CodeRoom Event Protocol — the normalized event stream emitted by every
+//! CoreRoom Event Protocol — the normalized event stream emitted by every
 //! engine adapter and consumed by the message bus, REPL, and patch logic.
 //!
-//! See `docs/architecture.md` § "CodeRoom Event Protocol (CREP)" and
+//! See `docs/architecture.md` § "CoreRoom Event Protocol (CREP)" and
 //! `docs/v0.2-trust-and-interrupt.md` § D for the v0.2 amendment.
 //!
 //! Wire format is JSON: each event serializes to a single object with a
 //! `"type"` discriminator and snake_case field names. The append-only
-//! `.coderoom/messages.jsonl` log stores durable events in this exact
+//! `.coreroom/messages.jsonl` log stores durable events in this exact
 //! shape; live-only deltas may be broadcast without being appended.
 //!
 //! ### v0.2 turn-id and thread-id
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::gate::{GatePhase, PlanReviewDecision};
 use crate::turn::TurnId;
 
-/// A single event in the CodeRoom Event Protocol stream.
+/// A single event in the CoreRoom Event Protocol stream.
 ///
 /// Variants intentionally use a single `#[serde(tag = "type")]` discriminator
 /// so the JSONL log is grep-friendly:
@@ -158,7 +158,7 @@ pub enum CrepEvent {
     },
     /// A gate phase advanced or rolled back by explicit user action.
     PhaseAdvanced {
-        /// CodeRoom thread id / gate id.
+        /// CoreRoom thread id / gate id.
         thread: String,
         /// Composite priors hash when the transition is tied to a role
         /// context. Empty for user/system-only gate transitions.
@@ -173,7 +173,7 @@ pub enum CrepEvent {
     },
     /// A role blocked the current gate phase with a declared reason.
     PhaseBlocked {
-        /// CodeRoom thread id / gate id.
+        /// CoreRoom thread id / gate id.
         thread: String,
         /// Phase that was blocked.
         phase: GatePhase,

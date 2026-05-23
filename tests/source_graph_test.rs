@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use coderoom::context_pack::{ContextPack, ContextPackEntry};
-use coderoom::source_graph::{
+use coreroom::context_pack::{ContextPack, ContextPackEntry};
+use coreroom::source_graph::{
     SourceGraph, SourceGraphFindingKind, SourceGraphNodeFacts, SourceRefreshPlan,
 };
-use coderoom::source_registry::SourceTrustLevel;
+use coreroom::source_registry::SourceTrustLevel;
 
 #[test]
 fn source_graph_fixture_covers_multi_repo_context_and_drift() {
@@ -183,7 +183,7 @@ fn current_facts() -> BTreeMap<String, SourceGraphNodeFacts> {
 }
 
 fn assert_finding(
-    findings: &[coderoom::source_graph::SourceGraphFinding],
+    findings: &[coreroom::source_graph::SourceGraphFinding],
     source_id: &str,
     kind: SourceGraphFindingKind,
 ) {

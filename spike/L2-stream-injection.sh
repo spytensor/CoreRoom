@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-SANDBOX="$(mktemp -d -t coderoom-L2-XXXXXX)"
+SANDBOX="$(mktemp -d -t coreroom-L2-XXXXXX)"
 trap 'echo "sandbox: $SANDBOX"' EXIT
 
 INPUT="$SANDBOX/input.jsonl"

@@ -1,6 +1,6 @@
 //! Project status rollup fixtures.
 
-use coderoom::project_status::{
+use coreroom::project_status::{
     build_project_status, ProjectStatusInput, ProjectWorkState, ReleaseDecision,
 };
 use serde::Deserialize;

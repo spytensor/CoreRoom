@@ -5,16 +5,16 @@ use tempfile::TempDir;
 
 fn fixture() -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         "default_engine = \"cc\"\n\
          host_role = \"host\"\n\n\
          [roles.host]\n",
     )
     .unwrap();
-    fs::write(coderoom.join(ROLES_DIR).join("host.md"), "h").unwrap();
+    fs::write(coreroom.join(ROLES_DIR).join("host.md"), "h").unwrap();
     tmp
 }
 
@@ -23,9 +23,9 @@ fn resolve_paths_for_each_layer() {
     let tmp = fixture();
     let root = tmp.path();
     let project = resolve_path(LayerTarget::Project, root).unwrap();
-    assert_eq!(project, root.join(CODEROOM_DIR).join(CONFIG_FILE));
+    assert_eq!(project, root.join(COREROOM_DIR).join(CONFIG_FILE));
     let local = resolve_path(LayerTarget::Local, root).unwrap();
-    assert_eq!(local, root.join(CODEROOM_DIR).join(CONFIG_LOCAL_FILE));
+    assert_eq!(local, root.join(COREROOM_DIR).join(CONFIG_LOCAL_FILE));
 }
 
 #[test]
@@ -49,21 +49,21 @@ fn ensure_seeded_is_no_op_when_file_exists() {
 #[test]
 fn ensure_local_gitignored_creates_when_missing() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(&coderoom).unwrap();
-    ensure_local_gitignored(&coderoom).unwrap();
-    let body = fs::read_to_string(coderoom.join(".gitignore")).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(&coreroom).unwrap();
+    ensure_local_gitignored(&coreroom).unwrap();
+    let body = fs::read_to_string(coreroom.join(".gitignore")).unwrap();
     assert!(body.contains(CONFIG_LOCAL_FILE));
 }
 
 #[test]
 fn ensure_local_gitignored_appends_to_existing() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(&coderoom).unwrap();
-    fs::write(coderoom.join(".gitignore"), "patches/\n").unwrap();
-    ensure_local_gitignored(&coderoom).unwrap();
-    let body = fs::read_to_string(coderoom.join(".gitignore")).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(&coreroom).unwrap();
+    fs::write(coreroom.join(".gitignore"), "patches/\n").unwrap();
+    ensure_local_gitignored(&coreroom).unwrap();
+    let body = fs::read_to_string(coreroom.join(".gitignore")).unwrap();
     assert!(body.contains("patches/"));
     assert!(body.contains(CONFIG_LOCAL_FILE));
 }
@@ -71,11 +71,11 @@ fn ensure_local_gitignored_appends_to_existing() {
 #[test]
 fn ensure_local_gitignored_is_idempotent() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(&coderoom).unwrap();
-    ensure_local_gitignored(&coderoom).unwrap();
-    ensure_local_gitignored(&coderoom).unwrap();
-    let body = fs::read_to_string(coderoom.join(".gitignore")).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(&coreroom).unwrap();
+    ensure_local_gitignored(&coreroom).unwrap();
+    ensure_local_gitignored(&coreroom).unwrap();
+    let body = fs::read_to_string(coreroom.join(".gitignore")).unwrap();
     // Only one occurrence of the rule, even after two calls.
     assert_eq!(
         body.matches(CONFIG_LOCAL_FILE).count(),
@@ -146,13 +146,13 @@ fn set_project_scalar_updates_config() {
 #[test]
 fn edit_project_refuses_when_config_missing() {
     let tmp = TempDir::new().unwrap();
-    // No .coderoom/config.toml
+    // No .coreroom/config.toml
     let err = edit(LayerTarget::Project, tmp.path()).expect_err("should refuse");
     assert!(err.to_string().contains("cr init"));
 }
 
 #[test]
-fn edit_local_refuses_when_coderoom_dir_missing() {
+fn edit_local_refuses_when_coreroom_dir_missing() {
     let tmp = TempDir::new().unwrap();
     let err = edit(LayerTarget::Local, tmp.path()).expect_err("should refuse");
     assert!(err.to_string().contains("cr init"));

@@ -2,12 +2,12 @@
 
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::context_pack::{
+use coreroom::config::COREROOM_DIR;
+use coreroom::context_pack::{
     load_context_pack, save_context_pack, ContextPack, ContextPackEntry, ContextPackProposal,
     ContextRange, CONTEXT_PACKS_DIR,
 };
-use coderoom::source_registry::{
+use coreroom::source_registry::{
     ProjectSource, RefreshPolicy, SourceKind, SourceRegistry, SourceTrustLevel,
 };
 
@@ -26,7 +26,7 @@ fn context_pack_roundtrips_different_role_slices() {
     assert_eq!(
         path,
         tmp.path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(CONTEXT_PACKS_DIR)
             .join("CTX-WO-0209.toml")
     );
@@ -73,7 +73,7 @@ fn host_context_pack_fixture_documents_scoped_delegation() {
 
 fn registry() -> SourceRegistry {
     SourceRegistry {
-        schema_version: coderoom::source_registry::SOURCE_REGISTRY_SCHEMA_VERSION,
+        schema_version: coreroom::source_registry::SOURCE_REGISTRY_SCHEMA_VERSION,
         sources: vec![
             ProjectSource {
                 id: "core-api".to_owned(),
@@ -105,7 +105,7 @@ fn registry() -> SourceRegistry {
 
 fn context_pack() -> ContextPack {
     ContextPack {
-        schema_version: coderoom::context_pack::CONTEXT_PACK_SCHEMA_VERSION,
+        schema_version: coreroom::context_pack::CONTEXT_PACK_SCHEMA_VERSION,
         id: "CTX-WO-0209".to_owned(),
         work_order: "WO-0209".to_owned(),
         entries: vec![

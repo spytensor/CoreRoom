@@ -8,7 +8,7 @@
 //!
 //! Why so simple at v0.1:
 //!
-//! - Gemini must expose `--system-instruction-file`; otherwise CodeRoom
+//! - Gemini must expose `--system-instruction-file`; otherwise CoreRoom
 //!   refuses to start the role instead of concatenating priors into the
 //!   user prompt and losing system-prompt isolation.
 //! - `-y` (yolo) skips approval prompts, mirroring CC's
@@ -18,7 +18,7 @@
 //!   format).
 //! - No wrapper-side permission gate or multi-turn cache reuse. Gemini
 //!   exposes tool events in `stream-json`, but not a hook protocol that lets
-//!   CodeRoom approve or deny them before execution.
+//!   CoreRoom approve or deny them before execution.
 //!
 //! `priors_hash` reuses [`crate::adapter::cc::fingerprint`] so the value
 //! is comparable across engines.
@@ -47,7 +47,7 @@ use crate::turn::TurnId;
 
 const CHANNEL_CAPACITY: usize = 32;
 const GEMINI_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-const GEMINI_UNTRUSTED_PRIORS_ENV: &str = "CODEROOM_GEMINI_UNTRUSTED_PRIORS";
+const GEMINI_UNTRUSTED_PRIORS_ENV: &str = "COREROOM_GEMINI_UNTRUSTED_PRIORS";
 const TOOL_OUTPUT_SUMMARY_MAX_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +95,7 @@ impl EngineAdapter for GeminiAdapter {
                 engine: Engine::Gemini.as_str(),
                 message: format!(
                     "Gemini roles require permission_mode=\"bypass\"; \
-                     CodeRoom cannot yet supervise Gemini tool approvals \
+                     CoreRoom cannot yet supervise Gemini tool approvals \
                      in permission_mode=\"{}\"",
                     config.permission_mode.as_str()
                 ),
@@ -199,7 +199,7 @@ async fn probe_gemini(gemini_path: &PathBuf) -> Result<GeminiPromptMode, String>
         return Err(
             "installed gemini CLI does not advertise --system-instruction-file; \
              refusing to inline priors into user prompts. Set \
-             CODEROOM_GEMINI_UNTRUSTED_PRIORS=1 to opt into the unsafe fallback"
+             COREROOM_GEMINI_UNTRUSTED_PRIORS=1 to opt into the unsafe fallback"
                 .to_owned(),
         );
     }
@@ -246,7 +246,7 @@ impl GeminiLoop {
                 UserMessage::Prompt(prompt) => prompt,
                 UserMessage::CompactContext { respond_to } => {
                     let _ = respond_to.send(CompactResult::Unsupported {
-                        reason: "Gemini does not expose a supervised live compaction primitive in CodeRoom"
+                        reason: "Gemini does not expose a supervised live compaction primitive in CoreRoom"
                             .to_owned(),
                     });
                     continue;

@@ -23,9 +23,9 @@ WorkOrder draft: WO-0212
   Packet, tracker update, PR link
 
 Required sources:
-- coderoom-architecture: docs/architecture.md
+- coreroom-architecture: docs/architecture.md
 - sdlc-gates: docs/sdlc-gates.md
-- v06-tracker: https://github.com/spytensor/codeRoom/issues/202
+- v06-tracker: https://github.com/spytensor/CoreRoom/issues/202
 - pr-template: .github/PULL_REQUEST_TEMPLATE.md
 
 ContextPack: CTX-WO-0212

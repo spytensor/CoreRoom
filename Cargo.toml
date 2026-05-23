@@ -1,13 +1,13 @@
 [package]
-name = "coderoom"
-version = "0.5.0"
+name = "coreroom"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Charlie Zhu <chaojie.zhu.cn@gmail.com>"]
 license = "MIT"
 description = "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control."
-homepage = "https://github.com/spytensor/codeRoom"
-repository = "https://github.com/spytensor/codeRoom"
+homepage = "https://github.com/spytensor/CoreRoom"
+repository = "https://github.com/spytensor/CoreRoom"
 readme = "README.md"
 keywords = ["cli", "ai", "agents", "coreroom", "codex"]
 categories = ["command-line-utilities", "development-tools"]
@@ -18,7 +18,7 @@ name = "cr"
 path = "src/main.rs"
 
 [lib]
-name = "coderoom"
+name = "coreroom"
 path = "src/lib.rs"
 
 [dependencies]
@@ -69,7 +69,7 @@ sha2 = "0.10"
 # pulled in by tests (a regular dep is visible there too).
 tempfile = "3.10"
 
-# Cross-process advisory file locks for `.coderoom/messages.jsonl`.
+# Cross-process advisory file locks for `.coreroom/messages.jsonl`.
 fs2 = "0.4"
 
 [target.'cfg(unix)'.dependencies]

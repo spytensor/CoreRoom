@@ -17,13 +17,13 @@ that reviews must preserve, see `docs/threat-model.md`.
 
 ## Files
 
-- `.coderoom/gates/<thread-id>.json` stores one ledger per work thread.
-- `.coderoom/gates/active` points at the most recently touched ledger.
-- `.coderoom/gates/<thread-id>/<phase>.md` stores the structured notes for
+- `.coreroom/gates/<thread-id>.json` stores one ledger per work thread.
+- `.coreroom/gates/active` points at the most recently touched ledger.
+- `.coreroom/gates/<thread-id>/<phase>.md` stores the structured notes for
   each phase the thread enters.
-- `.coderoom/gates/<thread-id>/reviews/<role>.toml` stores binding
+- `.coreroom/gates/<thread-id>/reviews/<role>.toml` stores binding
   authority-scoped plan review decisions for the current plan SHA.
-- `.coderoom/gate-templates/*.md` stores reusable gate prompts.
+- `.coreroom/gate-templates/*.md` stores reusable gate prompts.
 
 Ledgers are structural evidence. They do not approve correctness.
 
@@ -55,7 +55,7 @@ Confirmation required: yes | no
 Categories:
 
 - `tier-0-inline`: read-only review, explanation, or tiny low-risk edit where
-  inline evidence is enough and no `.coderoom/` ledger is needed.
+  inline evidence is enough and no `.coreroom/` ledger is needed.
 - `persistent-workorder`: code, docs, workflow, or project work that needs a
   GitHub Issue, branch, PR, evidence, and tracker row.
 - `constitution-amendment`: product/architecture/trust-boundary changes that
@@ -71,7 +71,7 @@ changes still follow the confirmation boundary above.
 ## WorkOrders
 
 Starting in v0.6, persistent engineering work can be represented as a
-WorkOrder under `.coderoom/work-orders/<id>.toml`. A WorkOrder is the
+WorkOrder under `.coreroom/work-orders/<id>.toml`. A WorkOrder is the
 project-level binding record between host intent, GitHub Issue, SDLC gate,
 branch, PR, tracker row, and evidence expectations. It does not replace the
 GitHub Issue.
@@ -119,7 +119,7 @@ comments.
 ## Project Source Registry
 
 Source Registry is the v0.6 project-level catalog of dependency context. It is
-stored at `.coderoom/source-registry.toml` and is distinct from both role
+stored at `.coreroom/source-registry.toml` and is distinct from both role
 knowledge and WorkOrder ContextPacks:
 
 - Role knowledge is long-lived role-specific prompt material.
@@ -181,7 +181,7 @@ loudly before registry writes.
 ## WorkOrder ContextPacks
 
 ContextPacks are WorkOrder-scoped selections from Source Registry. They are
-stored under `.coderoom/context-packs/<id>.toml` and exist to keep delegation
+stored under `.coreroom/context-packs/<id>.toml` and exist to keep delegation
 small and reproducible: `@engineer` and `@security` can receive different
 slices of the same registered sources.
 
@@ -226,7 +226,7 @@ every source by default.
 ## Evidence Packets
 
 Evidence Packets are WorkOrder-scoped completion records stored under
-`.coderoom/evidence/<workOrder>.toml`. They let `@host` generate PR-ready
+`.coreroom/evidence/<workOrder>.toml`. They let `@host` generate PR-ready
 summaries from structured evidence instead of trusting model prose.
 
 The persisted Evidence Packet schema uses camelCase keys:
@@ -376,10 +376,10 @@ stale.
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
-answer plus lightweight checks is enough. For read-only review, CodeRoom roles
+answer plus lightweight checks is enough. For read-only review, CoreRoom roles
 may inspect repository files, docs, config, tests, local logs, and command
 output needed to cite evidence. They must not mutate project files, write
-`.coderoom/` review evidence, or append gate artifacts, reviewers, or
+`.coreroom/` review evidence, or append gate artifacts, reviewers, or
 verification records unless the user explicitly asks for a persistent gate
 ledger.
 
@@ -399,11 +399,11 @@ cr gate phase <thread_id> discovery
 cr gate artifact --thread <thread_id> --kind discovery --path docs/gates/discovery.md
 
 cr gate phase <thread_id> plan
-# Fill `.coderoom/gates/<thread_id>/plan.md` with frontmatter:
+# Fill `.coreroom/gates/<thread_id>/plan.md` with frontmatter:
 # ---
 # scopes: [infra, deployment]
 # ---
-cr gate artifact --thread <thread_id> --kind plan --path .coderoom/gates/<thread_id>/plan.md
+cr gate artifact --thread <thread_id> --kind plan --path .coreroom/gates/<thread_id>/plan.md
 
 cr gate phase <thread_id> review
 cr gate role-review <thread_id> sre approve
@@ -423,7 +423,7 @@ cr gate verify --thread <thread_id> --command "cargo test --all-features --locke
 cr gate close --thread <thread_id>
 ```
 
-If `close` blocks, CodeRoom prints actionable missing evidence. A bypass is
+If `close` blocks, CoreRoom prints actionable missing evidence. A bypass is
 explicit and recorded:
 
 ```bash
@@ -442,12 +442,12 @@ cr gate override <thread_id> --role security --reason "Emergency patch; rollback
 
 - Discovery, plan, review, and sign-off artifacts must be recorded.
 - Plan artifacts must include a `Sign-off Checklist` with `SO-N` rows.
-- `.coderoom/gates/<thread-id>/plan.md` must declare frontmatter scopes
+- `.coreroom/gates/<thread-id>/plan.md` must declare frontmatter scopes
   before `plan -> review`; accepted scopes are `deployment`, `infra`,
   `secrets`, `data-policy`, `compliance`, and `dependencies`.
 - `review -> signoff` requires every role whose configured `authority`
   intersects the plan scopes to approve the current plan SHA.
-- If no configured role matches any plan scope, CodeRoom warns but does not
+- If no configured role matches any plan scope, CoreRoom warns but does not
   block. If at least one role matches but some plan scopes remain uncovered,
   sign-off advancement is blocked.
 - Changing the plan artifact after approval makes the prior authority review
@@ -484,6 +484,6 @@ Roles can block the active phase by ending their reply with:
 cr-phase-block: <reason>
 ```
 
-The marker must be the final line. CodeRoom strips it from the visible reply,
-records a `PhaseBlocked` event in `.coderoom/messages.jsonl`, appends the block
+The marker must be the final line. CoreRoom strips it from the visible reply,
+records a `PhaseBlocked` event in `.coreroom/messages.jsonl`, appends the block
 to the gate ledger, and suppresses follow-up auto-routing for that turn.

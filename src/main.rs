@@ -2,7 +2,7 @@
 //!
 //! Subcommands at v0.1:
 //!
-//! - `cr init [--project PATH]`  — bootstrap `.coderoom/` in a fresh project
+//! - `cr init [--project PATH]`  — bootstrap `.coreroom/` in a fresh project
 //! - `cr role add <name> [--engine cc|codex|gemini] [--model X]` — add a role
 //! - `cr role list`              — list configured roles
 //! - `cr role show <name>`        — show role identity and authority
@@ -13,7 +13,7 @@
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH] [--allow-large-priors]` — enter the REPL
 //! - `cr prompt show <role>`     — print a role's effective prompt
-//! - `cr lock`                   — regenerate `.coderoom/priors.lock`
+//! - `cr lock`                   — regenerate `.coreroom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
 //! - `cr gate ...`               — inspect SDLC gate ledgers
 //! - `cr doctor [--fix] [--stale-days N]` — inspect CoreRoom project files
@@ -25,15 +25,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
-use coderoom::adapter::{Engine, PermissionMode};
-use coderoom::config::AuthorityScope;
-use coderoom::config_cmd::LayerTarget;
-use coderoom::crep::CrepEvent;
-use coderoom::gate::{
+use coreroom::adapter::{Engine, PermissionMode};
+use coreroom::config::AuthorityScope;
+use coreroom::config_cmd::LayerTarget;
+use coreroom::crep::CrepEvent;
+use coreroom::gate::{
     ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, PhaseAdvanceInput,
     PlanOverrideInput, PlanReviewDecision, ReviewInput, RoleReviewInput, VerificationInput,
 };
-use coderoom::init::{InitHookMode, InitPreset};
+use coreroom::init::{InitHookMode, InitPreset};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -49,9 +49,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
-    /// Bootstrap a `.coderoom/` directory with detected default roles.
+    /// Bootstrap a `.coreroom/` directory with detected default roles.
     Init {
-        /// Project root in which to create `.coderoom/`. Defaults to the
+        /// Project root in which to create `.coreroom/`. Defaults to the
         /// current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
@@ -69,27 +69,27 @@ enum Cmd {
         #[arg(long, value_parser = parse_init_preset, default_value = "default")]
         preset: InitPreset,
     },
-    /// Regenerate `.coderoom/priors.lock` after intentional priors changes.
+    /// Regenerate `.coreroom/priors.lock` after intentional priors changes.
     Lock {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
     },
-    /// Verify `.coderoom/priors.lock` against current priors content.
+    /// Verify `.coreroom/priors.lock` against current priors content.
     Verify {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
     },
-    /// Manage roles in the current project's `.coderoom/config.toml`.
+    /// Manage roles in the current project's `.coreroom/config.toml`.
     Role {
         #[command(subcommand)]
         command: RoleCmd,
     },
-    /// Enter the interactive REPL using `.coderoom/config.toml` in the
+    /// Enter the interactive REPL using `.coreroom/config.toml` in the
     /// current directory (or `--project`).
     Start {
-        /// Project root containing `.coderoom/`. Defaults to the current
+        /// Project root containing `.coreroom/`. Defaults to the current
         /// working directory.
         #[arg(long)]
         project: Option<PathBuf>,
@@ -99,7 +99,7 @@ enum Cmd {
         /// Start every role with a fresh engine session instead of
         /// resuming the prior conversation. Default behaviour (per
         /// amendment A-006) is to resume from
-        /// `.coderoom/sessions/ids/<role>.id` when present; pass
+        /// `.coreroom/sessions/ids/<role>.id` when present; pass
         /// `--fresh` to clear those ids and start clean. The user-
         /// facing equivalent of `claude --resume` vs no flag.
         #[arg(long)]
@@ -108,7 +108,7 @@ enum Cmd {
         #[arg(long)]
         allow_large_priors: bool,
     },
-    /// Replay `.coderoom/messages.jsonl` through the live renderer.
+    /// Replay `.coreroom/messages.jsonl` through the live renderer.
     Show {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
@@ -125,7 +125,7 @@ enum Cmd {
         #[arg(long)]
         tail: Option<usize>,
     },
-    /// Per-role cost summary aggregated from `.coderoom/messages.jsonl`.
+    /// Per-role cost summary aggregated from `.coreroom/messages.jsonl`.
     Cost {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
@@ -199,7 +199,7 @@ switch to `@HEAD` when you've reviewed the new content.")]
         #[arg(long)]
         fix: bool,
         /// Priors liveness stale threshold.
-        #[arg(long, default_value_t = coderoom::liveness::DEFAULT_STALE_DAYS)]
+        #[arg(long, default_value_t = coreroom::liveness::DEFAULT_STALE_DAYS)]
         stale_days: i64,
     },
     /// Check the npm registry for a newer `cr` and report the diff.
@@ -212,7 +212,7 @@ switch to `@HEAD` when you've reviewed the new content.")]
     /// the binary on disk actually changed before claiming success.
     Upgrade,
     /// Internal Claude Code hook entry point.
-    #[command(name = "__coderoom-hook-decision", hide = true)]
+    #[command(name = "__coreroom-hook-decision", hide = true)]
     HookDecision {
         /// Permission mode to apply to this hook decision.
         #[arg(long, value_parser = parse_permission_mode)]
@@ -338,16 +338,16 @@ enum ConfigCmd {
     },
     /// Open `$EDITOR` (or `$VISUAL`) on a layer's config file.
     /// Creates a commented stub for `--user` / `--local` if missing;
-    /// refuses `--project` if `.coderoom/config.toml` is missing
+    /// refuses `--project` if `.coreroom/config.toml` is missing
     /// (run `cr init` first).
     Edit {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// Edit the user-level config (~/.config/coderoom/config.toml).
+        /// Edit the user-level config (~/.config/coreroom/config.toml).
         #[arg(long, group = "layer")]
         user: bool,
-        /// Edit the project-local override (.coderoom/config.local.toml).
+        /// Edit the project-local override (.coreroom/config.local.toml).
         #[arg(long, group = "layer")]
         local: bool,
     },
@@ -377,7 +377,7 @@ enum ConfigCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// Write project `.coderoom/config.toml`.
+        /// Write project `.coreroom/config.toml`.
         #[arg(long = "project-layer", group = "layer")]
         project_layer: bool,
         /// Write the project-local override.
@@ -637,7 +637,7 @@ enum GateCmd {
         #[arg(long)]
         thread: Option<String>,
     },
-    /// Install missing SDLC gate templates into `.coderoom/`.
+    /// Install missing SDLC gate templates into `.coreroom/`.
     Templates {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
@@ -724,7 +724,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if let Some(Cmd::HookDecision { mode, policy_file }) = &cli.command {
-        return coderoom::permissions::run_claude_hook(*mode, policy_file.as_deref());
+        return coreroom::permissions::run_claude_hook(*mode, policy_file.as_deref());
     }
 
     let _ = tracing_subscriber::fmt()
@@ -734,7 +734,7 @@ fn main() -> Result<()> {
         )
         .with_writer(std::io::stderr)
         .try_init();
-    coderoom::output::print_terminal_probe();
+    coreroom::output::print_terminal_probe();
 
     // Engine-binary check up front. `cr config`, `cr update`, and
     // `cr upgrade` are useful without any engine installed (inspecting
@@ -756,7 +756,7 @@ fn main() -> Result<()> {
                 | Cmd::HookDecision { .. }
         )
     );
-    if needs_engine && coderoom::engines::require_any_installed().is_err() {
+    if needs_engine && coreroom::engines::require_any_installed().is_err() {
         std::process::exit(1);
     }
 
@@ -770,9 +770,9 @@ fn main() -> Result<()> {
             preset,
         }) => {
             let mut opts = if yes {
-                coderoom::init::InitOptions::accepted_defaults()
+                coreroom::init::InitOptions::accepted_defaults()
             } else {
-                coderoom::init::InitOptions::manual()
+                coreroom::init::InitOptions::manual()
             };
             opts.hook_mode = if with_claude_hooks {
                 InitHookMode::InstallOrUpgrade
@@ -782,7 +782,7 @@ fn main() -> Result<()> {
                 InitHookMode::None
             };
             opts.preset = preset;
-            coderoom::init::run(&project_root_or_cwd(project)?, opts)
+            coreroom::init::run(&project_root_or_cwd(project)?, opts)
         }
         Some(Cmd::Lock { project }) => run_lock(project),
         Some(Cmd::Verify { project }) => run_verify(project),
@@ -804,12 +804,12 @@ fn main() -> Result<()> {
                 .build()?;
             runtime.block_on(async move {
                 let project_root = project_root_or_cwd(project)?;
-                let options = coderoom::repl::ShowOptions {
+                let options = coreroom::repl::ShowOptions {
                     role: role.map(|role| role.strip_prefix('@').unwrap_or(&role).to_owned()),
                     since,
                     tail,
                 };
-                coderoom::repl::show_log(&project_root, &options).await
+                coreroom::repl::show_log(&project_root, &options).await
             })
         }
         Some(Cmd::Config { command }) => run_config_cmd(command),
@@ -821,16 +821,16 @@ fn main() -> Result<()> {
             stale_days,
         }) => {
             let root = project_root_or_cwd(project)?;
-            coderoom::doctor::run(&root, coderoom::doctor::DoctorOptions { fix, stale_days })
+            coreroom::doctor::run(&root, coreroom::doctor::DoctorOptions { fix, stale_days })
         }
-        Some(Cmd::Update) => coderoom::update::check(),
-        Some(Cmd::Upgrade) => coderoom::update::upgrade(),
+        Some(Cmd::Update) => coreroom::update::check(),
+        Some(Cmd::Upgrade) => coreroom::update::upgrade(),
         Some(Cmd::HookDecision { .. }) => unreachable!("handled before terminal setup"),
         Some(Cmd::Compact { role, project }) => {
             let root = project_root_or_cwd(project)?;
             let role = role.strip_prefix('@').unwrap_or(&role);
             let path =
-                coderoom::priors::compact_role(&root.join(coderoom::config::CODEROOM_DIR), role)?;
+                coreroom::priors::compact_role(&root.join(coreroom::config::COREROOM_DIR), role)?;
             println!("compacted @{role} history into {}", path.display());
             Ok(())
         }
@@ -845,7 +845,7 @@ fn main() -> Result<()> {
                 .build()?;
             runtime.block_on(async move {
                 let project_root = project_root_or_cwd(project)?;
-                coderoom::cost::run(&project_root, since).await
+                coreroom::cost::run(&project_root, since).await
             })
         }
     }
@@ -857,10 +857,10 @@ fn run_prompt_cmd(cmd: PromptCmd) -> Result<()> {
             role,
             project,
             allow_large_priors,
-        } => coderoom::prompt_cmd::show_with_options(
+        } => coreroom::prompt_cmd::show_with_options(
             &project_root_or_cwd(project)?,
             &role,
-            coderoom::priors::ComposeOptions {
+            coreroom::priors::ComposeOptions {
                 allow_large_priors,
                 ..Default::default()
             },
@@ -899,7 +899,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                     "--role, --engine, and --model must be supplied together for implementer metadata"
                 ),
             };
-            let ledger = coderoom::gate::init(
+            let ledger = coreroom::gate::init(
                 &root,
                 GateInit {
                     thread_id: thread,
@@ -919,14 +919,14 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         }
         GateCmd::Status { project, thread } => {
             let root = project_root_or_cwd(project)?;
-            let ledger = coderoom::gate::load(&root, thread.as_deref())?;
-            let validation = coderoom::gate::validate(&root, Some(&ledger.thread_id))?;
-            println!("{}", coderoom::gate::format_status(&ledger, &validation));
+            let ledger = coreroom::gate::load(&root, thread.as_deref())?;
+            let validation = coreroom::gate::validate(&root, Some(&ledger.thread_id))?;
+            println!("{}", coreroom::gate::format_status(&ledger, &validation));
             Ok(())
         }
         GateCmd::Validate { project, thread } => {
             let root = project_root_or_cwd(project)?;
-            let validation = coderoom::gate::validate(&root, thread.as_deref())?;
+            let validation = coreroom::gate::validate(&root, thread.as_deref())?;
             if validation.passed() {
                 println!(
                     "{} gate pass ({})",
@@ -934,7 +934,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                     validation.thread_id
                 );
             } else {
-                println!("{}", coderoom::gate::format_blocking_message(&validation));
+                println!("{}", coreroom::gate::format_blocking_message(&validation));
             }
             Ok(())
         }
@@ -946,7 +946,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
             rollback,
         } => {
             let root = project_root_or_cwd(project)?;
-            let transition = coderoom::gate::advance_phase(
+            let transition = coreroom::gate::advance_phase(
                 &root,
                 &PhaseAdvanceInput {
                     thread_id: thread,
@@ -989,7 +989,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         } => {
             let root = project_root_or_cwd(project)?;
             let thread = selected_gate_thread(&root, thread.as_deref())?;
-            let ledger = coderoom::gate::close(&root, &thread, bypass_reason.as_deref())?;
+            let ledger = coreroom::gate::close(&root, &thread, bypass_reason.as_deref())?;
             println!(
                 "closed gate {} with result {}",
                 ledger.thread_id,
@@ -1005,7 +1005,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         } => {
             let root = project_root_or_cwd(project)?;
             let thread = selected_gate_thread(&root, thread.as_deref())?;
-            let ledger = coderoom::gate::record_bypass(&root, &thread, &gate, &reason)?;
+            let ledger = coreroom::gate::record_bypass(&root, &thread, &gate, &reason)?;
             println!(
                 "recorded bypass for {} ({})",
                 ledger.thread_id,
@@ -1023,7 +1023,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         } => {
             let root = project_root_or_cwd(project)?;
             let thread = selected_gate_thread(&root, thread.as_deref())?;
-            let ledger = coderoom::gate::record_artifact(
+            let ledger = coreroom::gate::record_artifact(
                 &root,
                 ArtifactInput {
                     thread_id: thread,
@@ -1057,7 +1057,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                 turn_id: turn,
                 thread_id: Some(thread.clone()),
             };
-            let ledger = coderoom::gate::set_implementer(&root, &thread, actor)?;
+            let ledger = coreroom::gate::set_implementer(&root, &thread, actor)?;
             println!("recorded implementer for {}", ledger.thread_id);
             Ok(())
         }
@@ -1084,7 +1084,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                 turn_id: turn,
                 thread_id: Some(thread.clone()),
             };
-            let ledger = coderoom::gate::record_review(
+            let ledger = coreroom::gate::record_review(
                 &root,
                 ReviewInput {
                     thread_id: thread,
@@ -1108,7 +1108,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
             reason,
         } => {
             let root = project_root_or_cwd(project)?;
-            let record = coderoom::gate::record_role_review(
+            let record = coreroom::gate::record_role_review(
                 &root,
                 RoleReviewInput {
                     thread_id: thread.clone(),
@@ -1142,7 +1142,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
             reason,
         } => {
             let root = project_root_or_cwd(project)?;
-            let override_record = coderoom::gate::record_plan_override(
+            let override_record = coreroom::gate::record_plan_override(
                 &root,
                 PlanOverrideInput {
                     thread_id: thread.clone(),
@@ -1175,7 +1175,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         } => {
             let root = project_root_or_cwd(project)?;
             let thread = selected_gate_thread(&root, thread.as_deref())?;
-            let ledger = coderoom::gate::record_verification(
+            let ledger = coreroom::gate::record_verification(
                 &root,
                 VerificationInput {
                     thread_id: thread,
@@ -1189,17 +1189,17 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
         }
         GateCmd::Show { project, thread } => {
             let root = project_root_or_cwd(project)?;
-            let ledger = coderoom::gate::load(&root, thread.as_deref())?;
+            let ledger = coreroom::gate::load(&root, thread.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&ledger)?);
             Ok(())
         }
         GateCmd::Templates { project, overwrite } => {
             let root = project_root_or_cwd(project)?;
-            let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
-            if !coderoom_dir.exists() {
-                anyhow::bail!("{} is missing; run `cr init` first", coderoom_dir.display());
+            let coreroom_dir = root.join(coreroom::config::COREROOM_DIR);
+            if !coreroom_dir.exists() {
+                anyhow::bail!("{} is missing; run `cr init` first", coreroom_dir.display());
             }
-            let outcome = coderoom::gate::install_templates(&coderoom_dir, overwrite)?;
+            let outcome = coreroom::gate::install_templates(&coreroom_dir, overwrite)?;
             println!(
                 "gate templates: {} written, {} skipped",
                 outcome.written, outcome.skipped
@@ -1210,15 +1210,15 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
 }
 
 fn selected_gate_thread(root: &Path, explicit: Option<&str>) -> Result<String> {
-    Ok(coderoom::gate::load(root, explicit)?.thread_id)
+    Ok(coreroom::gate::load(root, explicit)?.thread_id)
 }
 
 fn append_crep_event(root: &Path, event: &CrepEvent) -> Result<()> {
     use std::io::Write as _;
 
-    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
-    std::fs::create_dir_all(&coderoom_dir)?;
-    let path = coderoom_dir.join("messages.jsonl");
+    let coreroom_dir = root.join(coreroom::config::COREROOM_DIR);
+    std::fs::create_dir_all(&coreroom_dir)?;
+    let path = coreroom_dir.join("messages.jsonl");
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
@@ -1241,14 +1241,14 @@ fn normalize_role(role: &str) -> String {
 /// data-out with no `crate::config` or `println!` dependencies; the
 /// future Contracts / Inbox layers reuse the library half.
 fn run_pointers(project_root: &Path, role: &str) -> Result<()> {
-    use coderoom::config::CODEROOM_DIR;
-    use coderoom::pointers::{
+    use coreroom::config::COREROOM_DIR;
+    use coreroom::pointers::{
         resolve_all, status_glyph, status_word, Pointer, PointerStatus, UnresolvableReason,
     };
 
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let priors_path = coderoom::manifest::role_priors_path_existing(&coderoom_dir, role)
-        .unwrap_or_else(|| coderoom::manifest::preferred_role_priors_path(&coderoom_dir, role));
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let priors_path = coreroom::manifest::role_priors_path_existing(&coreroom_dir, role)
+        .unwrap_or_else(|| coreroom::manifest::preferred_role_priors_path(&coreroom_dir, role));
     let priors = std::fs::read_to_string(&priors_path).map_err(|e| {
         anyhow::anyhow!(
             "could not read priors for @{role} at {}: {e} \
@@ -1322,22 +1322,22 @@ fn run_start(
         .build()?;
     runtime.block_on(async move {
         let project_root = project_root_or_cwd(project)?;
-        let options = coderoom::repl::RunOptions {
+        let options = coreroom::repl::RunOptions {
             permission_mode_override: yolo.then_some(PermissionMode::Bypass),
             fresh,
             allow_large_priors,
         };
-        coderoom::repl::run_with_options(&project_root, options).await
+        coreroom::repl::run_with_options(&project_root, options).await
     })
 }
 
 fn run_lock(project: Option<PathBuf>) -> Result<()> {
     let root = project_root_or_cwd(project)?;
-    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
-    let lock = coderoom::lock::write(&coderoom_dir, coderoom::priors::ComposeOptions::default())?;
+    let coreroom_dir = root.join(coreroom::config::COREROOM_DIR);
+    let lock = coreroom::lock::write(&coreroom_dir, coreroom::priors::ComposeOptions::default())?;
     println!(
         "✓ wrote {} ({} role{})",
-        coderoom::lock::lock_path(&coderoom_dir).display(),
+        coreroom::lock::lock_path(&coreroom_dir).display(),
         lock.roles.len(),
         if lock.roles.len() == 1 { "" } else { "s" }
     );
@@ -1346,9 +1346,9 @@ fn run_lock(project: Option<PathBuf>) -> Result<()> {
 
 fn run_verify(project: Option<PathBuf>) -> Result<()> {
     let root = project_root_or_cwd(project)?;
-    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
+    let coreroom_dir = root.join(coreroom::config::COREROOM_DIR);
     let report =
-        coderoom::lock::verify(&coderoom_dir, coderoom::priors::ComposeOptions::default())?;
+        coreroom::lock::verify(&coreroom_dir, coreroom::priors::ComposeOptions::default())?;
     if report.is_clean() {
         println!("✓ priors lock verified ({})", report.lock_path.display());
         return Ok(());
@@ -1373,14 +1373,14 @@ fn confirm_yolo() -> Result<bool> {
 
 fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {
     match cmd {
-        ConfigCmd::Show { project } => coderoom::config_cmd::show(&project_root_or_cwd(project)?),
+        ConfigCmd::Show { project } => coreroom::config_cmd::show(&project_root_or_cwd(project)?),
         ConfigCmd::Edit {
             project,
             user,
             local,
         } => {
             let layer = layer_from_flags(user, local);
-            coderoom::config_cmd::edit(layer, &project_root_or_cwd(project)?)
+            coreroom::config_cmd::edit(layer, &project_root_or_cwd(project)?)
         }
         ConfigCmd::Path {
             project,
@@ -1388,10 +1388,10 @@ fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {
             local,
         } => {
             let layer = layer_from_flags(user, local);
-            coderoom::config_cmd::path(layer, &project_root_or_cwd(project)?)
+            coreroom::config_cmd::path(layer, &project_root_or_cwd(project)?)
         }
         ConfigCmd::Get { project, key } => {
-            coderoom::config_cmd::get(&project_root_or_cwd(project)?, &key)
+            coreroom::config_cmd::get(&project_root_or_cwd(project)?, &key)
         }
         ConfigCmd::Set {
             project,
@@ -1407,7 +1407,7 @@ fn run_config_cmd(cmd: ConfigCmd) -> Result<()> {
             } else {
                 LayerTarget::User
             };
-            coderoom::config_cmd::set(layer, &project_root_or_cwd(project)?, &key, &value)
+            coreroom::config_cmd::set(layer, &project_root_or_cwd(project)?, &key, &value)
         }
     }
 }
@@ -1421,18 +1421,18 @@ fn run_role_cmd(cmd: RoleCmd) -> Result<()> {
             project,
         } => {
             let root = project_root_or_cwd(project)?;
-            coderoom::role::add(&root, &name, engine, model.as_deref())
+            coreroom::role::add(&root, &name, engine, model.as_deref())
         }
-        RoleCmd::List { project } => coderoom::role::list(&project_root_or_cwd(project)?),
+        RoleCmd::List { project } => coreroom::role::list(&project_root_or_cwd(project)?),
         RoleCmd::Show { name, project } => {
-            coderoom::role::show(&project_root_or_cwd(project)?, &name)
+            coreroom::role::show(&project_root_or_cwd(project)?, &name)
         }
         RoleCmd::Attach {
             role,
             file_path,
             alias,
             project,
-        } => coderoom::role::attach(
+        } => coreroom::role::attach(
             &project_root_or_cwd(project)?,
             &role,
             &file_path,
@@ -1442,25 +1442,25 @@ fn run_role_cmd(cmd: RoleCmd) -> Result<()> {
             role,
             name,
             project,
-        } => coderoom::role::detach(&project_root_or_cwd(project)?, &role, &name),
+        } => coreroom::role::detach(&project_root_or_cwd(project)?, &role, &name),
         RoleCmd::Knowledge {
             role,
             project,
             with_liveness,
-        } => coderoom::role::knowledge(&project_root_or_cwd(project)?, &role, with_liveness),
-        RoleCmd::Rm { name, project } => coderoom::role::rm(&project_root_or_cwd(project)?, &name),
+        } => coreroom::role::knowledge(&project_root_or_cwd(project)?, &role, with_liveness),
+        RoleCmd::Rm { name, project } => coreroom::role::rm(&project_root_or_cwd(project)?, &name),
         RoleCmd::Host { name, project } => {
-            coderoom::role::set_host(&project_root_or_cwd(project)?, &name)
+            coreroom::role::set_host(&project_root_or_cwd(project)?, &name)
         }
         RoleCmd::SetOwner {
             name,
             owner,
             project,
-        } => coderoom::role::set_owner(&project_root_or_cwd(project)?, &name, &owner),
+        } => coreroom::role::set_owner(&project_root_or_cwd(project)?, &name, &owner),
         RoleCmd::SetAuthority {
             name,
             scopes,
             project,
-        } => coderoom::role::set_authority(&project_root_or_cwd(project)?, &name, &scopes),
+        } => coreroom::role::set_authority(&project_root_or_cwd(project)?, &name, &scopes),
     }
 }

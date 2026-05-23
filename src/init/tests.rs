@@ -56,7 +56,7 @@ fn ctrl_c_key_aborts_raw_mode_wizard() {
 
 fn snapshot_scan() -> detect::ProjectScan {
     detect::ProjectScan {
-        root: PathBuf::from("/repo/codeRoom"),
+        root: PathBuf::from("/repo/CoreRoom"),
         stack: vec![
             detect::StackSignal::CargoToml,
             detect::StackSignal::GithubWorkflows,
@@ -97,13 +97,13 @@ fn sample_choices() -> Vec<RoleChoice> {
 fn snapshot_init_role_picker() {
     let scan = snapshot_scan();
     let rendered = strip_ansi(&render_role_picker(
-        Path::new("/repo/codeRoom"),
+        Path::new("/repo/CoreRoom"),
         &scan,
         &sample_choices(),
         4,
     ));
     insta::assert_snapshot!(rendered, @r"
-pick roles · setting up CoreRoom in codeRoom
+pick roles · setting up CoreRoom in CoreRoom
 space toggles · ↑↓ moves · enter continues · esc backs out
 
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
@@ -129,13 +129,13 @@ detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
 fn snapshot_init_role_expansion_picker() {
     let scan = snapshot_scan();
     let rendered = strip_ansi(&render_role_expansion_picker(
-        Path::new("/repo/codeRoom"),
+        Path::new("/repo/CoreRoom"),
         &scan,
         &sample_choices(),
         4,
     ));
     insta::assert_snapshot!(rendered, @r"
-suggest roles · setting up CoreRoom in codeRoom
+suggest roles · setting up CoreRoom in CoreRoom
 space toggles · ↑↓ moves · enter adds selected · esc skips
 
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
@@ -172,14 +172,14 @@ fn snapshot_init_engine_picker() {
         ("security".into(), Engine::Codex),
     ]);
     let rendered = strip_ansi(&render_engine_picker(
-        Path::new("/repo/codeRoom"),
+        Path::new("/repo/CoreRoom"),
         &installed,
         &roles,
         &assignments,
         2,
     ));
     insta::assert_snapshot!(rendered, @r"
-assign engines · setting up CoreRoom in codeRoom
+assign engines · setting up CoreRoom in CoreRoom
 ↑/↓ moves · ←/→ cycles engine · enter continues · esc goes back
 
 detected on your system:
@@ -192,7 +192,7 @@ detected on your system:
     @backend      ‹ claude-code › claude default     ready
   > @security     ‹ codex      › codex default      ready
 
-defaults are editable later in .coderoom/config.toml
+defaults are editable later in .coreroom/config.toml
 ");
 }
 
@@ -200,17 +200,17 @@ defaults are editable later in .coderoom/config.toml
 fn snapshot_init_confirm() {
     let scan = snapshot_scan();
     let rendered = strip_ansi(&render_confirm(
-        Path::new("/repo/codeRoom"),
+        Path::new("/repo/CoreRoom"),
         &scan,
         &snapshot_plan(),
     ));
     insta::assert_snapshot!(rendered, @r"
-ready to write · setting up CoreRoom in codeRoom
+ready to write · setting up CoreRoom in CoreRoom
 nothing is written until Enter
 
 will create:
 
-.coderoom/
+.coreroom/
 ├─ config.toml              3 roles
 ├─ shared.md                project-wide priors
 ├─ roles/
@@ -337,21 +337,21 @@ fn init_yes_creates_minimal_valid_layout() {
     let tmp = TempDir::new().unwrap();
     run(tmp.path(), InitOptions::auto()).expect("auto init succeeds in fresh dir");
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    assert!(coderoom.is_dir());
-    assert!(coderoom.join(CONFIG_FILE).is_file());
-    assert!(coderoom.join(crate::lock::LOCK_FILE).is_file());
-    assert!(coderoom.join("shared.md").is_file());
-    assert!(coderoom
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    assert!(coreroom.is_dir());
+    assert!(coreroom.join(CONFIG_FILE).is_file());
+    assert!(coreroom.join(crate::lock::LOCK_FILE).is_file());
+    assert!(coreroom.join("shared.md").is_file());
+    assert!(coreroom
         .join(ROLES_DIR)
         .join("host")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
-    assert!(coderoom
+    assert!(coreroom
         .join(crate::gate::GATE_TEMPLATES_DIR)
         .join("code-review-gate.md")
         .is_file());
-    assert!(coderoom.join(".gitignore").is_file());
+    assert!(coreroom.join(".gitignore").is_file());
 }
 
 #[test]
@@ -364,12 +364,12 @@ fn init_yes_output_passes_config_validation() {
 }
 
 #[test]
-fn init_is_idempotent_when_coderoom_exists() {
+fn init_is_idempotent_when_coreroom_exists() {
     let tmp = TempDir::new().unwrap();
     run(tmp.path(), InitOptions::auto()).expect("first init");
-    let before = std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+    let before = std::fs::read_to_string(tmp.path().join(COREROOM_DIR).join(CONFIG_FILE)).unwrap();
     run(tmp.path(), InitOptions::auto()).expect("second init should be no-op");
-    let after = std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+    let after = std::fs::read_to_string(tmp.path().join(COREROOM_DIR).join(CONFIG_FILE)).unwrap();
     assert_eq!(before, after);
 }
 
@@ -483,13 +483,13 @@ fn init_seeds_default_starter_roles() {
     assert!(cfg.roles.contains_key("engineer"));
     assert!(cfg.roles.contains_key("reviewer"));
 
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    assert!(coderoom
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    assert!(coreroom
         .join(ROLES_DIR)
         .join("engineer")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
-    assert!(coderoom
+    assert!(coreroom
         .join(ROLES_DIR)
         .join("reviewer")
         .join(crate::manifest::ROLE_PRIORS_FILE)
@@ -504,13 +504,13 @@ fn team_preset_adds_sre_security_and_qa_with_authority_fields() {
     run(tmp.path(), options).expect("init");
 
     let cfg_text =
-        std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+        std::fs::read_to_string(tmp.path().join(COREROOM_DIR).join(CONFIG_FILE)).unwrap();
     let cfg = Config::load_test(tmp.path()).expect("valid config");
     for role in ["host", "engineer", "reviewer", "sre", "security", "qa"] {
         assert!(cfg.roles.contains_key(role), "missing {role}");
         assert!(tmp
             .path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(ROLES_DIR)
             .join(role)
             .join(crate::manifest::KNOWLEDGE_DIR)
@@ -530,7 +530,7 @@ fn role_template_substitutes_role_name() {
 
     let engineer_priors = std::fs::read_to_string(
         tmp.path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(ROLES_DIR)
             .join("engineer")
             .join(crate::manifest::ROLE_PRIORS_FILE),
@@ -564,21 +564,21 @@ fn planned_files_lists_in_render_order() {
     assert_eq!(
         display,
         vec![
-            "/tmp/p/.coderoom/config.toml",
-            "/tmp/p/.coderoom/priors.lock",
-            "/tmp/p/.coderoom/shared.md",
-            "/tmp/p/.coderoom/roles/host/priors.md",
-            "/tmp/p/.coderoom/roles/backend/priors.md",
-            "/tmp/p/.coderoom/gate-templates/tier-classify.md",
-            "/tmp/p/.coderoom/gate-templates/research-gate.md",
-            "/tmp/p/.coderoom/gate-templates/plan-gate.md",
-            "/tmp/p/.coderoom/gate-templates/plan-review-gate.md",
-            "/tmp/p/.coderoom/gate-templates/code-review-gate.md",
-            "/tmp/p/.coderoom/gate-templates/precommit-gate.md",
-            "/tmp/p/.coderoom/gate-templates/signoff-gate.md",
-            "/tmp/p/.coderoom/.gitignore",
+            "/tmp/p/.coreroom/config.toml",
+            "/tmp/p/.coreroom/priors.lock",
+            "/tmp/p/.coreroom/shared.md",
+            "/tmp/p/.coreroom/roles/host/priors.md",
+            "/tmp/p/.coreroom/roles/backend/priors.md",
+            "/tmp/p/.coreroom/gate-templates/tier-classify.md",
+            "/tmp/p/.coreroom/gate-templates/research-gate.md",
+            "/tmp/p/.coreroom/gate-templates/plan-gate.md",
+            "/tmp/p/.coreroom/gate-templates/plan-review-gate.md",
+            "/tmp/p/.coreroom/gate-templates/code-review-gate.md",
+            "/tmp/p/.coreroom/gate-templates/precommit-gate.md",
+            "/tmp/p/.coreroom/gate-templates/signoff-gate.md",
+            "/tmp/p/.coreroom/.gitignore",
             "/tmp/p/.claude/settings.json",
-            "/tmp/p/.claude/.coderoom-managed.json",
+            "/tmp/p/.claude/.coreroom-managed.json",
         ]
     );
 }

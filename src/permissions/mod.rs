@@ -1,6 +1,6 @@
 //! Tool permission policy and Claude Code hook bridge.
 //!
-//! CodeRoom keeps the runtime policy deliberately small at v0.2:
+//! CoreRoom keeps the runtime policy deliberately small at v0.2:
 //! `/allow TOOL` and `/deny TOOL` update a session JSON file, and
 //! hook-backed adapters read that file on every proposed tool call.
 //!
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::adapter::PermissionMode;
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 
 pub use bridge::{
     BridgeError, BridgeHandle, BridgeRequest, BridgeRequestSink, BridgeResponse, DecisionScope,
@@ -133,14 +133,14 @@ impl PermissionPolicy {
 #[must_use]
 pub fn policy_path(project_root: &Path) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join("permission_policy.json")
 }
 
-/// Path to the session permission policy file under `.coderoom/`.
+/// Path to the session permission policy file under `.coreroom/`.
 #[must_use]
-pub fn policy_path_for_coderoom(coderoom_dir: &Path) -> PathBuf {
-    coderoom_dir.join("permission_policy.json")
+pub fn policy_path_for_coreroom(coreroom_dir: &Path) -> PathBuf {
+    coreroom_dir.join("permission_policy.json")
 }
 
 /// Load, mutate, and save a permission policy file.
@@ -184,7 +184,7 @@ pub fn update_policy_from_bridge_response(
 /// The hook reads Claude's PreToolUse JSON from stdin and writes the
 /// `hookSpecificOutput` JSON that Claude expects on stdout.
 ///
-/// When the verdict is `ask` and the `CODEROOM_PERMISSION_SOCKET`
+/// When the verdict is `ask` and the `COREROOM_PERMISSION_SOCKET`
 /// environment variable points at a live REPL bridge socket, the hook
 /// promotes the verdict to a real user prompt over that socket. If the
 /// bridge is missing or fails, the hook degrades to deny — never
@@ -199,7 +199,7 @@ pub fn run_claude_hook(mode: PermissionMode, policy_file: Option<&Path>) -> Resu
         claude_hook_output(mode, policy_file, role.as_deref(), &input).unwrap_or_else(|error| {
             claude_hook_output_json(
                 "deny",
-                &format!("CodeRoom permission hook failed: {error:#}"),
+                &format!("CoreRoom permission hook failed: {error:#}"),
             )
         });
     std::io::stdout()
@@ -214,7 +214,7 @@ pub fn run_claude_hook(mode: PermissionMode, policy_file: Option<&Path>) -> Resu
 /// Environment variable carrying the role name into the hook subprocess.
 /// Set per-role by the cc adapter so the bridge prompt can attribute the
 /// request to the right role color.
-pub const BRIDGE_ROLE_ENV: &str = "CODEROOM_PERMISSION_ROLE";
+pub const BRIDGE_ROLE_ENV: &str = "COREROOM_PERMISSION_ROLE";
 
 fn claude_hook_output(
     mode: PermissionMode,
@@ -262,13 +262,13 @@ fn claude_hook_output(
             }
             Err(BridgeError::NoSocket) => {
                 verdict = deny(format!(
-                    "{} requires user approval but no live CodeRoom session is available",
+                    "{} requires user approval but no live CoreRoom session is available",
                     request.name
                 ));
             }
             Err(other) => {
                 verdict = deny(format!(
-                    "{} denied — CodeRoom permission bridge failed: {other}",
+                    "{} denied — CoreRoom permission bridge failed: {other}",
                     request.name
                 ));
             }
@@ -333,13 +333,13 @@ fn decide_tool(
 ) -> ToolVerdict {
     if policy.denies(&request.name) {
         return deny(format!(
-            "{} denied by CodeRoom session policy",
+            "{} denied by CoreRoom session policy",
             request.name
         ));
     }
     if policy.allows(&request.name) {
         return allow(format!(
-            "{} allowed by CodeRoom session policy",
+            "{} allowed by CoreRoom session policy",
             request.name
         ));
     }
@@ -516,13 +516,13 @@ mod tests {
         assert!(out.to_string().contains("parsing Claude hook stdin"));
 
         let fallback =
-            claude_hook_output_json("deny", &format!("CodeRoom permission hook failed: {out:#}"));
+            claude_hook_output_json("deny", &format!("CoreRoom permission hook failed: {out:#}"));
         let parsed: Value = serde_json::from_str(&fallback).unwrap();
         assert_eq!(parsed["hookSpecificOutput"]["permissionDecision"], "deny");
         assert!(parsed["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
             .unwrap()
-            .contains("CodeRoom permission hook failed"));
+            .contains("CoreRoom permission hook failed"));
     }
 
     #[test]

@@ -302,12 +302,12 @@ fn home_relative_display(path: &Path) -> String {
 /// color; engine and context render in muted neutral tones.
 fn splash_role_cell(
     cfg: &Config,
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     name: &str,
     role_pad: usize,
     max_width: usize,
 ) -> UiCell {
-    let role_cfg = cfg.role_config(name, coderoom_dir);
+    let role_cfg = cfg.role_config(name, coreroom_dir);
     let engine = role_cfg
         .as_ref()
         .map_or(cfg.default_engine, |role| role.engine);
@@ -421,14 +421,14 @@ pub(super) fn pick_release<'a>(
 /// are sorted alphabetically to match the rest of the dashboard.
 fn splash_role_rows(
     cfg: &Config,
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role_names: &[&str],
     role_pad: usize,
     max_width: usize,
 ) -> Vec<UiCell> {
     role_names
         .iter()
-        .map(|name| splash_role_cell(cfg, coderoom_dir, name, role_pad, max_width))
+        .map(|name| splash_role_cell(cfg, coreroom_dir, name, role_pad, max_width))
         .collect()
 }
 
@@ -436,13 +436,13 @@ fn splash_role_rows(
 /// bare `cr`, and the `/welcome` slash command. The `first_run` flag
 /// only swaps the greeting verb — the surrounding frame stays identical
 /// so returning users see the same status surface.
-pub(super) fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path, first_run: bool) {
+pub(super) fn print_home(cfg: &Config, coreroom_dir: &Path, project_root: &Path, first_run: bool) {
     let user_name = git_user_name();
     print!(
         "{}",
         render_home_at_width(
             cfg,
-            coderoom_dir,
+            coreroom_dir,
             project_root,
             first_run,
             splash_width(),
@@ -453,7 +453,7 @@ pub(super) fn print_home(cfg: &Config, coderoom_dir: &Path, project_root: &Path,
 
 pub(super) fn render_home_at_width(
     cfg: &Config,
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     project_root: &Path,
     first_run: bool,
     width: usize,
@@ -463,7 +463,7 @@ pub(super) fn render_home_at_width(
     role_names.sort_unstable();
     let total_tokens: u64 = role_names
         .iter()
-        .map(|n| priors::estimate_role_tokens(coderoom_dir, n))
+        .map(|n| priors::estimate_role_tokens(coreroom_dir, n))
         .sum();
     let role_pad = role_names
         .iter()
@@ -518,7 +518,7 @@ pub(super) fn render_home_at_width(
     left.push(empty_cell());
     left.extend(splash_role_rows(
         cfg,
-        coderoom_dir,
+        coreroom_dir,
         &role_names,
         role_pad,
         left_w,

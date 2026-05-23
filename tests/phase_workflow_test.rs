@@ -4,7 +4,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
+use coreroom::config::COREROOM_DIR;
 
 #[test]
 fn gate_phase_cli_advances_creates_artifact_and_rejects_skip() {
@@ -31,7 +31,7 @@ fn gate_phase_cli_advances_creates_artifact_and_rejects_skip() {
 
     assert!(tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join("gates")
         .join("42")
         .join("intake.md")
@@ -55,12 +55,12 @@ fn gate_phase_cli_advances_creates_artifact_and_rejects_skip() {
 
     assert!(tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join("gates")
         .join("42")
         .join("discovery.md")
         .is_file());
-    let log = fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("messages.jsonl"))
+    let log = fs::read_to_string(tmp.path().join(COREROOM_DIR).join("messages.jsonl"))
         .expect("messages log");
     assert!(log.contains(r#""type":"phase_advanced""#));
     assert!(log.contains(r#""from":"intake""#));

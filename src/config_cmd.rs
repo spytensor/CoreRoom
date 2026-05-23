@@ -8,13 +8,13 @@
 //! - [`edit`] opens `$EDITOR` on a chosen layer file. Creates the
 //!   parent directory and seeds a minimal commented stub for layers
 //!   that don't exist yet (user, .local). The project layer is
-//!   refused if `.coderoom/config.toml` is missing — `cr init` is the
+//!   refused if `.coreroom/config.toml` is missing — `cr init` is the
 //!   correct entry point there.
 //! - [`path`] just prints the absolute path of the requested layer.
 //!
-//! Auto-gitignore: when `edit --local` creates `.coderoom/config.local.toml`,
-//! it also ensures `.coderoom/.gitignore` contains a rule for the file.
-//! The .gitignore is scoped to `.coderoom/` so we don't touch the
+//! Auto-gitignore: when `edit --local` creates `.coreroom/config.local.toml`,
+//! it also ensures `.coreroom/.gitignore` contains a rule for the file.
+//! The .gitignore is scoped to `.coreroom/` so we don't touch the
 //! project's top-level ignore file.
 //!
 //! `cr config get / set` are intentionally not in this module — `edit`
@@ -27,7 +27,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE};
+use crate::config::{Config, CONFIG_FILE, COREROOM_DIR};
 use crate::config_layered::{user_config_path, CONFIG_LOCAL_FILE};
 
 /// Which config layer a command is targeting. Mirrors
@@ -35,11 +35,11 @@ use crate::config_layered::{user_config_path, CONFIG_LOCAL_FILE};
 /// can't `edit` or print a `path` for the built-in defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerTarget {
-    /// `~/.config/coderoom/config.toml` — personal preferences.
+    /// `~/.config/coreroom/config.toml` — personal preferences.
     User,
-    /// `<project>/.coderoom/config.toml` — committed team contract.
+    /// `<project>/.coreroom/config.toml` — committed team contract.
     Project,
-    /// `<project>/.coderoom/config.local.toml` — gitignored.
+    /// `<project>/.coreroom/config.local.toml` — gitignored.
     Local,
 }
 
@@ -62,10 +62,10 @@ pub fn show(project_root: &Path) -> Result<()> {
 
 /// Hermetic form of [`show`] that takes an explicit user-config path
 /// (or `None` to skip the user layer). Tests use this so they don't
-/// pick up the developer's real `~/.config/coderoom/config.toml`.
+/// pick up the developer's real `~/.config/coreroom/config.toml`.
 pub fn show_with_user(project_root: &Path, user_path: Option<&Path>) -> Result<()> {
     let cfg = crate::config_layered::load(project_root, user_path)?;
-    print_effective(&cfg, &project_root.join(CODEROOM_DIR));
+    print_effective(&cfg, &project_root.join(COREROOM_DIR));
     print_layer_footer(user_path, project_root);
     Ok(())
 }
@@ -97,14 +97,14 @@ pub fn set(layer: LayerTarget, project_root: &Path, key: &str, value: &str) -> R
             target.display()
         ),
         LayerTarget::Local => {
-            let coderoom_dir = project_root.join(CODEROOM_DIR);
-            if !coderoom_dir.is_dir() {
+            let coreroom_dir = project_root.join(COREROOM_DIR);
+            if !coreroom_dir.is_dir() {
                 bail!(
                     "{} not found — run `cr init` first to bootstrap the project",
-                    coderoom_dir.display()
+                    coreroom_dir.display()
                 );
             }
-            ensure_local_gitignored(&coderoom_dir)?;
+            ensure_local_gitignored(&coreroom_dir)?;
         }
         LayerTarget::User | LayerTarget::Project => {}
     }
@@ -127,10 +127,10 @@ pub fn set(layer: LayerTarget, project_root: &Path, key: &str, value: &str) -> R
 
 /// Open `$EDITOR` on the chosen layer file. Creates the parent
 /// directory and seeds a commented stub when the file doesn't exist
-/// yet (user / local). For `--local`, also ensures `.coderoom/.gitignore`
+/// yet (user / local). For `--local`, also ensures `.coreroom/.gitignore`
 /// covers the file.
 ///
-/// Refuses `--project` if `.coderoom/config.toml` is missing — `cr init`
+/// Refuses `--project` if `.coreroom/config.toml` is missing — `cr init`
 /// is the right command for bootstrapping a project.
 pub fn edit(layer: LayerTarget, project_root: &Path) -> Result<()> {
     // Validate the layer's prerequisites first, then seed any missing
@@ -148,15 +148,15 @@ pub fn edit(layer: LayerTarget, project_root: &Path) -> Result<()> {
         }
         LayerTarget::User => ensure_seeded(&target, USER_STUB)?,
         LayerTarget::Local => {
-            let coderoom_dir = project_root.join(CODEROOM_DIR);
-            if !coderoom_dir.is_dir() {
+            let coreroom_dir = project_root.join(COREROOM_DIR);
+            if !coreroom_dir.is_dir() {
                 bail!(
                     "{} not found — run `cr init` first to bootstrap the project",
-                    coderoom_dir.display()
+                    coreroom_dir.display()
                 );
             }
             ensure_seeded(&target, LOCAL_STUB)?;
-            ensure_local_gitignored(&coderoom_dir)?;
+            ensure_local_gitignored(&coreroom_dir)?;
         }
     }
 
@@ -191,8 +191,8 @@ fn resolve_path(layer: LayerTarget, project_root: &Path) -> Result<PathBuf> {
                  or $HOME and retry"
             )
         }),
-        LayerTarget::Project => Ok(project_root.join(CODEROOM_DIR).join(CONFIG_FILE)),
-        LayerTarget::Local => Ok(project_root.join(CODEROOM_DIR).join(CONFIG_LOCAL_FILE)),
+        LayerTarget::Project => Ok(project_root.join(COREROOM_DIR).join(CONFIG_FILE)),
+        LayerTarget::Local => Ok(project_root.join(COREROOM_DIR).join(CONFIG_LOCAL_FILE)),
     }
 }
 
@@ -243,7 +243,7 @@ fn set_value(root: &mut toml::Value, key: &str, value: toml::Value) -> Result<()
 }
 
 const USER_STUB: &str = "\
-# CodeRoom user config. Personal preferences that travel with you
+# CoreRoom user config. Personal preferences that travel with you
 # across projects. See `cr config --help`.
 #
 # [defaults]
@@ -262,7 +262,7 @@ const USER_STUB: &str = "\
 ";
 
 const LOCAL_STUB: &str = "\
-# Project-local CodeRoom overrides. Always gitignored.
+# Project-local CoreRoom overrides. Always gitignored.
 # Use this for machine-specific paths and auth refs that you don't
 # want to commit. See `cr config --help`.
 #
@@ -283,10 +283,10 @@ fn ensure_seeded(target: &Path, stub: &str) -> Result<()> {
     Ok(())
 }
 
-/// Make sure `.coderoom/.gitignore` exists and lists the local config
+/// Make sure `.coreroom/.gitignore` exists and lists the local config
 /// file. Idempotent — appends only if the rule isn't already present.
-fn ensure_local_gitignored(coderoom_dir: &Path) -> Result<()> {
-    let ignore_path = coderoom_dir.join(".gitignore");
+fn ensure_local_gitignored(coreroom_dir: &Path) -> Result<()> {
+    let ignore_path = coreroom_dir.join(".gitignore");
     let existing = std::fs::read_to_string(&ignore_path).unwrap_or_default();
     if existing
         .lines()
@@ -299,7 +299,7 @@ fn ensure_local_gitignored(coderoom_dir: &Path) -> Result<()> {
         new.push('\n');
     }
     if new.is_empty() {
-        new.push_str("# CodeRoom — auto-managed by `cr config edit --local`.\n");
+        new.push_str("# CoreRoom — auto-managed by `cr config edit --local`.\n");
     }
     new.push_str(CONFIG_LOCAL_FILE);
     new.push('\n');
@@ -327,7 +327,7 @@ fn pick_editor_from(get: impl Fn(&str) -> Option<String>) -> Result<PathBuf> {
 
 // ---- Pretty-print ------------------------------------------------------
 
-fn print_effective(cfg: &Config, coderoom_dir: &Path) {
+fn print_effective(cfg: &Config, coreroom_dir: &Path) {
     println!("Effective configuration");
     println!("─────────────────────────");
     println!("default_engine      = {}", cfg.default_engine.as_str());
@@ -347,7 +347,7 @@ fn print_effective(cfg: &Config, coderoom_dir: &Path) {
     } else {
         for name in names {
             let role_cfg = cfg
-                .role_config(name, coderoom_dir)
+                .role_config(name, coreroom_dir)
                 .expect("iterated role names must resolve to role configs");
             let engine = role_cfg.engine.as_str();
             let model = role_cfg.model.as_deref().unwrap_or("(default)");
@@ -361,8 +361,8 @@ fn print_effective(cfg: &Config, coderoom_dir: &Path) {
 fn print_layer_footer(user_path: Option<&Path>, project_root: &Path) {
     println!();
     println!("Layers loaded:");
-    let project_path = project_root.join(CODEROOM_DIR).join(CONFIG_FILE);
-    let local_path = project_root.join(CODEROOM_DIR).join(CONFIG_LOCAL_FILE);
+    let project_path = project_root.join(COREROOM_DIR).join(CONFIG_FILE);
+    let local_path = project_root.join(COREROOM_DIR).join(CONFIG_LOCAL_FILE);
 
     print_layer_line("user   ", user_path);
     print_layer_line("project", Some(project_path.as_path()));

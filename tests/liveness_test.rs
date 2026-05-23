@@ -5,8 +5,8 @@ use chrono::{Duration, SecondsFormat, Utc};
 use predicates::prelude::*;
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::priors::ComposeOptions;
+use coreroom::config::COREROOM_DIR;
+use coreroom::priors::ComposeOptions;
 
 fn cr() -> Command {
     Command::cargo_bin("cr").expect("binary")
@@ -36,8 +36,8 @@ fn init_with_attached_knowledge() -> tempfile::TempDir {
 }
 
 fn compose_engineer_with_liveness(tmp: &tempfile::TempDir) {
-    coderoom::priors::compose_for_with_options(
-        &tmp.path().join(CODEROOM_DIR),
+    coreroom::priors::compose_for_with_options(
+        &tmp.path().join(COREROOM_DIR),
         "engineer",
         ComposeOptions {
             record_liveness: true,
@@ -50,13 +50,13 @@ fn compose_engineer_with_liveness(tmp: &tempfile::TempDir) {
 #[test]
 fn liveness_increments_when_role_is_composed() {
     let tmp = init_with_attached_knowledge();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    let segment_path = coderoom::liveness::knowledge_segment_path("engineer", "runbook.md");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    let segment_path = coreroom::liveness::knowledge_segment_path("engineer", "runbook.md");
 
     compose_engineer_with_liveness(&tmp);
     compose_engineer_with_liveness(&tmp);
 
-    let doc = coderoom::liveness::read(&coderoom, "engineer").expect("liveness");
+    let doc = coreroom::liveness::read(&coreroom, "engineer").expect("liveness");
     let segment = doc
         .segments
         .get(&segment_path)
@@ -64,7 +64,7 @@ fn liveness_increments_when_role_is_composed() {
     assert_eq!(segment.hit_count, 2);
     assert!(segment.last_matched_at.is_some());
     assert!(!segment.attached_at.is_empty());
-    assert!(coderoom::liveness::path_for_role(&coderoom, "engineer").is_file());
+    assert!(coreroom::liveness::path_for_role(&coreroom, "engineer").is_file());
 }
 
 #[test]
@@ -90,19 +90,19 @@ fn role_knowledge_with_liveness_prints_hit_counts() {
 #[test]
 fn doctor_reports_stale_liveness_with_prune_command() {
     let tmp = init_with_attached_knowledge();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     compose_engineer_with_liveness(&tmp);
 
-    let mut doc = coderoom::liveness::read(&coderoom, "engineer").expect("liveness");
+    let mut doc = coreroom::liveness::read(&coreroom, "engineer").expect("liveness");
     let old = (Utc::now() - Duration::days(31)).to_rfc3339_opts(SecondsFormat::Secs, true);
-    let segment_path = coderoom::liveness::knowledge_segment_path("engineer", "runbook.md");
+    let segment_path = coreroom::liveness::knowledge_segment_path("engineer", "runbook.md");
     let segment = doc
         .segments
         .get_mut(&segment_path)
         .expect("knowledge liveness segment");
     segment.last_matched_at = Some(old);
     segment.last_cited_at = None;
-    coderoom::liveness::write(&coderoom, &doc).expect("write liveness");
+    coreroom::liveness::write(&coreroom, &doc).expect("write liveness");
 
     cr().args([
         "doctor",

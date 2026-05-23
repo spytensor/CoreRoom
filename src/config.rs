@@ -1,9 +1,9 @@
-//! Project-level configuration loaded from `.coderoom/config.toml`.
+//! Project-level configuration loaded from `.coreroom/config.toml`.
 //!
-//! A project's `.coderoom/` layout (per `docs/architecture.md`):
+//! A project's `.coreroom/` layout (per `docs/architecture.md`):
 //!
 //! ```text
-//! .coderoom/
+//! .coreroom/
 //! ├── config.toml             # this file
 //! ├── roles/<name>/priors.md  # per-role base priors
 //! ├── roles/<name>/knowledge/ # mounted domain documents
@@ -39,16 +39,16 @@ use thiserror::Error;
 
 use crate::adapter::{Engine, PermissionMode, RoleConfig};
 
-/// Standard subdirectory inside a project that holds legacy CodeRoom state.
-pub const CODEROOM_DIR: &str = ".coderoom";
+/// Standard subdirectory inside a project that holds legacy CoreRoom state.
+pub const COREROOM_DIR: &str = ".coreroom";
 
-/// File name of the project-level config inside [`CODEROOM_DIR`].
+/// File name of the project-level config inside [`COREROOM_DIR`].
 pub const CONFIG_FILE: &str = "config.toml";
 
 /// Subdirectory holding per-role priors files.
 pub const ROLES_DIR: &str = "roles";
 
-/// Project-level config loaded from `.coderoom/config.toml`.
+/// Project-level config loaded from `.coreroom/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     /// Engine used for any role that doesn't override.
@@ -162,7 +162,7 @@ const fn default_permission_mode() -> PermissionMode {
 /// Errors raised while loading or validating a config.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// `.coderoom/config.toml` is missing or unreadable.
+    /// `.coreroom/config.toml` is missing or unreadable.
     #[error("could not read {path}: {source}")]
     Read {
         /// Absolute path that failed to read.
@@ -171,7 +171,7 @@ pub enum ConfigError {
         #[source]
         source: std::io::Error,
     },
-    /// `.coderoom/config.toml` content is not valid TOML / shape.
+    /// `.coreroom/config.toml` content is not valid TOML / shape.
     #[error("could not parse {path}: {source}")]
     Parse {
         /// Absolute path that failed to parse.
@@ -215,8 +215,8 @@ pub enum ConfigError {
     /// failure mode.
     #[error(
         "no default_engine is declared. set it in either user config \
-         (~/.config/coderoom/config.toml under [defaults] engine = \"cc\") \
-         or project config (.coderoom/config.toml `default_engine = \"cc\"`)."
+         (~/.config/coreroom/config.toml under [defaults] engine = \"cc\") \
+         or project config (.coreroom/config.toml `default_engine = \"cc\"`)."
     )]
     MissingDefaultEngine,
 }
@@ -225,16 +225,16 @@ pub enum ConfigError {
 pub type ConfigResult<T> = Result<T, ConfigError>;
 
 impl Config {
-    /// Load and validate a project's `.coderoom/config.toml`.
+    /// Load and validate a project's `.coreroom/config.toml`.
     ///
-    /// `project_root` is the directory containing `.coderoom/` — typically
+    /// `project_root` is the directory containing `.coreroom/` — typically
     /// the user's project repo root. Validation includes:
     ///
     /// 1. TOML parses into the documented shape.
     /// 2. `host_role` is one of the declared roles.
     /// 3. Every declared role has a priors file at
-    ///    `.coderoom/roles/<role>/priors.md`, with legacy
-    ///    `.coderoom/roles/<role>.md` still accepted.
+    ///    `.coreroom/roles/<role>/priors.md`, with legacy
+    ///    `.coreroom/roles/<role>.md` still accepted.
     pub fn load(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
         // Delegate to the layered loader. Production code resolves
         // the user-config path from $XDG_CONFIG_HOME / ~/.config etc.;
@@ -248,7 +248,7 @@ impl Config {
 
     /// Validate the in-memory config against on-disk state. Used by
     /// [`Self::load`]; exposed so tests can validate hand-built configs.
-    pub fn validate(&self, coderoom_dir: &Path) -> ConfigResult<()> {
+    pub fn validate(&self, coreroom_dir: &Path) -> ConfigResult<()> {
         if !self.roles.contains_key(&self.host_role) {
             let mut declared: Vec<String> = self.roles.keys().cloned().collect();
             declared.sort();
@@ -259,7 +259,7 @@ impl Config {
         }
 
         for name in self.roles.keys() {
-            let priors = priors_path_for(coderoom_dir, name);
+            let priors = priors_path_for(coreroom_dir, name);
             if !priors.is_file() {
                 return Err(ConfigError::MissingPriors {
                     role: name.clone(),
@@ -283,7 +283,7 @@ impl Config {
     ///
     /// Returns `None` if the role is not declared in the config.
     #[must_use]
-    pub fn role_config(&self, name: &str, coderoom_dir: &Path) -> Option<RoleConfig> {
+    pub fn role_config(&self, name: &str, coreroom_dir: &Path) -> Option<RoleConfig> {
         let entry = self.roles.get(name)?;
         let engine = entry.engine.unwrap_or(self.default_engine);
         let permission_mode = entry.permission_mode.unwrap_or(match engine {
@@ -298,12 +298,12 @@ impl Config {
             name: name.to_owned(),
             engine,
             model: entry.model.clone().or_else(|| self.default_model.clone()),
-            priors_path: priors_path_for(coderoom_dir, name),
+            priors_path: priors_path_for(coreroom_dir, name),
             permission_mode,
             permission_policy_path: None,
             permission_socket_path: None,
             // Populated by the REPL spawn path after reading
-            // `.coderoom/sessions/ids/<role>.id`. The bare `Config`
+            // `.coreroom/sessions/ids/<role>.id`. The bare `Config`
             // loader is engine-neutral and doesn't see session state.
             resume_session_id: None,
         })
@@ -316,8 +316,8 @@ impl Config {
 
     /// Test-only hermetic loader that skips the user layer entirely.
     /// Used by unit tests so they don't pick up the developer's
-    /// real `~/.config/coderoom/config.toml` and become flaky on
-    /// machines where the user has actually configured CodeRoom.
+    /// real `~/.config/coreroom/config.toml` and become flaky on
+    /// machines where the user has actually configured CoreRoom.
     #[cfg(test)]
     pub(crate) fn load_test(project_root: impl AsRef<Path>) -> ConfigResult<Self> {
         crate::config_layered::load(project_root.as_ref(), None)
@@ -325,10 +325,10 @@ impl Config {
 }
 
 /// Path where the priors file for `role` lives, given the project's
-/// `.coderoom/` directory. The directory layout is preferred, while
+/// `.coreroom/` directory. The directory layout is preferred, while
 /// legacy flat `.md` files remain accepted for back compatibility.
-fn priors_path_for(coderoom_dir: &Path, role: &str) -> PathBuf {
-    crate::manifest::role_priors_path_for_config(coderoom_dir, role)
+fn priors_path_for(coreroom_dir: &Path, role: &str) -> PathBuf {
+    crate::manifest::role_priors_path_for_config(coreroom_dir, role)
 }
 
 #[cfg(test)]

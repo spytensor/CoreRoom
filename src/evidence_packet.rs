@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 
-/// Subdirectory inside `.coderoom/` that stores Evidence Packets.
+/// Subdirectory inside `.coreroom/` that stores Evidence Packets.
 pub const EVIDENCE_DIR: &str = "evidence";
 
 /// Current persisted Evidence Packet schema version.
@@ -374,7 +374,7 @@ pub struct EvidenceCompletionReport {
     pub unverified_items: Vec<String>,
 }
 
-/// Save an Evidence Packet to `.coderoom/evidence/<workOrder>.toml`.
+/// Save an Evidence Packet to `.coreroom/evidence/<workOrder>.toml`.
 pub fn save_evidence_packet(project_root: &Path, packet: &EvidencePacket) -> Result<PathBuf> {
     packet.completion_report()?;
     let path = evidence_packet_path(project_root, &packet.work_order)?;
@@ -402,7 +402,7 @@ pub fn load_evidence_packet(path: &Path) -> Result<EvidencePacket> {
 pub fn evidence_packet_path(project_root: &Path, work_order: &str) -> Result<PathBuf> {
     validate_work_order_id(work_order)?;
     Ok(project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(EVIDENCE_DIR)
         .join(format!("{work_order}.toml")))
 }
