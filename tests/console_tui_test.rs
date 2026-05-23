@@ -1,6 +1,6 @@
 //! Ratatui console shell fixtures.
 
-use coreroom::console_snapshot::CoreRoomSnapshot;
+use coreroom::console_snapshot::{ConversationTurn, ConversationVisibility, CoreRoomSnapshot};
 use coreroom::console_tui::render_snapshot_to_text;
 
 fn snapshot() -> CoreRoomSnapshot {
@@ -33,7 +33,22 @@ fn console_shell_keeps_internal_delegation_out_of_public_transcript() {
     let snapshot = snapshot();
     let rendered = render_snapshot_to_text(&snapshot, 180, 48).expect("rendered console");
 
-    assert!(rendered.contains("internal delegations hidden: 3"));
+    assert!(rendered.contains("hidden delegation: 3 internal / 1 side-rail"));
     assert!(rendered.contains("user <-> @host"));
+    assert!(!rendered.contains("Side rail: active tracker #238"));
     assert!(!rendered.contains("xray:thread-v08-console-fixture/reviewer"));
+}
+
+#[test]
+fn console_shell_can_show_user_addressed_specialist_turns() {
+    let mut snapshot = snapshot();
+    snapshot.conversation.public_turns.push(ConversationTurn {
+        speaker: "security".to_owned(),
+        body: "User-addressed security answer.".to_owned(),
+        visibility: ConversationVisibility::PublicTranscript,
+    });
+    let rendered = render_snapshot_to_text(&snapshot, 180, 48).expect("rendered console");
+
+    assert!(rendered.contains("@security"));
+    assert!(rendered.contains("User-addressed security answer."));
 }
