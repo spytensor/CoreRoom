@@ -1,0 +1,82 @@
+[[cases]]
+columns = 120
+breakpoint = "compact120"
+conversationMin = 76
+rightRailVisible = true
+visiblePanes = ["project-header", "public-conversation", "right-rail", "tabs"]
+hiddenOrFoldedPanes = [
+  "project-state",
+  "role-lanes",
+  "work-list",
+  "gate-pipeline",
+  "evidence-closure",
+  "sources",
+  "alerts",
+  "debug-log",
+]
+requiredSections = [
+  "progress-work",
+  "environment",
+  "changes",
+  "active-roles",
+  "evidence",
+  "sources",
+  "alerts",
+]
+
+[[cases]]
+columns = 160
+breakpoint = "standard160"
+conversationMin = 104
+rightRailVisible = true
+visiblePanes = ["project-header", "public-conversation", "right-rail", "tabs"]
+hiddenOrFoldedPanes = [
+  "project-state",
+  "role-lanes",
+  "work-list",
+  "gate-pipeline",
+  "evidence-closure",
+  "sources",
+  "alerts",
+  "debug-log",
+]
+requiredSections = [
+  "progress-work",
+  "environment",
+  "changes",
+  "active-roles",
+  "evidence",
+  "sources",
+  "alerts",
+]
+
+[[cases]]
+columns = 220
+breakpoint = "wide220"
+conversationMin = 132
+rightRailVisible = true
+visiblePanes = [
+  "project-header",
+  "public-conversation",
+  "right-rail",
+  "project-state",
+  "role-lanes",
+  "tabs",
+]
+hiddenOrFoldedPanes = [
+  "work-list",
+  "gate-pipeline",
+  "evidence-closure",
+  "sources",
+  "alerts",
+  "debug-log",
+]
+requiredSections = [
+  "progress-work",
+  "environment",
+  "changes",
+  "active-roles",
+  "evidence",
+  "sources",
+  "alerts",
+]
