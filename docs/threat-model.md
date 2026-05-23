@@ -47,6 +47,7 @@ Out of scope:
 | `.coderoom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
 | `.coderoom/source-registry.toml` | User-editable project context catalog after schema validation | Pinned source ids, source kind, trust level, owner, visible roles, purpose, and refresh policy for future ContextPacks | Proof that remote content is fresh, source content is safe, role knowledge was updated, or a source may refresh silently |
 | `.coderoom/context-packs/*` | User-editable WorkOrder context selections after schema validation | Source slices, copied pins, trust levels, reasons, and target roles for a WorkOrder delegation | Proof that selected content is fresh, complete, safe, or semantically sufficient |
+| `.coderoom/evidence/*` | User-editable structured completion packet after schema validation | Changed files, command/test evidence, role reviews, risks, rollback, tracker update status, and unverified items | Semantic correctness, CI truth without cited checks, or completion when required evidence is missing |
 
 ## Runtime Invariants
 
@@ -145,6 +146,12 @@ architecture amendment before implementation.
     sources must be surfaced before delegation; they are not hidden evidence
     of freshness.
 
+16. Evidence Packets are structured claims.
+    Evidence Packets can support host PR summaries, but completion still
+    depends on required fields being present and tracker state being updated.
+    Model prose alone cannot satisfy changed-file, command, test, review, risk,
+    rollback, or tracker evidence. Missing or unverified items must be named.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -164,6 +171,7 @@ role-written journals:
 - Whether a WorkOrder GitHub Issue binding was confirmed by the user.
 - Whether a source registration or re-pin was confirmed by the user.
 - Whether a ContextPack is fresh enough for delegation.
+- Whether an Evidence Packet is complete enough for a completion claim.
 - Whether a tracker row or Evidence Ledger update is complete.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.

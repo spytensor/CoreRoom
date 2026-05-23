@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visibility, owner, purpose, and no-silent-refresh semantics.
 - Added the v0.6 ContextPack model so WorkOrders can delegate scoped source
   slices to specific roles while surfacing stale or unpinned source warnings.
+- Added the v0.6 Evidence Packet model so host completion summaries are based
+  on structured issue, PR, gate, command, test, risk, rollback, tracker, and
+  unverified-item evidence instead of model prose.
 
 ## [0.5.0] - 2026-05-23
 
