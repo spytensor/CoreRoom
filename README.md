@@ -72,7 +72,8 @@ delegation line like `@x: <brief>` in its reply.
 
 ## Design docs
 
-See [docs/architecture.md](docs/architecture.md) for the v0.1 constitution,
+See [docs/getting-started.md](docs/getting-started.md) for setup and Claude
+hook scaffolding, [docs/architecture.md](docs/architecture.md) for the v0.1 constitution,
 [docs/v0.2-trust-and-interrupt.md](docs/v0.2-trust-and-interrupt.md) for
 the v0.2 amendment, [docs/v0.4-calm-cli-ui.md](docs/v0.4-calm-cli-ui.md)
 for the v0.4 live-surface contract, [docs/threat-model.md](docs/threat-model.md)

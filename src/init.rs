@@ -8,8 +8,8 @@
 //! every default. `cr start` calls `run(.., InitOptions::auto())` when
 //! `.coderoom/` is missing, so first-time users only need one command.
 //!
-//! Idempotent-by-refusing-to-overwrite: an existing `.coderoom/` errors
-//! with a clear message rather than silently merging.
+//! Re-running init is idempotent: existing `.coderoom/` files are left
+//! untouched, while opt-in hook scaffolding is merged into `.claude/`.
 
 use std::collections::HashMap;
 use std::io::{BufRead, IsTerminal, Write};
@@ -35,6 +35,7 @@ use crate::detect;
 use crate::output;
 use crate::role::{self, RoleAddition};
 
+mod hooks;
 mod labels;
 mod render;
 mod write;
@@ -62,11 +63,57 @@ const DEFAULT_ROLE_TEMPLATE: &str = include_str!("init_defaults/role_template.md
 const ROLE_SUGGESTIONS_DISMISSED: &str = "sessions/role-suggestions-dismissed";
 
 const DEFAULT_ENGINE: Engine = Engine::Cc;
+const DEFAULT_STARTER_ROLES: &[&str] = &["host", "engineer", "reviewer"];
+const TEAM_PRESET_ROLES: &[&str] = &["host", "engineer", "reviewer", "sre", "security", "qa"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RolePlan {
     name: String,
     engine: Engine,
+}
+
+/// Starter role set selected by `cr init --preset`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitPreset {
+    /// Seed host, engineer, and reviewer.
+    Default,
+    /// Seed the default roles plus SRE, security, and QA.
+    Team,
+}
+
+impl InitPreset {
+    /// Parse a CLI preset token.
+    pub fn parse(input: &str) -> Result<Self> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "default" | "starter" => Ok(Self::Default),
+            "team" => Ok(Self::Team),
+            other => bail!("unknown init preset `{other}`; use default or team"),
+        }
+    }
+
+    const fn role_names(self) -> &'static [&'static str] {
+        match self {
+            Self::Default => DEFAULT_STARTER_ROLES,
+            Self::Team => TEAM_PRESET_ROLES,
+        }
+    }
+}
+
+/// Hook scaffolding requested for `cr init`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitHookMode {
+    /// Do not write or merge Claude Code hooks.
+    None,
+    /// Install hooks for a fresh project, or merge them into an existing one.
+    InstallOrUpgrade,
+    /// Only upgrade hooks in an already-initialized CodeRoom project.
+    UpgradeExisting,
+}
+
+impl InitHookMode {
+    const fn enabled(self) -> bool {
+        !matches!(self, Self::None)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +126,18 @@ const ROLE_CATALOG: &[RoleInfo] = &[
     RoleInfo {
         name: "host",
         description: "orchestrates requests and keeps the room coherent",
+    },
+    RoleInfo {
+        name: "engineer",
+        description: "implements changes across the project",
+    },
+    RoleInfo {
+        name: "reviewer",
+        description: "reviews plans and code for regressions",
+    },
+    RoleInfo {
+        name: "sre",
+        description: "runtime reliability, deploys, operations",
     },
     RoleInfo {
         name: "backend",
@@ -123,6 +182,10 @@ pub struct InitOptions {
     /// When `true`, the function prints a brief auto-init notice
     /// instead of the full transparent summary. Used by `cr start`.
     pub quiet_intro: bool,
+    /// Claude Code hook scaffolding mode.
+    pub hook_mode: InitHookMode,
+    /// Starter role preset.
+    pub preset: InitPreset,
 }
 
 impl InitOptions {
@@ -133,6 +196,8 @@ impl InitOptions {
         Self {
             yes: false,
             quiet_intro: false,
+            hook_mode: InitHookMode::None,
+            preset: InitPreset::Default,
         }
     }
 
@@ -143,6 +208,8 @@ impl InitOptions {
         Self {
             yes: true,
             quiet_intro: false,
+            hook_mode: InitHookMode::None,
+            preset: InitPreset::Default,
         }
     }
 
@@ -153,6 +220,8 @@ impl InitOptions {
         Self {
             yes: true,
             quiet_intro: true,
+            hook_mode: InitHookMode::None,
+            preset: InitPreset::Default,
         }
     }
 }
@@ -161,23 +230,41 @@ impl InitOptions {
 pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     let coderoom_dir = project_root.join(CODEROOM_DIR);
     if coderoom_dir.exists() {
+        if options.hook_mode.enabled() {
+            let hook = hooks::install_or_upgrade(project_root)?;
+            print_hook_summary(&hook);
+        } else if !options.quiet_intro {
+            println!(
+                "{} {}",
+                "✓ unchanged".green().bold(),
+                coderoom_dir.display().to_string().bold()
+            );
+        }
+        return Ok(());
+    }
+
+    if matches!(options.hook_mode, InitHookMode::UpgradeExisting) {
         bail!(
-            "{} already exists — refusing to overwrite. \
-             edit it directly, or `rm -rf {}` to start over.",
-            coderoom_dir.display(),
-            coderoom_dir.display(),
+            "{} is missing; run `cr init --with-claude-hooks` first",
+            coderoom_dir.display()
         );
     }
 
     let scan = detect::scan(project_root);
     let installed = detect_installed_engines();
-    let default_plan = default_role_plan(&scan.suggested_roles, &installed);
+    let default_plan = default_role_plan(options.preset, &installed);
 
     let role_plan = if options.quiet_intro {
-        print_auto_intro(&scan);
+        print_auto_intro(&role_plan_names(&default_plan));
         default_plan
     } else if options.yes {
-        print_full_summary(project_root, &scan, &installed, &default_plan);
+        print_full_summary(
+            project_root,
+            &scan,
+            &installed,
+            &default_plan,
+            options.hook_mode.enabled(),
+        );
         default_plan
     } else if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
         if let Some(plan) = run_wizard(project_root, &scan, &installed, default_plan)? {
@@ -187,7 +274,13 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
             return Ok(());
         }
     } else {
-        print_full_summary(project_root, &scan, &installed, &default_plan);
+        print_full_summary(
+            project_root,
+            &scan,
+            &installed,
+            &default_plan,
+            options.hook_mode.enabled(),
+        );
         if !confirm_proceed()? {
             println!("aborted. nothing was written.");
             return Ok(());
@@ -196,6 +289,11 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     };
 
     write_all(&coderoom_dir, &role_plan)?;
+    let hook = if options.hook_mode.enabled() {
+        Some(hooks::install_or_upgrade(project_root)?)
+    } else {
+        None
+    };
 
     println!();
     println!(
@@ -203,6 +301,9 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
         "✓ wrote".green().bold(),
         coderoom_dir.display().to_string().bold()
     );
+    if let Some(hook) = &hook {
+        print_hook_summary(hook);
+    }
     println!(
         "  {}",
         "next: cr start   ·   edit .coderoom/roles/<role>/priors.md when you want deeper priors"
@@ -427,7 +528,8 @@ fn role_additions_from_plan(plan: &[RolePlan], cfg: &Config) -> Vec<RoleAddition
 }
 
 /// What `cr init` will create on disk, in render order.
-fn planned_files(coderoom_dir: &Path, roles: &[RolePlan]) -> Vec<PathBuf> {
+fn planned_files(project_root: &Path, roles: &[RolePlan], with_claude_hooks: bool) -> Vec<PathBuf> {
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
     let mut paths = vec![
         coderoom_dir.join(CONFIG_FILE),
         coderoom_dir.join("shared.md"),
@@ -445,26 +547,26 @@ fn planned_files(coderoom_dir: &Path, roles: &[RolePlan]) -> Vec<PathBuf> {
         paths.push(gate_templates_dir.join(template.filename));
     }
     paths.push(coderoom_dir.join(".gitignore"));
+    if with_claude_hooks {
+        paths.push(project_root.join(".claude").join("settings.json"));
+        paths.push(project_root.join(".claude").join(".coderoom-managed.json"));
+    }
     paths
 }
 
-fn default_role_plan(suggested_roles: &[&str], installed: &InstalledEngines) -> Vec<RolePlan> {
-    let mut names = suggested_roles.to_vec();
-    if names.is_empty() {
-        names.push("host");
-    }
-
-    names
-        .into_iter()
+fn default_role_plan(preset: InitPreset, installed: &InstalledEngines) -> Vec<RolePlan> {
+    preset
+        .role_names()
+        .iter()
         .map(|name| RolePlan {
-            name: name.to_owned(),
+            name: (*name).to_owned(),
             engine: default_engine_for_role(name, installed),
         })
         .collect()
 }
 
 fn default_engine_for_role(role: &str, installed: &InstalledEngines) -> Engine {
-    if matches!(role, "security" | "qa") && installed.codex {
+    if matches!(role, "reviewer" | "security" | "qa") && installed.codex {
         return Engine::Codex;
     }
     preferred_engine(installed)
@@ -484,8 +586,8 @@ fn preferred_engine(installed: &InstalledEngines) -> Engine {
 
 /// Brief notice used when `cr start` auto-inits — the user didn't ask
 /// for a wall of text, just a heads-up that we're setting things up.
-fn print_auto_intro(scan: &detect::ProjectScan) {
-    let role_list = scan.suggested_roles.join(", @");
+fn print_auto_intro(role_names: &[String]) {
+    let role_list = role_names.join(", @");
     println!("{} {}", "coderoom".bold(), "· first run setup".dark_grey());
     println!(
         "  {} @{} {}",
@@ -506,12 +608,13 @@ fn print_full_summary(
     scan: &detect::ProjectScan,
     installed: &InstalledEngines,
     roles: &[RolePlan],
+    with_claude_hooks: bool,
 ) {
     let project_name = project_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("(this project)");
-    let to_write = planned_files(&project_root.join(CODEROOM_DIR), roles);
+    let to_write = planned_files(project_root, roles, with_claude_hooks);
 
     println!();
     println!(
@@ -555,9 +658,9 @@ fn print_full_summary(
         "· nothing on disk yet".dark_grey()
     );
     println!();
-    println!("  {}/", project_root.join(CODEROOM_DIR).display());
+    println!("  {}/", project_root.display());
     for path in to_write {
-        if let Ok(rel) = path.strip_prefix(project_root.join(CODEROOM_DIR)) {
+        if let Ok(rel) = path.strip_prefix(project_root) {
             println!("  {}", format_tree_path(rel).dark_grey());
         }
     }
@@ -608,7 +711,7 @@ fn print_role_summary(roles: &[RolePlan]) {
     println!(
         "{} {}",
         "assign roles".bold(),
-        "· generated from detected project signals".with(output::DIM)
+        "· generated from starter preset".with(output::DIM)
     );
     let header = format!("  {:<13} {:<13} {}", "role", "engine", "focus");
     println!("{}", header.with(output::DIM));
@@ -624,6 +727,32 @@ fn print_role_summary(roles: &[RolePlan]) {
             info.description.with(output::DIM),
         );
     }
+}
+
+fn print_hook_summary(hook: &hooks::ClaudeHookInstall) {
+    let settings_status = match hook.settings_status {
+        hooks::HookWriteStatus::Created => "created",
+        hooks::HookWriteStatus::Updated => "updated",
+        hooks::HookWriteStatus::Unchanged => "unchanged",
+    };
+    println!(
+        "{} {}",
+        format!("✓ hooks {settings_status}").green().bold(),
+        hook.settings_path.display().to_string().dark_grey()
+    );
+    if hook.marker_status != hooks::HookWriteStatus::Unchanged {
+        println!(
+            "  {}",
+            format!("marker: {}", hook.marker_path.display()).dark_grey()
+        );
+    }
+    if let Some(path) = &hook.backup_path {
+        println!("  {}", format!("backup: {}", path.display()).dark_grey());
+    }
+}
+
+fn role_plan_names(plan: &[RolePlan]) -> Vec<String> {
+    plan.iter().map(|role| role.name.clone()).collect()
 }
 
 fn format_tree_path(path: &Path) -> String {
