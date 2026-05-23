@@ -36,6 +36,122 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
+## A-020: Full-screen console architecture
+
+- **Status:** accepted for v0.9; implementation split across #253-#261
+- **Filed:** 2026-05-23
+- **Touches:** What CoreRoom is, locked architecture diagram, CLI/REPL
+  compatibility, threat model console boundary, and v0.4 calm CLI non-goals.
+
+### Problem
+
+A-019 allowed a future full-screen console only after v0.8 proved the console
+data plane. v0.8 is now complete: #238 closed with `CoreRoomSnapshot`,
+observation/freshness metadata, visibility rules, reducers, projections,
+health selectors, responsive layout model, generated preview, and dogfood
+evidence.
+
+v0.9 needs permission to implement the K9s-style full-screen console without
+undoing the original CoreRoom architecture. The risk is not "drawing a better
+terminal UI"; the risk is accidentally turning the console into a second
+operator that bypasses `@host`, GitHub, PR/CI, gate, evidence, and tracker
+closure.
+
+### Alternatives considered
+
+1. **Keep only the chat REPL forever.** Rejected. v0.8 proves enough
+   structural state exists to render a useful room view.
+2. **Replace `cr start` with the full-screen console.** Rejected for v0.9.
+   Existing users and automation must retain the normal REPL behavior.
+3. **Let the console mutate project state directly.** Rejected. Mutations must
+   remain host/user-confirmed engineering actions.
+4. **Render directly from model prose or terminal text.** Rejected. Console
+   state must derive from structural facts and v0.8 view models.
+5. **Add a read-only console first, then add host-confirmed action overlays.**
+   Accepted. This preserves trust boundaries while making the UI useful.
+
+### Accepted change
+
+Starting in v0.9, CoreRoom may implement a full-screen terminal console as a
+**derived view** over the v0.8 console data plane:
+
+> The full-screen console is a host-led engineering control view over
+> `CoreRoomSnapshot`, `ConsoleState`, WorkOrders, gates, Evidence Packets,
+> source health, GitHub lifecycle, and CREP logs. It is not an agent runtime,
+> not a replacement for the REPL, and not an independent authority for
+> project-state changes.
+
+The console has these binding rules:
+
+- `@host` remains the public conversation authority.
+- The center panel preserves `User <-> @host` clarity.
+- Specialist roles appear as lanes, work rows, logs, evidence, or Xray
+  details unless the user explicitly addresses them or `@host` surfaces a
+  decision-changing result.
+- The default console mode is read-only.
+- Any mutating action must route through `@host` and the existing confirmation
+  / gate / evidence path.
+- The console may display a proposed action, but it cannot treat display as
+  confirmation.
+- Completion, freshness, approval, release readiness, and tracker closure must
+  continue to come from structural facts, not rendered panels.
+
+### Entry and compatibility
+
+`cr start` remains the normal chat REPL entry and must not become a full-screen
+TUI by default in v0.9.
+
+The full-screen console may be entered explicitly through:
+
+- a REPL command such as `/console`; and/or
+- a direct command such as `cr console` for automation/debug/recovery.
+
+Both entries must reuse the same project configuration, host role, permission
+mode, and room/session model as `cr start`. Exiting the console must restore a
+usable terminal and must not corrupt the current room's CREP/log state.
+
+### Read-only default and action bridge
+
+The first console mode is read-only. It can inspect and navigate:
+
+- overview/project state;
+- public conversation;
+- role lanes;
+- WorkOrders;
+- gates;
+- evidence;
+- sources;
+- alerts;
+- CREP logs and Xray views.
+
+Mutating actions belong behind a host-confirmed action bridge. Examples:
+
+- create or bind issue;
+- update tracker checkbox or Evidence Ledger;
+- refresh source pins;
+- override veto;
+- advance gate phase;
+- prepare PR summary;
+- run release readiness checks.
+
+The console may initiate the request, but `@host` must still present the
+confirmation boundary and record evidence.
+
+### Migration impact
+
+No migration is required for existing projects. v0.9 adds an optional view.
+Existing `.coreroom/` state, `cr start`, slash commands, role routing, and
+CREP logs remain valid.
+
+Scripts and users that rely on `cr start` entering the REPL continue to work.
+If `cr console` is added, it is additive.
+
+### Decision
+
+Accepted by the user for v0.9 on 2026-05-23. v0.9 starts with an explicit
+full-screen console architecture boundary before implementation issues #253+
+are made `codex-ready`.
+
 ## A-019: Console control surface and conversation visibility
 
 - **Status:** accepted for v0.8; implementation split across #241-#251

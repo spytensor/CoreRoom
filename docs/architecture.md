@@ -29,6 +29,14 @@ autonomous execution power.
 
 The CLI binary is `cr`.
 
+Starting with A-020, CoreRoom may also expose a full-screen terminal console
+as an optional v0.9 view over the same room. The console is a derived
+projection over structural facts such as `CoreRoomSnapshot`, CREP replay,
+WorkOrders, gates, Evidence Packets, source health, and GitHub lifecycle. It
+does not replace `cr start`, the REPL, `@host`, or the engine subprocesses.
+The default console mode is read-only; mutating actions must route through
+`@host` and the existing confirmation/evidence path.
+
 ## Role Invariance Principle
 
 CoreRoom's roles are not replacements for the engineering roles in your
@@ -116,6 +124,8 @@ violate the constitution.
 ├──────────────────────────────────────────────────────────┤
 │  REPL                                                     │
 │    parses @mentions, /commands, free text                 │
+│  Console (v0.9 optional derived view)                     │
+│    renders CoreRoomSnapshot/ConsoleState; read-only first │
 ├──────────────────────────────────────────────────────────┤
 │  Message Bus                                              │
 │    central event log, append-only JSONL                   │
@@ -499,6 +509,8 @@ cr role list                     # marks the host with *
 cr role rm <name>
 cr role host <name>              # change which role is host
 cr start                         # enter REPL; spawn all configured roles
+cr console                       # (v0.9 optional) enter the full-screen
+                                 #   console explicitly; read-only by default
 
 # global commands (outside REPL)
 cr prompt show <role>            # print the exact composed system prompt
@@ -523,6 +535,8 @@ cr cost                          # cost breakdown per role since YYYY-MM-DD
 /halt <role>                     # (v0.2) interrupt one role's in-flight turn
 /transcript <role>               # paginate latest archive
 /host <role>                     # switch host for the current session only
+/console                         # (v0.9 optional) enter the full-screen
+                                 #   console for the current room
 /help
 /exit
 ```

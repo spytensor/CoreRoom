@@ -166,6 +166,13 @@ architecture amendment before implementation.
     transcript must never delete durable CREP/log evidence or hide a critical
     veto, permission outcome, safety finding, or user-confirmation request.
 
+19. The full-screen console is read-only by default.
+    Starting with A-020, a v0.9 full-screen console may render project state,
+    but a rendered panel is not a permission grant or state mutation. Any
+    action that creates issues, updates trackers, refreshes sources, advances
+    gates, prepares PR evidence, overrides vetoes, or claims readiness must
+    route through `@host` and the existing confirmation/evidence path.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -190,6 +197,7 @@ role-written journals:
 - Whether a console panel is fresh, complete, or release-blocking.
 - Whether a specialist role message belongs in the public transcript or only
   in internal delegation views.
+- Whether a full-screen console action was confirmed by `@host` and the user.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.
 - Whether a resumed role's context is fresh enough for an audit or release
