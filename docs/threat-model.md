@@ -46,6 +46,7 @@ Out of scope:
 | `.coderoom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
 | `.coderoom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
 | `.coderoom/source-registry.toml` | User-editable project context catalog after schema validation | Pinned source ids, source kind, trust level, owner, visible roles, purpose, and refresh policy for future ContextPacks | Proof that remote content is fresh, source content is safe, role knowledge was updated, or a source may refresh silently |
+| `.coderoom/context-packs/*` | User-editable WorkOrder context selections after schema validation | Source slices, copied pins, trust levels, reasons, and target roles for a WorkOrder delegation | Proof that selected content is fresh, complete, safe, or semantically sufficient |
 
 ## Runtime Invariants
 
@@ -137,6 +138,13 @@ architecture amendment before implementation.
     external sources must never silently refresh. Adding a source does not
     mount it into role knowledge or make it part of a ContextPack.
 
+15. ContextPacks are scoped selections.
+    A ContextPack can select path/range or snapshot references from registered
+    sources for specific target roles. It must not imply that all project
+    sources are loaded into every role. Stale pins and unpinned selected
+    sources must be surfaced before delegation; they are not hidden evidence
+    of freshness.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -155,6 +163,7 @@ role-written journals:
 - Whether the host has confirmed a persistent state change.
 - Whether a WorkOrder GitHub Issue binding was confirmed by the user.
 - Whether a source registration or re-pin was confirmed by the user.
+- Whether a ContextPack is fresh enough for delegation.
 - Whether a tracker row or Evidence Ledger update is complete.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.

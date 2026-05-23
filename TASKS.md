@@ -18,7 +18,7 @@ evidence packets, and mandatory tracker closure.
 - [x] #206: Implement host intent classification.
 - [x] #207: Define WorkOrder model and GitHub binding.
 - [x] #208: Define project Source Registry.
-- [ ] #209: Define WorkOrder-scoped ContextPack.
+- [x] #209: Define WorkOrder-scoped ContextPack.
 - [ ] #210: Define Evidence Packet model.
 - [ ] #211: Enforce tracker update protocol and PR evidence template.
 - [ ] #212: Add end-to-end host-led dogfood validation.

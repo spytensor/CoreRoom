@@ -362,6 +362,8 @@ trait EngineAdapter {
 ├── work-orders/
 │   └── WO-0001.toml               # host-led binding to issue/gate/PR/tracker
 ├── source-registry.toml           # pinned project sources for future contexts
+├── context-packs/
+│   └── CTX-WO-0001.toml           # WorkOrder-scoped source slices per role
 ├── transcripts/
 │   └── YYYY-MM-DD/
 │       └── <role>-<session>.jsonl # raw CREP archive (grep, not auto-loaded)

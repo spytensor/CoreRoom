@@ -1,0 +1,37 @@
+User:
+Before delegating WO-0209, build the smallest context for @engineer and @security.
+
+@host:
+Classification: persistent-workorder
+Reason:
+- The WorkOrder needs context from registered sources, but each role should receive only the slice needed for its task.
+Next step:
+- Propose ContextPack CTX-WO-0209 before delegation.
+Confirmation required: yes
+
+ContextPack proposal: CTX-WO-0209
+workOrder: WO-0209
+
+@engineer receives:
+- sourceId: core-api
+- path: src/contracts.rs
+- range: 10-40
+- sourcePin: commit:abc123
+- reason: Engineer needs API contract definitions.
+
+@security receives:
+- sourceId: security-policy
+- path: docs/policies/security.md
+- sourcePin: sha256:def456
+- reason: Security needs policy constraints.
+
+Warnings:
+- none
+
+No role receives every source by default.
+
+User:
+Confirmed. Use this ContextPack for delegation.
+
+@host:
+Confirmed CTX-WO-0209. I will delegate the core-api slice to @engineer and the security-policy slice to @security.
