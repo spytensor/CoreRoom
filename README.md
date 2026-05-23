@@ -10,6 +10,8 @@
 
 ![CoreRoom role work cards](docs/images/work-cards.png)
 
+![CoreRoom console data-plane preview](docs/images/control-room-console.png)
+
 > **Status: v0.7.0 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
