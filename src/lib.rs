@@ -15,6 +15,7 @@ pub mod config_cmd;
 pub mod config_layered;
 pub mod console_snapshot;
 pub mod context_pack;
+pub mod conversation_visibility;
 pub mod cost;
 pub mod crep;
 pub mod detect;

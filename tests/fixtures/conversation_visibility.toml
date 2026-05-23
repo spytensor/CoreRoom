@@ -1,0 +1,98 @@
+[[cases]]
+name = "user-default-public"
+expectedVisibility = "public-transcript"
+expectedPublic = true
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "user-message"
+
+[[cases]]
+name = "host-default-public"
+expectedVisibility = "public-transcript"
+expectedPublic = true
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "host-response"
+
+[[cases]]
+name = "user-addressed-role-public"
+expectedVisibility = "public-transcript"
+expectedPublic = true
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "user-message"
+addressedRole = "security"
+
+[[cases]]
+name = "role-addressed-by-user-public"
+expectedVisibility = "public-transcript"
+expectedPublic = true
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "role-addressed-by-user"
+role = "security"
+
+[[cases]]
+name = "host-to-role-internal"
+expectedVisibility = "internal-delegation"
+expectedPublic = false
+expectedSideRail = true
+expectedXray = true
+
+[cases.input]
+kind = "host-to-role"
+role = "reviewer"
+workOrder = "WO-0244"
+
+[[cases]]
+name = "role-to-host-internal"
+expectedVisibility = "internal-delegation"
+expectedPublic = false
+expectedSideRail = true
+expectedXray = true
+
+[cases.input]
+kind = "role-to-host"
+role = "reviewer"
+
+[[cases]]
+name = "host-surfaces-critical-risk"
+expectedVisibility = "public-transcript"
+expectedPublic = true
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "role-to-host"
+role = "security"
+surfacedByHost = "critical-risk"
+
+[[cases]]
+name = "side-rail-summary"
+expectedVisibility = "side-rail"
+expectedPublic = false
+expectedSideRail = true
+expectedXray = true
+
+[cases.input]
+kind = "side-rail-summary"
+source = "role-lanes"
+
+[[cases]]
+name = "debug-log"
+expectedVisibility = "debug-log"
+expectedPublic = false
+expectedSideRail = false
+expectedXray = true
+
+[cases.input]
+kind = "debug-log"
+source = "crep-jsonl"

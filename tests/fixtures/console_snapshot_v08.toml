@@ -56,6 +56,20 @@ lastActivity = "Waiting on source citation model"
 [conversation]
 internalDelegationCount = 3
 
+[[conversation.internalActivity]]
+role = "reviewer"
+workOrder = "WO-0242"
+state = "reviewing"
+summary = "Reviewing snapshot schema without entering public transcript."
+xrayRef = "xray:thread-v08-console-fixture/reviewer"
+
+[[conversation.internalActivity]]
+role = "security"
+workOrder = "WO-0243"
+state = "blocked"
+summary = "Waiting on observation/citation model before final risk review."
+xrayRef = "xray:thread-v08-console-fixture/security"
+
 [[conversation.publicTurns]]
 speaker = "user"
 body = "设计 0.8/0.9 的 CoreRoom console，主对话必须清晰，其他角色只在需要时显式出现。"

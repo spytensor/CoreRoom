@@ -251,12 +251,28 @@ pub struct ConversationSnapshot {
     /// Count of internal delegations hidden from the public transcript.
     #[serde(default)]
     pub internal_delegation_count: u32,
+    /// Side-rail activity rows for internal delegation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub internal_activity: Vec<InternalDelegationActivity>,
 }
 
 impl ConversationSnapshot {
     fn validate(&self) -> Result<()> {
         for turn in &self.public_turns {
             turn.validate()?;
+            if matches!(
+                turn.visibility,
+                ConversationVisibility::InternalDelegation | ConversationVisibility::DebugLog
+            ) {
+                bail!(
+                    "conversation.publicTurns cannot contain {:?} turn from `{}`",
+                    turn.visibility,
+                    turn.speaker
+                );
+            }
+        }
+        for activity in &self.internal_activity {
+            activity.validate()?;
         }
         Ok(())
     }
@@ -293,6 +309,54 @@ pub enum ConversationVisibility {
     SideRail,
     /// Debug/audit log.
     DebugLog,
+}
+
+/// Side-rail activity for host-managed internal delegation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalDelegationActivity {
+    /// Delegated role.
+    pub role: String,
+    /// Related WorkOrder, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_order: Option<String>,
+    /// Activity state.
+    pub state: InternalDelegationState,
+    /// Compact side-rail summary.
+    pub summary: String,
+    /// Log/Xray reference for details on demand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xray_ref: Option<String>,
+}
+
+impl InternalDelegationActivity {
+    fn validate(&self) -> Result<()> {
+        ensure_nonempty("internalActivity.role", &self.role)?;
+        ensure_nonempty("internalActivity.summary", &self.summary)?;
+        if let Some(work_order) = &self.work_order {
+            ensure_work_order_id(work_order)?;
+        }
+        if self.xray_ref.as_deref().is_some_and(str::is_empty) {
+            bail!("internalActivity.xrayRef cannot be empty");
+        }
+        Ok(())
+    }
+}
+
+/// Internal delegation side-rail state.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum InternalDelegationState {
+    /// Delegation was queued or dispatched.
+    Dispatched,
+    /// Role is actively working.
+    Working,
+    /// Role is reviewing a plan/work item.
+    Reviewing,
+    /// Delegation is blocked.
+    Blocked,
+    /// Delegation completed and is awaiting host synthesis.
+    Completed,
 }
 
 /// One WorkOrder row in the console.
