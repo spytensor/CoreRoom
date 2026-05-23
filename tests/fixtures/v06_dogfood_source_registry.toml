@@ -1,0 +1,45 @@
+schemaVersion = 1
+
+[[sources]]
+id = "coderoom-architecture"
+kind = "project-file"
+path = "docs/architecture.md"
+pin = "sha256:arch-v06-dogfood"
+trustLevel = "project"
+owner = "host"
+visibleRoles = ["host", "engineer", "reviewer"]
+purpose = "Architecture boundary for wrapper-not-runtime and host-led control."
+refreshPolicy = "manual"
+
+[[sources]]
+id = "sdlc-gates"
+kind = "policy-doc"
+path = "docs/sdlc-gates.md"
+pin = "sha256:gates-v06-dogfood"
+trustLevel = "policy"
+owner = "host"
+visibleRoles = ["host", "reviewer", "qa"]
+purpose = "Gate ordering and evidence requirements."
+refreshPolicy = "manual"
+
+[[sources]]
+id = "v06-tracker"
+kind = "url-snapshot"
+url = "https://github.com/spytensor/codeRoom/issues/202"
+pin = "snapshot:v06-tracker-202"
+trustLevel = "external-doc"
+owner = "host"
+visibleRoles = ["host", "reviewer"]
+purpose = "Milestone tracker and Evidence Ledger state for v0.6 closure."
+refreshPolicy = "on-confirmation"
+
+[[sources]]
+id = "pr-template"
+kind = "project-file"
+path = ".github/PULL_REQUEST_TEMPLATE.md"
+pin = "sha256:pr-template-v06-dogfood"
+trustLevel = "project"
+owner = "host"
+visibleRoles = ["host", "engineer", "reviewer", "qa"]
+purpose = "PR evidence packet and tracker update requirements."
+refreshPolicy = "manual"

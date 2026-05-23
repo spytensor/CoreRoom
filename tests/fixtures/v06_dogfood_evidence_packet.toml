@@ -1,0 +1,64 @@
+schemaVersion = 1
+status = "complete"
+workOrder = "WO-0212"
+githubIssue = 212
+branch = "feat/v0.6-212-host-led-dogfood-validation"
+pullRequest = 228
+gateThread = "thread-v06-dogfood"
+rollback = "Revert PR #228; no migration or persisted runtime state change."
+unverifiedItems = ["GitHub CI status is proven after PR #228 opens; the default dogfood test itself does not call paid engines."]
+
+[[changedFiles]]
+path = "tests/v06_host_led_dogfood.rs"
+summary = "Adds the v0.6 host-led dogfood validation test."
+
+[[changedFiles]]
+path = "tests/fixtures/v06_host_led_dogfood.txt"
+summary = "Documents the natural-language host-led dogfood transcript."
+
+[[changedFiles]]
+path = "tests/fixtures/v06_dogfood_work_order.toml"
+summary = "Provides the WorkOrder example for #212."
+
+[[changedFiles]]
+path = "tests/fixtures/v06_dogfood_context_pack.toml"
+summary = "Provides the WorkOrder-scoped ContextPack example."
+
+[[changedFiles]]
+path = "tests/fixtures/v06_dogfood_evidence_packet.toml"
+summary = "Provides the Evidence Packet example."
+
+[[commandsRun]]
+command = "cargo test --test v06_host_led_dogfood --quiet"
+result = "pass"
+evidence = "Dogfood validation test passes without live engines."
+
+[[testResults]]
+name = "v0.6 dogfood fixture"
+result = "pass"
+evidence = "WorkOrder, Source Registry, ContextPack, Evidence Packet, and tracker closure all validate."
+
+[[roleReviews]]
+role = "host"
+decision = "accepted"
+evidence = "Host transcript classifies request, proposes WorkOrder, drives gate, and closes tracker."
+
+[[roleReviews]]
+role = "engineer"
+decision = "accepted"
+evidence = "Engineer receives only architecture and PR-template context slices."
+
+[[roleReviews]]
+role = "reviewer"
+decision = "accepted"
+evidence = "Reviewer receives gate, tracker, and PR-template context slices."
+
+[[risks]]
+level = "low"
+description = "Validation uses deterministic fixtures; live GitHub CI evidence is attached by the completing PR."
+
+[trackerUpdate]
+trackerIssue = 202
+checkboxUpdated = true
+evidenceLedgerUpdated = true
+milestoneAcUpdated = ["M-AC-10"]

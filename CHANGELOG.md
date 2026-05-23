@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unverified-item evidence instead of model prose.
 - Added v0.6 tracker closure enforcement docs, PR template evidence sections,
   and stale tracker detection helpers for host completion checks.
+- Added a deterministic v0.6 host-led dogfood validation that links the user
+  request, WorkOrder, Source Registry, ContextPack, gate ordering, Evidence
+  Packet, PR binding, and tracker closure into one replayable proof.
 
 ## [0.5.0] - 2026-05-23
 

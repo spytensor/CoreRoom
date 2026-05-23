@@ -1,0 +1,80 @@
+# v0.6 Host-led Dogfood Transcript
+
+User:
+Make the v0.6 host-led Engineering Control Room flow prove itself. Start from
+this request, bind it to the existing GitHub issue, use the minimum context,
+delegate review, reach signoff before implementation, and close the tracker
+with evidence.
+
+@host:
+Classification: persistent-workorder
+Reason:
+- This is milestone validation for v0.6.
+- It must bind GitHub Issue, WorkOrder, gate thread, branch, PR, Evidence
+  Packet, and tracker row.
+Confirmation required: yes
+
+WorkOrder draft: WO-0212
+- GitHub Issue: #212
+- Phase: v0.6.0 - Engineering Control Room
+- Epic: Evidence / Tracker Closure
+- Tracker: #202 / #212
+- Required evidence: dogfood transcript, WorkOrder, ContextPack, Evidence
+  Packet, tracker update, PR link
+
+Required sources:
+- coderoom-architecture: docs/architecture.md
+- sdlc-gates: docs/sdlc-gates.md
+- v06-tracker: https://github.com/spytensor/codeRoom/issues/202
+- pr-template: .github/PULL_REQUEST_TEMPLATE.md
+
+ContextPack: CTX-WO-0212
+- @engineer receives architecture and PR-template slices.
+- @reviewer receives SDLC gate, tracker, and PR-template slices.
+- @qa receives SDLC gate and PR-template slices.
+- No role receives every registered source by default.
+
+Delegate @engineer:
+Use the architecture and PR-template context to verify the fixture models prove
+the implementation-facing path without adding a user command.
+
+Delegate @reviewer:
+Use the SDLC gate, tracker, and PR-template context to verify completion cannot
+be claimed until tracker checkbox and Evidence Ledger are updated.
+
+Gate phase: discovery
+Evidence: required sources and context slices identified.
+
+Gate phase: plan
+Evidence: WorkOrder WO-0212 and ContextPack CTX-WO-0212 drafted.
+
+Gate phase: review
+Evidence: @engineer and @reviewer both have scoped delegation.
+
+Gate phase: signoff
+Evidence: host confirms scoped context, tracker closure rule, and rollback
+requirements before implementation starts.
+
+Gate phase: implement
+Evidence: deterministic fixtures and v0.6 dogfood test are added.
+
+Gate phase: qa
+Evidence: cargo test --test v06_host_led_dogfood --quiet passes.
+
+Evidence Packet: WO-0212
+- Pull Request: #228
+- GitHub Issue: #212
+- Branch: feat/v0.6-212-host-led-dogfood-validation
+- Gate thread: thread-v06-dogfood
+
+Tracker closure: #202 / #212
+- Checkbox: checked after PR merge.
+- Evidence Ledger: PR #228, merged, validation evidence, tracker updated yes.
+- M-AC-10: checked after dogfood proof merges.
+
+Remaining risks:
+- This default dogfood does not call paid live engines.
+- GitHub CI evidence is attached by the completing PR after it opens.
+
+Rollback:
+Revert PR #228; no migration or persisted runtime state change.
