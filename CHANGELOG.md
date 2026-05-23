@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Accepted the host-led engineering control protocol: `@host` is the highest
   in-room authority for intake, delegation, gate progress, evidence, and
   tracker closure while the user remains the final owner.
+- Added `AGENTS.md` as the shared worker protocol for Codex, Claude Code, and
+  other AI coding agents, including v0.6 issue pickup rules and tracker
+  evidence requirements.
 
 ## [0.5.0] - 2026-05-23
 

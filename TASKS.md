@@ -14,7 +14,7 @@ evidence packets, and mandatory tracker closure.
 - [x] Update GitHub repository description and topics toward Engineering Control Room positioning.
 - [x] #203: Land A-016 naming/product-positioning amendment.
 - [x] #204: Land A-017 host authority and host-led engineering control protocol.
-- [ ] #205: Add AGENTS.md as the external AI worker protocol.
+- [x] #205: Add AGENTS.md as the external AI worker protocol.
 - [ ] #206: Implement host intent classification.
 - [ ] #207: Define WorkOrder model and GitHub binding.
 - [ ] #208: Define project Source Registry.
