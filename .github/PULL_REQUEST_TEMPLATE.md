@@ -44,6 +44,7 @@ Bump scope must be a directory or module name (e.g. `adapter-cc`, `crep`,
 - Changed files:
 - Commands run:
 - Test/check results:
+- Snapshot/fixture evidence, if console/status/view-model/host output changed:
 - Role reviews:
 - Risks:
 - Rollback:
@@ -51,9 +52,10 @@ Bump scope must be a directory or module name (e.g. `adapter-cc`, `crep`,
 
 ## Tracker update
 
-For v0.7 issues, the PR is incomplete until tracker #213 is updated.
+For the active milestone, the PR is incomplete until the tracker named in
+`AGENTS.md` is updated. The current active tracker is #238.
 
-- Tracker issue: #213
+- Tracker issue:
 - Issue checkbox updated:
   - [ ] yes
   - [ ] no, reason:
@@ -64,7 +66,7 @@ For v0.7 issues, the PR is incomplete until tracker #213 is updated.
   - [ ] yes
   - [ ] no, reason:
 
-If implementation is complete but tracker #213 is stale, report
+If implementation is complete but the tracker is stale, report
 `implementation complete, tracker incomplete`; do not claim `done`.
 
 ## Risk and rollback

@@ -5,11 +5,11 @@ repository, including Codex, Claude Code, and other terminal coding agents.
 
 ## Current Project Phase
 
-Active milestone: v0.7.0 - CoreRoom GitHub-native Engineering Loop.
+Active milestone: v0.8.0 - CoreRoom Console Data Plane.
 
-Primary tracker: #213.
+Primary tracker: #238.
 
-v0.6 tracker #202 is complete. Do not work on v0.8+ issues unless the user
+v0.7 tracker #213 is complete. Do not work on v0.9+ issues unless the user
 explicitly pulls one into the active milestone.
 
 ## Operating Model
@@ -33,7 +33,7 @@ Only pick up an issue when all are true:
 - The issue has `codex-ready`.
 - The issue is not labelled `constitution`.
 - The issue is not labelled `human-only`.
-- The issue belongs to the active v0.7 milestone, unless the user explicitly
+- The issue belongs to the active v0.8 milestone, unless the user explicitly
   re-scopes it.
 
 If an issue is ambiguous, blocked, missing acceptance criteria, or conflicts
@@ -42,8 +42,8 @@ with this file, comment on the issue and stop. Do not guess.
 ## Branch and PR Discipline
 
 - Use one branch per issue.
-- For v0.7 issues, branch from `main` as
-  `feat/v0.7-<issue-number>-<short-slug>`.
+- For v0.8 issues, branch from `main` as
+  `feat/v0.8-<issue-number>-<short-slug>`.
 - Implement strictly against the issue Acceptance Criteria.
 - Do not touch files outside the issue scope unless the PR explains why.
 - Do not mix constitution decisions with implementation unless the issue
@@ -58,6 +58,8 @@ Every PR must include:
 - Changed files summary.
 - Validation commands and results.
 - Evidence Packet or inline evidence summary.
+- Snapshot/fixture evidence when console, status, view-model, transcript, or
+  host output changes.
 - Risks and remaining gaps.
 - Rollback plan.
 - Tracker update section.
@@ -66,7 +68,7 @@ Every PR must include:
 
 An issue is not done until the tracker is updated.
 
-For v0.7, the completing PR must update #213 by:
+For v0.8, the completing PR must update #238 by:
 
 - Ticking the issue checkbox.
 - Updating any satisfied milestone acceptance criteria.
@@ -115,9 +117,11 @@ tests and explain why that scope is sufficient.
 
 - Do not work on `constitution` or `human-only` issues unless the user directly
   instructs this specific worker in the current conversation.
-- Do not pick up v0.8+ work while #213 is active.
+- Do not pick up v0.9+ work while #238 is active.
 - Do not infer completion from model prose.
 - Do not update trackers without evidence.
+- Do not claim a console, status panel, or dashboard state is valid unless it
+  is derived from structural facts or an explicit fixture.
 - Do not silently change package names, binary names, repo names, release
   scripts, or migration policy.
 - Do not replace GitHub Issues, PRs, CI, or tracker evidence with chat history.
