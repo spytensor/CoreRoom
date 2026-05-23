@@ -1,0 +1,78 @@
+schemaVersion = 1
+status = "complete"
+workOrder = "WO-0251"
+githubIssue = 251
+branch = "feat/v0.8-251-console-dogfood"
+pullRequest = 280
+gateThread = "thread-v08-console-dogfood"
+rollback = "Revert PR #280; no migration or runtime behavior change is included."
+unverifiedItems = ["GitHub CI evidence is attached by PR #280 after it opens; v0.9 ratatui UI remains unimplemented by design."]
+
+[[changedFiles]]
+path = "docs/v0.8-console-dogfood.md"
+summary = "Documents v0.8 console dogfood evidence, v0.9 readiness criteria, risks, and rollback."
+
+[[changedFiles]]
+path = "tests/v08_console_dogfood.rs"
+summary = "Adds deterministic dogfood validation over transcript, WorkOrder, snapshot, layout, image, evidence, and tracker closure."
+
+[[changedFiles]]
+path = "tests/fixtures/v08_console_dogfood_transcript.txt"
+summary = "Captures the host-led request/classification/gate/evidence transcript."
+
+[[changedFiles]]
+path = "tests/fixtures/v08_console_dogfood_work_order.toml"
+summary = "Binds #251 to WorkOrder WO-0251 and tracker #238."
+
+[[changedFiles]]
+path = "tests/fixtures/v08_console_dogfood_evidence_packet.toml"
+summary = "Provides complete dogfood Evidence Packet closure."
+
+[[commandsRun]]
+command = "cargo test --test v08_console_dogfood --quiet"
+result = "pass"
+evidence = "Dogfood validation test passes without live engines."
+
+[[commandsRun]]
+command = "make readme-images"
+result = "pass"
+evidence = "Regenerates boot dashboard, work cards, and control-room console image."
+
+[[commandsRun]]
+command = "cargo test --all-features --locked --quiet"
+result = "pass"
+evidence = "Full locked suite passes locally before PR."
+
+[[testResults]]
+name = "v0.8 console dogfood fixture"
+result = "pass"
+evidence = "Transcript, WorkOrder, CoreRoomSnapshot, layout, rendered image, Evidence Packet, and tracker closure validate."
+
+[[roleReviews]]
+role = "host"
+decision = "accepted"
+evidence = "Host transcript classifies request, binds WO-0251/#251/#238, and preserves User <-> @host public transcript."
+
+[[roleReviews]]
+role = "reviewer"
+decision = "accepted"
+evidence = "Reviewer result is surfaced only through host; specialist output remains side-rail/internal."
+
+[[roleReviews]]
+role = "qa"
+decision = "accepted"
+evidence = "Negative stale-tracker/missing-evidence fixture is present and v0.9 risks are documented."
+
+[[risks]]
+level = "medium"
+description = "v0.9 full-screen ratatui renderer is not implemented; v0.8 proves the data plane and preview only."
+
+[[risks]]
+level = "low"
+description = "Dogfood additions are deterministic docs/fixtures/tests and can be reverted without migration."
+
+[trackerUpdate]
+trackerIssue = 238
+checkboxUpdated = true
+evidenceLedgerUpdated = true
+milestoneAcUpdated = ["M-AC-10"]
