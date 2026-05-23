@@ -1,0 +1,196 @@
+[[cases]]
+name = "not-started"
+expectedLifecycle = "not-started"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = []
+evidence = "missing"
+
+[cases.facts.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "ready"
+expectedLifecycle = "ready"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:ready", "codex-ready"]
+evidence = "missing"
+
+[cases.facts.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "in-progress"
+expectedLifecycle = "in-progress"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:ready"]
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "missing"
+
+[cases.facts.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "in-review"
+expectedLifecycle = "in-review"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:in-review"]
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "incomplete"
+
+[cases.facts.pullRequest]
+number = 229
+state = "open"
+
+[[cases.facts.checks]]
+name = "rustfmt"
+state = "pass"
+
+[[cases.facts.checks]]
+name = "test (ubuntu-latest)"
+state = "pending"
+
+[cases.facts.tracker]
+checkbox_checked = false
+ledger_status = "in_review"
+ledger_tracker_updated = false
+
+[[cases]]
+name = "failed-ci"
+expectedLifecycle = "failed-ci"
+expectedFinding = "CI check"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:in-review"]
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "incomplete"
+
+[cases.facts.pullRequest]
+number = 229
+state = "open"
+
+[[cases.facts.checks]]
+name = "test (ubuntu-latest)"
+state = "fail"
+
+[cases.facts.tracker]
+checkbox_checked = false
+ledger_status = "in_review"
+ledger_tracker_updated = false
+
+[[cases]]
+name = "merged-tracker-stale"
+expectedLifecycle = "merged-tracker-stale"
+expectedFinding = "tracker row"
+
+[cases.facts]
+issue = 214
+issueState = "closed"
+labels = []
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "complete"
+evidencePacket = "WO-0214"
+
+[cases.facts.pullRequest]
+number = 229
+state = "merged"
+
+[[cases.facts.checks]]
+name = "clippy"
+state = "pass"
+
+[cases.facts.tracker]
+checkbox_checked = false
+ledger_status = "in_review"
+ledger_tracker_updated = false
+
+[[cases]]
+name = "blocked"
+expectedLifecycle = "blocked"
+expectedFinding = "blocked"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:blocked"]
+evidence = "missing"
+blocker = "waiting for human confirmation"
+
+[cases.facts.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "fully-closed"
+expectedLifecycle = "closed"
+
+[cases.facts]
+issue = 214
+issueState = "closed"
+labels = []
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "complete"
+evidencePacket = "WO-0214"
+
+[cases.facts.pullRequest]
+number = 229
+state = "merged"
+
+[[cases.facts.checks]]
+name = "rustfmt"
+state = "pass"
+
+[[cases.facts.checks]]
+name = "clippy"
+state = "pass"
+
+[[cases.facts.checks]]
+name = "test (macos-latest)"
+state = "pass"
+
+[[cases.facts.checks]]
+name = "test (ubuntu-latest)"
+state = "pass"
+
+[cases.facts.tracker]
+checkbox_checked = true
+ledger_status = "merged"
+ledger_tracker_updated = true
+
+[[cases]]
+name = "failed-ci-tracker-stale"
+expectedLifecycle = "failed-ci"
+expectedFinding = "tracker checkbox"
+
+[cases.facts]
+issue = 214
+issueState = "open"
+labels = ["status:in-review"]
+branch = "feat/v0.7-214-github-workorder-status-sync"
+evidence = "complete"
+evidencePacket = "WO-0214"
+
+[cases.facts.pullRequest]
+number = 229
+state = "open"
+
+[[cases.facts.checks]]
+name = "test (ubuntu-latest)"
+state = "fail"
+
+[cases.facts.tracker]
+checkbox_checked = true
+ledger_status = "merged"
+ledger_tracker_updated = true

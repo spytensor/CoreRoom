@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a deterministic v0.6 host-led dogfood validation that links the user
   request, WorkOrder, Source Registry, ContextPack, gate ordering, Evidence
   Packet, PR binding, and tracker closure into one replayable proof.
+- Added the v0.7 GitHub-native WorkOrder lifecycle model for deriving host
+  status from Issue, branch, PR, CI, Evidence Packet, and tracker facts.
 
 ## [0.5.0] - 2026-05-23
 

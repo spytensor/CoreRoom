@@ -21,6 +21,7 @@ pub mod doctor;
 pub mod engines;
 pub mod evidence_packet;
 pub mod gate;
+pub mod github_status;
 pub mod image_paths;
 pub mod init;
 pub mod liveness;

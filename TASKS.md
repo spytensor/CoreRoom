@@ -1,12 +1,12 @@
-# v0.6 Engineering Control Room Bootstrap Tasks
+# CoreRoom Engineering Control Room Bootstrap Tasks
 
 ## Goal
 
-Bootstrap v0.6 as the Engineering Control Room turn: host-led AI-assisted
-software engineering control with GitHub issue discipline, dependency context,
-evidence packets, and mandatory tracker closure.
+Bootstrap CoreRoom as the Engineering Control Room for AI Agents: host-led
+AI-assisted software engineering control with GitHub issue discipline,
+dependency context, evidence packets, status rollups, and tracker closure.
 
-## Current Plan
+## v0.6 Complete
 
 - [x] Pin GitHub epic #202 for v0.6.
 - [x] Create v0.6 tracker and implementation issues (#202-#212).
@@ -23,13 +23,20 @@ evidence packets, and mandatory tracker closure.
 - [x] #211: Enforce tracker update protocol and PR evidence template.
 - [x] #212: Add end-to-end host-led dogfood validation.
 
+## v0.7 Current Plan
+
+- [x] Pin GitHub epic #213 for v0.7.
+- [ ] #214: Implement GitHub-native WorkOrder/Issue/PR/CI status sync.
+- [ ] #215: Implement host-managed worker action layer.
+- [ ] #216: Implement multi-repo source graph and remote snapshots.
+- [ ] #217: Implement release readiness and project status rollup.
+- [ ] #218: Implement CoreRoom rename and compatibility migration.
+
 ## Notes
 
-- v0.6 work must keep #202 updated. An issue is not done until tracker checkbox
+- v0.7 work must keep #213 updated. An issue is not done until tracker checkbox
   and Evidence Ledger row are updated.
-- Do not pick up v0.7 issues while v0.6 is active unless the user explicitly
-  re-scopes them into v0.6.
 - Commands are automation, CI, debug, and recovery surface. The happy path is
   user intent -> `@host` -> role/gate/evidence/tracker orchestration.
-- Repository/package/binary rename implementation is not part of #203. It is
-  deferred to #218 unless the user explicitly changes scope.
+- CoreRoom rename implementation is tracked in #218 and must preserve the `cr`
+  happy-path command unless explicitly changed.
