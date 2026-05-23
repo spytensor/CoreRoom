@@ -116,6 +116,68 @@ user confirmation. Binding an existing issue updates only the local WorkOrder;
 it must not silently change the GitHub Issue body, labels, milestone, or
 comments.
 
+## Project Source Registry
+
+Source Registry is the v0.6 project-level catalog of dependency context. It is
+stored at `.coderoom/source-registry.toml` and is distinct from both role
+knowledge and WorkOrder ContextPacks:
+
+- Role knowledge is long-lived role-specific prompt material.
+- Source Registry lists project sources with pins, trust, owners, visibility,
+  purpose, and refresh policy.
+- ContextPack, added later in v0.6, selects the minimal source slices for a
+  specific WorkOrder.
+
+The persisted Source Registry schema uses camelCase keys:
+
+```toml
+schemaVersion = 1
+
+[[sources]]
+id = "core-api"
+kind = "local-repo"
+path = "../core-api"
+pin = "commit:0123456789abcdef"
+trustLevel = "internal"
+owner = "platform-team"
+visibleRoles = ["host", "engineer"]
+purpose = "Integration behavior and API contracts."
+refreshPolicy = "on-confirmation"
+
+[[sources]]
+id = "security-policy"
+kind = "policy-doc"
+path = "docs/policies/security.md"
+pin = "sha256:abc123"
+trustLevel = "policy"
+owner = "security"
+visibleRoles = ["host", "security"]
+purpose = "Security constraints for source handling."
+refreshPolicy = "manual"
+
+[[sources]]
+id = "provider-docs"
+kind = "url-snapshot"
+url = "https://docs.example.test/api"
+pin = "snapshot:deadbeef"
+trustLevel = "external-doc"
+owner = "host"
+visibleRoles = ["host", "engineer"]
+purpose = "External API reference snapshot."
+refreshPolicy = "on-confirmation"
+```
+
+Supported source kinds are `project-file`, `local-repo`, `git-repo`,
+`url-snapshot`, `policy-doc`, `api-spec`, and `design-reference`. Trust levels
+are `project`, `internal`, `external-doc`, `policy`, `generated`, and
+`untrusted`. Refresh policies are `never`, `manual`, and `on-confirmation`;
+there is no silent auto-refresh policy in v0.6.
+
+`@host` may propose source entries during intake, but registration or
+re-pinning requires user confirmation. Missing local files, inaccessible local
+repos, missing pins, invalid trust levels, and invalid refresh policies fail
+loudly before registry writes.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline

@@ -1,0 +1,53 @@
+User:
+This v0.6 work depends on ../core-api, docs/policies/security.md, and a pinned provider docs URL.
+
+@host:
+Classification: persistent-workorder
+Reason:
+- The work needs project-level dependency context that should be registered once and reused in scoped ContextPacks.
+Next step:
+- Propose Source Registry entries and ask for confirmation before writing `.coderoom/source-registry.toml`.
+Confirmation required: yes
+
+Source Registry entry proposal:
+- id: core-api
+- kind: local-repo
+- path: ../core-api
+- pin: commit:0123456789abcdef
+- trustLevel: internal
+- owner: platform-team
+- visibleRoles: host, engineer
+- purpose: Integration behavior and API contracts.
+- refreshPolicy: on-confirmation
+
+Source Registry entry proposal:
+- id: security-policy
+- kind: policy-doc
+- path: docs/policies/security.md
+- pin: sha256:abc123
+- trustLevel: policy
+- owner: security
+- visibleRoles: host, security
+- purpose: Security constraints for source handling.
+- refreshPolicy: manual
+
+Source Registry entry proposal:
+- id: provider-docs
+- kind: url-snapshot
+- url: https://docs.example.test/api
+- pin: snapshot:deadbeef
+- trustLevel: external-doc
+- owner: host
+- visibleRoles: host, engineer
+- purpose: External API reference snapshot.
+- refreshPolicy: on-confirmation
+
+Silent refresh allowed: no
+Role knowledge: no
+ContextPack: not yet
+
+User:
+Confirmed. Register these sources.
+
+@host:
+Registered the confirmed project sources. I did not mount them into any role knowledge or build a WorkOrder ContextPack yet.
