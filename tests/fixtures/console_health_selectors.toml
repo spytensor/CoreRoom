@@ -1,0 +1,57 @@
+forbiddenSignalPrefixes = [
+  "work:closed:WO-0241",
+  "role:enabled:engineer",
+  "source:pinned:core-repo",
+]
+
+[[expectedSelectors]]
+selector = "work:active"
+contains = ["WO-0242", "WO-0251"]
+
+[[expectedSelectors]]
+selector = "work:blocked"
+contains = ["WO-0251"]
+
+[[expectedSelectors]]
+selector = "work:stale-tracker"
+contains = ["WO-0206"]
+
+[[expectedSelectors]]
+selector = "role:enabled"
+contains = ["host", "engineer", "reviewer", "security", "qa", "sre", "product"]
+
+[[expectedSelectors]]
+selector = "role:working"
+contains = ["host"]
+
+[[expectedSelectors]]
+selector = "role:waiting-approval"
+contains = ["qa"]
+
+[[expectedSelectors]]
+selector = "role:permission-risk"
+contains = ["sre"]
+
+[[expectedSelectors]]
+selector = "gate:blocked"
+contains = ["WO-0251"]
+
+[[expectedSelectors]]
+selector = "gate:missing-review"
+contains = ["WO-0251"]
+
+[[expectedSelectors]]
+selector = "evidence:incomplete"
+contains = ["WO-0242"]
+
+[[expectedSelectors]]
+selector = "evidence:missing"
+contains = []
+
+[[expectedSelectors]]
+selector = "evidence:tracker-stale"
+contains = ["WO-0242"]
+
+[[expectedSelectors]]
+selector = "source:stale"
+contains = ["readme-console-mock"]
