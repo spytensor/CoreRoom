@@ -1,0 +1,13 @@
+{"type":"role_started","role":"host","engine":"cc","model":"sonnet","session_id":"host-session","priors_hash":"hash-host"}
+{"type":"role_started","role":"reviewer","engine":"codex","model":"gpt-5","session_id":"reviewer-session","priors_hash":"hash-reviewer"}
+{"type":"turn_dispatched","role":"host","priors_hash":"hash-host","turn_id":"turn-host-1","thread_id":"thread-console-1","parent_turn_id":null,"queue_position":0}
+{"type":"role_output_delta","role":"host","priors_hash":"hash-host","text_delta":"I will ","sequence":1,"turn_id":"turn-host-1","thread_id":"thread-console-1"}
+{"type":"role_output_delta","role":"host","priors_hash":"hash-host","text_delta":"plan v0.8","sequence":2,"turn_id":"turn-host-1","thread_id":"thread-console-1"}
+{"type":"role_spoke","role":"host","priors_hash":"hash-host","text":"I will plan v0.8 with a clean host-led transcript.","mentions":[],"cost_usd":0.01,"cache_read":1200,"turn_id":"turn-host-1","thread_id":"thread-console-1"}
+{"type":"turn_dispatched","role":"reviewer","priors_hash":"hash-reviewer","turn_id":"turn-reviewer-1","thread_id":"thread-console-1","parent_turn_id":"turn-host-1","queue_position":0}
+{"type":"tool_call_proposed","role":"reviewer","priors_hash":"hash-reviewer","tool_name":"Bash","tool_input":{"command":"rg ConsoleState src tests"},"tool_use_id":"tool-1","turn_id":"turn-reviewer-1","thread_id":"thread-console-1"}
+{"type":"tool_call_executed","role":"reviewer","priors_hash":"hash-reviewer","tool_use_id":"tool-1","ok":true,"output_summary":"found reducer references","turn_id":"turn-reviewer-1","thread_id":"thread-console-1"}
+{"type":"permission_denied","role":"reviewer","priors_hash":"hash-reviewer","tool_name":"Bash","tool_input":{"command":"rm -rf .coreroom"},"reason":"destructive command denied","turn_id":"turn-reviewer-1","thread_id":"thread-console-1"}
+{"type":"role_spoke","role":"reviewer","priors_hash":"hash-reviewer","text":"Reviewer internal finding: the reducer should not print.","mentions":[],"cost_usd":0.02,"cache_read":2048,"turn_id":"turn-reviewer-1","thread_id":"thread-console-1"}
+{"type":"phase_blocked","thread":"thread-console-1","phase":"review","role":"security","priors_hash":"hash-security","reason":"Missing evidence citations for health signals."}
+this is not valid crep json
