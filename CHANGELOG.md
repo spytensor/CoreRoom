@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the v0.6 Source Registry model for pinned project files, repos, URL
   snapshots, policy docs, API specs, and design references with trust,
   visibility, owner, purpose, and no-silent-refresh semantics.
+- Added the v0.6 ContextPack model so WorkOrders can delegate scoped source
+  slices to specific roles while surfacing stale or unpinned source warnings.
 
 ## [0.5.0] - 2026-05-23
 

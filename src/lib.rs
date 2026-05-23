@@ -13,6 +13,7 @@ pub mod bus;
 pub mod config;
 pub mod config_cmd;
 pub mod config_layered;
+pub mod context_pack;
 pub mod cost;
 pub mod crep;
 pub mod detect;

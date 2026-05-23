@@ -178,6 +178,51 @@ re-pinning requires user confirmation. Missing local files, inaccessible local
 repos, missing pins, invalid trust levels, and invalid refresh policies fail
 loudly before registry writes.
 
+## WorkOrder ContextPacks
+
+ContextPacks are WorkOrder-scoped selections from Source Registry. They are
+stored under `.coderoom/context-packs/<id>.toml` and exist to keep delegation
+small and reproducible: `@engineer` and `@security` can receive different
+slices of the same registered sources.
+
+The persisted ContextPack schema uses camelCase keys:
+
+```toml
+schemaVersion = 1
+id = "CTX-WO-0209"
+workOrder = "WO-0209"
+
+[[entries]]
+sourceId = "core-api"
+path = "src/contracts.rs"
+sourcePin = "commit:abc123"
+trustLevel = "internal"
+reason = "Engineer needs API contract definitions."
+targetRoles = ["engineer"]
+
+[entries.range]
+startLine = 10
+endLine = 40
+
+[[entries]]
+sourceId = "security-policy"
+path = "docs/policies/security.md"
+sourcePin = "sha256:def456"
+trustLevel = "policy"
+reason = "Security needs policy constraints."
+targetRoles = ["security"]
+```
+
+Each entry must reference a registered `sourceId`, include a path/range or
+snapshot reference, explain why the slice is needed, declare target roles, and
+copy the source pin and trust level from the Source Registry. If the registry
+pin changes later, the ContextPack remains auditable but `@host` must surface a
+stale-context warning before delegation. If a selected source is unpinned, that
+also produces a warning.
+
+Target roles must be included in the source's `visibleRoles`. No role receives
+every source by default.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
