@@ -1,0 +1,27 @@
+[[cases]]
+name = "healthy"
+expectedLifecycle = "closed"
+expectedCi = "ok"
+expectedEvidence = "ok"
+expectedTracker = "ok"
+
+[[cases]]
+name = "blocked"
+expectedLifecycle = "blocked"
+expectedCi = "unknown"
+expectedEvidence = "warn"
+expectedTracker = "warn"
+
+[[cases]]
+name = "failed-ci"
+expectedLifecycle = "failed-ci"
+expectedCi = "blocking"
+expectedEvidence = "warn"
+expectedTracker = "warn"
+
+[[cases]]
+name = "merged-tracker-stale"
+expectedLifecycle = "merged-tracker-stale"
+expectedCi = "ok"
+expectedEvidence = "ok"
+expectedTracker = "blocking"
