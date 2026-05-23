@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Packet, PR binding, and tracker closure into one replayable proof.
 - Added the v0.7 GitHub-native WorkOrder lifecycle model for deriving host
   status from Issue, branch, PR, CI, Evidence Packet, and tracker facts.
+- Added the v0.7 host action layer for structured host-owned actions,
+  confirmation policy mapping, audit events, and loop safety controls.
 
 ## [0.5.0] - 2026-05-23
 

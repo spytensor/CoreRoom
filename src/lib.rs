@@ -22,6 +22,7 @@ pub mod engines;
 pub mod evidence_packet;
 pub mod gate;
 pub mod github_status;
+pub mod host_action;
 pub mod image_paths;
 pub mod init;
 pub mod liveness;

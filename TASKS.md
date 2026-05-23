@@ -26,8 +26,8 @@ dependency context, evidence packets, status rollups, and tracker closure.
 ## v0.7 Current Plan
 
 - [x] Pin GitHub epic #213 for v0.7.
-- [ ] #214: Implement GitHub-native WorkOrder/Issue/PR/CI status sync.
-- [ ] #215: Implement host-managed worker action layer.
+- [x] #214: Implement GitHub-native WorkOrder/Issue/PR/CI status sync.
+- [ ] #215: Implement host-managed worker action layer. (in progress)
 - [ ] #216: Implement multi-repo source graph and remote snapshots.
 - [ ] #217: Implement release readiness and project status rollup.
 - [ ] #218: Implement CoreRoom rename and compatibility migration.
