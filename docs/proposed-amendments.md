@@ -36,6 +36,97 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
+## A-016: Engineering Control Room product positioning
+
+- **Status:** accepted for v0.6; rename implementation deferred to #218
+- **Filed:** 2026-05-23
+- **Touches:** Product positioning, README, repository description, release
+  narrative. No package, binary, or repository rename is accepted by this
+  amendment.
+
+### Problem
+
+The name and early README framing describe CodeRoom as a room where multiple
+AI coding roles collaborate. That was accurate through v0.5, but it now
+under-describes the product. Role collaboration is the visible surface; the
+deeper product is software engineering control under AI acceleration:
+
+- `@host` owns intake and coordination for the user.
+- GitHub Issues provide durable work units.
+- SDLC gates provide phase evidence.
+- Role priors and knowledge provide scoped expertise.
+- Pull requests provide review and merge evidence.
+- Trackers provide project progress and completion state.
+
+If the project keeps presenting itself as only a "multi-role agent CLI
+session" tool, it attracts the wrong expectations: chat-room orchestration
+instead of engineering governance.
+
+### Alternatives considered
+
+1. **Keep `codeRoom` as-is.** Low migration cost, but increasingly misleading
+   as WorkOrders, source context, evidence packets, and tracker closure become
+   product primitives.
+2. **Rename immediately to `Engineering Control Room`.** Accurate category,
+   but too disruptive for v0.6 because package, binary, docs, screenshots,
+   release assets, and user installs would all churn before the control model
+   is stable.
+3. **Rename immediately to `CoreRoom`.** Stronger short brand and keeps the
+   "room" metaphor, but less explicit for search than "Engineering Control
+   Room" and still requires migration work.
+4. **Use `Engineering Control Room` as the product direction now, defer the
+   concrete repo/package/binary rename.** Accepted. This makes the next product
+   surface honest without mixing naming migration into the control-plane
+   bootstrap.
+
+### Accepted change
+
+v0.6 positions CodeRoom as an **Engineering Control Room for AI-assisted
+software delivery**.
+
+The public description should include searchable terms that match the real
+direction:
+
+- AI engineering control room
+- AI engineering control plane
+- AI agents
+- agentic software engineering
+- GitHub issue driven AI coding
+- AI work orders
+- evidence-based AI coding
+
+The short v0.6 positioning statement is:
+
+> CodeRoom is an Engineering Control Room for AI-assisted software delivery:
+> a host-led system that coordinates AI coding roles through GitHub issues,
+> SDLC gates, role priors, and evidence-based pull request workflow.
+
+The working naming policy is:
+
+| Surface | v0.6 decision | Migration note |
+| --- | --- | --- |
+| Product category | Engineering Control Room | Use in README, repo description, issues, and docs. |
+| Short brand | Keep CodeRoom for v0.6 | `CoreRoom` remains the leading fallback if a later rename is accepted. |
+| Repository name | Keep `codeRoom` for v0.6 | User may rename later; implementation tracked by #218. |
+| CLI binary | Keep `cr` | Short, already shipped, and still suitable after a future rename. |
+| npm package | Keep `@spytensor/coderoom` | Avoid package churn until the product model stabilizes. |
+| Compatibility alias | Keep `croom` | No new alias in this amendment. |
+
+### Migration impact
+
+No runtime migration in v0.6. Existing users keep the same install command,
+binary, config directory, and role layout.
+
+Future rename implementation, if accepted, must be staged in a separate v0.7
+issue and must preserve a compatibility story for `cr`, `.coderoom/`, and
+`@spytensor/coderoom`.
+
+### Decision
+
+Accepted by the user for v0.6 on 2026-05-23. v0.6 updates product positioning
+only. Repository/package/binary rename implementation is explicitly deferred
+to #218.
+
 ## A-001: Adapter contract is role-handle based, not method-per-action
 
 - **Status:** implemented in v0.1.12
