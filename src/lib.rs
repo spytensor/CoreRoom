@@ -35,3 +35,4 @@ pub mod role;
 pub mod turn;
 pub mod update;
 mod work;
+pub mod work_order;

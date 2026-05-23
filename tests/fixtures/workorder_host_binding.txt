@@ -1,0 +1,29 @@
+User:
+Turn this into v0.6 persistent work: define a WorkOrder model and bind it to GitHub Issue #207.
+
+@host:
+Classification: persistent-workorder
+Reason:
+- This changes project-level engineering control state and must bind to a GitHub Issue, tracker row, gate thread, branch, PR, and evidence expectations.
+Next step:
+- Draft WorkOrder WO-0207 and propose binding it to existing GitHub Issue #207.
+Confirmation required: yes
+
+WorkOrder draft:
+- id: WO-0207
+- title: WorkOrder model and GitHub binding
+- phase: v0.6.0 - Engineering Control Room
+- epic: WorkOrder / GitHub Binding
+- trackerIssue: #202
+- trackerCheckbox: #207 - WorkOrder model and GitHub binding
+- requiredEvidence: changed-files, validation, tracker-update
+
+Binding plan: bind existing GitHub Issue #207
+Confirmation required before binding: yes
+Issue body mutation: no
+
+User:
+Confirmed. Bind WO-0207 to #207.
+
+@host:
+Bound local WorkOrder WO-0207 to GitHub Issue #207. I did not change the issue body, labels, milestone, or comments.
