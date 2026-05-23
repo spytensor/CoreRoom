@@ -15,6 +15,12 @@ fn console_shell_renders_core_snapshot_facts() {
     assert!(rendered.contains("CoreRoom"));
     assert!(rendered.contains("spytensor/CoreRoom"));
     assert!(rendered.contains("Tracker #238"));
+    assert!(rendered.contains("Overview"));
+    assert!(rendered.contains("Roles"));
+    assert!(rendered.contains("WorkOrders"));
+    assert!(rendered.contains("Gates"));
+    assert!(rendered.contains("Evidence"));
+    assert!(rendered.contains("Sources"));
     assert!(rendered.contains("Conversation"));
     assert!(rendered.contains("Control Rail"));
     assert!(rendered.contains("user <-> @host"));
