@@ -147,6 +147,14 @@ pub(super) fn render_event_line_at_width(
                     .italic()
             )
         }
+        CrepEvent::PlanReviewed {
+            role,
+            decision,
+            plan_sha,
+        } => render_plan_reviewed(role, host_role, decision.label(), plan_sha),
+        CrepEvent::PlanOverridden { role, reason } => {
+            render_plan_overridden(role, host_role, reason)
+        }
         // `TurnDispatched` is the cross-role handoff boundary. When
         // the role is *actually starting* (queue_position == 0) we
         // render a full-width banner so the speaker change is an
@@ -183,6 +191,30 @@ pub(super) fn render_event_line_at_width(
             )
         }
     }
+}
+
+fn render_plan_reviewed(role: &str, host_role: &str, decision: &str, plan_sha: &str) -> String {
+    let role_paint = output::role_color(role, host_role);
+    let role_label = format!("@{role}").with(role_paint).bold();
+    format!(
+        "  {} {role_label} {}",
+        "▸".with(output::SPLASH_ACCENT),
+        format!("plan review {decision} ({})", short_inline_sha(plan_sha))
+            .with(output::DIM)
+            .italic()
+    )
+}
+
+fn render_plan_overridden(role: &str, host_role: &str, reason: &str) -> String {
+    let role_paint = output::role_color(role, host_role);
+    let role_label = format!("@{role}").with(role_paint).bold();
+    format!(
+        "  {} {role_label} {}",
+        "!".with(output::WARN),
+        format!("plan review override: {reason}")
+            .with(output::DIM)
+            .italic()
+    )
 }
 
 /// Build the role-handoff banner. Mirrors the layout of WorkCards
@@ -228,6 +260,10 @@ fn handoff_banner(role: &str, host_role: &str, status: &str, width: usize) -> St
     };
     let status_styled = status.with(output::DIM).to_string();
     format!("  {role_label}{separator}{status_styled}")
+}
+
+fn short_inline_sha(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
 }
 
 /// Compact quote line printed by the REPL just before dispatching

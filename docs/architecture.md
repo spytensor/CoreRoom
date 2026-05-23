@@ -195,6 +195,8 @@ these. UI, message bus, and patch logic only ever see CREP.
 | `RoleSpoke`        | Role emitted a final assistant turn              | role, text, mentions[], cost_usd, cache_read, turn_id, thread_id, outcome, phase_block |
 | `PhaseAdvanced`    | Gate phase advanced or rolled back explicitly    | thread, from, to, actor                         |
 | `PhaseBlocked`     | Role blocked the active gate phase               | thread, phase, role, reason                     |
+| `PlanReviewed`     | Authority role reviewed the current plan SHA     | role, decision, plan_sha                        |
+| `PlanOverridden`   | User overrode a blocking authority review        | role, reason                                    |
 | `TurnInterrupted`  | (v0.2) `/halt` or watchdog cancelled the turn    | role, turn_id, thread_id, source, partial_text, partial_mentions |
 | `ToolCallProposed` | PreToolUse fired                                 | role, tool_name, tool_input, tool_use_id, turn_id, thread_id |
 | `ToolCallExecuted` | PostToolUse fired                                | role, tool_use_id, ok, output_summary, turn_id, thread_id |
@@ -232,6 +234,17 @@ intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed
 forward phases and regressions; rollback requires a justification via
 `--rollback`. Each entered phase creates `.coderoom/gates/<thread>/<phase>.md`
 for structured notes, evidence, decisions, or blockers.
+
+The plan review binding is narrower than general peer review. Before
+`plan -> review`, `.coderoom/gates/<thread>/plan.md` must declare
+frontmatter `scopes`, for example `scopes: [infra, deployment]`. Before
+`review -> signoff`, every configured role whose `authority` intersects those
+scopes must have approved the current plan SHA through
+`cr gate role-review`. A plan SHA change makes earlier approvals stale.
+Rejecting or needs-revision decisions block signoff until the same role
+approves the current SHA or the user records `cr gate override <thread>
+--role <name> --reason <text>`. No matching authority role is a warning;
+partial scope coverage is a blocker.
 
 ## Engine adapters
 
@@ -323,6 +336,11 @@ trait EngineAdapter {
 │   └── YYYY-MM-DD/
 │       ├── <role>.md              # role-written end-of-session log
 │       └── _thread-<id>.md        # project-level activity summary
+├── gates/
+│   ├── <thread>.json              # structural SDLC gate ledger
+│   └── <thread>/
+│       ├── plan.md                # phase artifact with plan scopes
+│       └── reviews/<role>.toml    # authority plan review for a plan SHA
 ├── transcripts/
 │   └── YYYY-MM-DD/
 │       └── <role>-<session>.jsonl # raw CREP archive (grep, not auto-loaded)

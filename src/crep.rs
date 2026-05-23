@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::gate::GatePhase;
+use crate::gate::{GatePhase, PlanReviewDecision};
 use crate::turn::TurnId;
 
 /// A single event in the CodeRoom Event Protocol stream.
@@ -164,6 +164,22 @@ pub enum CrepEvent {
         /// Role that declared the block.
         role: String,
         /// Human-readable reason.
+        reason: String,
+    },
+    /// An authority-scoped role reviewed the current plan artifact.
+    PlanReviewed {
+        /// Role that recorded the review.
+        role: String,
+        /// Review decision.
+        decision: PlanReviewDecision,
+        /// SHA-256 of the plan artifact at review time.
+        plan_sha: String,
+    },
+    /// A user overrode a blocking authority-scoped plan review.
+    PlanOverridden {
+        /// Role whose blocking review was overruled.
+        role: String,
+        /// Human-readable override reason.
         reason: String,
     },
     /// Streaming assistant text for the current role turn. This is a
@@ -581,8 +597,17 @@ mod tests {
             role: "security".into(),
             reason: "missing threat model".into(),
         };
+        let reviewed = CrepEvent::PlanReviewed {
+            role: "sre".into(),
+            decision: PlanReviewDecision::Approve,
+            plan_sha: "abc123".into(),
+        };
+        let overridden = CrepEvent::PlanOverridden {
+            role: "security".into(),
+            reason: "accepted release risk".into(),
+        };
 
-        for event in [advanced, blocked] {
+        for event in [advanced, blocked, reviewed, overridden] {
             let wire = serde_json::to_value(&event).unwrap();
             let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
             assert_eq!(event, parsed);
@@ -833,8 +858,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn type_tag_is_snake_case_for_all_variants() {
-        let cases: [(CrepEvent, &str); 13] = [
+        let cases: [(CrepEvent, &str); 15] = [
             (
                 CrepEvent::RoleStarted {
                     role: "r".into(),
@@ -902,6 +928,21 @@ mod tests {
                     reason: "missing evidence".into(),
                 },
                 "phase_blocked",
+            ),
+            (
+                CrepEvent::PlanReviewed {
+                    role: "sre".into(),
+                    decision: PlanReviewDecision::Approve,
+                    plan_sha: "abc123".into(),
+                },
+                "plan_reviewed",
+            ),
+            (
+                CrepEvent::PlanOverridden {
+                    role: "sre".into(),
+                    reason: "accepted risk".into(),
+                },
+                "plan_overridden",
             ),
             (
                 CrepEvent::RoleOutputDelta {

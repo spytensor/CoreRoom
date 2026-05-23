@@ -104,7 +104,9 @@ fn event_role(event: &CrepEvent) -> &str {
         | CrepEvent::ToolCallExecuted { role, .. }
         | CrepEvent::PermissionDenied { role, .. }
         | CrepEvent::RoleStopped { role, .. }
-        | CrepEvent::PhaseBlocked { role, .. } => role,
+        | CrepEvent::PhaseBlocked { role, .. }
+        | CrepEvent::PlanReviewed { role, .. }
+        | CrepEvent::PlanOverridden { role, .. } => role,
         CrepEvent::PhaseAdvanced { .. } => "",
     }
 }
