@@ -13,6 +13,8 @@ that reviews must preserve, see `docs/threat-model.md`.
 - `.coderoom/gates/active` points at the most recently touched ledger.
 - `.coderoom/gates/<thread-id>/<phase>.md` stores the structured notes for
   each phase the thread enters.
+- `.coderoom/gates/<thread-id>/reviews/<role>.toml` stores binding
+  authority-scoped plan review decisions for the current plan SHA.
 - `.coderoom/gate-templates/*.md` stores reusable gate prompts.
 
 Ledgers are structural evidence. They do not approve correctness.
@@ -43,9 +45,15 @@ cr gate phase <thread_id> discovery
 cr gate artifact --thread <thread_id> --kind discovery --path docs/gates/discovery.md
 
 cr gate phase <thread_id> plan
-cr gate artifact --thread <thread_id> --kind plan --path docs/gates/plan.md
+# Fill `.coderoom/gates/<thread_id>/plan.md` with frontmatter:
+# ---
+# scopes: [infra, deployment]
+# ---
+cr gate artifact --thread <thread_id> --kind plan --path .coderoom/gates/<thread_id>/plan.md
 
 cr gate phase <thread_id> review
+cr gate role-review <thread_id> sre approve
+cr gate role-review <thread_id> release approve
 cr gate reviewer --thread <thread_id> --role security --engine codex \
   --model "gpt-5" --turn <turn_id> --blocking-count 0 --warning-count 1 \
   --file-line-evidence --all-blockings-resolved --artifact docs/gates/review.md
@@ -68,10 +76,29 @@ explicit and recorded:
 cr gate close --thread <thread_id> --bypass "User accepted missing second reviewer for emergency fix."
 ```
 
+Authority-scoped plan vetoes have a narrower override command. Use it only
+when a configured authority role rejects the current plan SHA and the user
+explicitly accepts the risk:
+
+```bash
+cr gate override <thread_id> --role security --reason "Emergency patch; rollback plan accepted."
+```
+
 ## Tier 1 Structural Rules
 
 - Discovery, plan, review, and sign-off artifacts must be recorded.
 - Plan artifacts must include a `Sign-off Checklist` with `SO-N` rows.
+- `.coderoom/gates/<thread-id>/plan.md` must declare frontmatter scopes
+  before `plan -> review`; accepted scopes are `deployment`, `infra`,
+  `secrets`, `data-policy`, `compliance`, and `dependencies`.
+- `review -> signoff` requires every role whose configured `authority`
+  intersects the plan scopes to approve the current plan SHA.
+- If no configured role matches any plan scope, CodeRoom warns but does not
+  block. If at least one role matches but some plan scopes remain uncovered,
+  sign-off advancement is blocked.
+- Changing the plan artifact after approval makes the prior authority review
+  stale. A `reject` or `needs-revision` decision blocks sign-off until the role
+  approves the current SHA or the user records an override.
 - Review artifacts must include reviewer role, engine, model, finding counts,
   `cross_model_satisfied`, and `all_blockings_resolved`.
 - Review findings that claim code evidence must cite `path:line`.

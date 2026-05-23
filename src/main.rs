@@ -29,7 +29,7 @@ use coderoom::config_cmd::LayerTarget;
 use coderoom::crep::CrepEvent;
 use coderoom::gate::{
     ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, PhaseAdvanceInput,
-    ReviewInput, VerificationInput,
+    PlanOverrideInput, PlanReviewDecision, ReviewInput, RoleReviewInput, VerificationInput,
 };
 
 #[derive(Debug, Parser)]
@@ -550,6 +550,36 @@ enum GateCmd {
         #[arg(long)]
         all_blockings_resolved: bool,
     },
+    /// Record an authority-scoped plan review decision.
+    RoleReview {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// CodeRoom thread id.
+        thread: String,
+        /// Reviewer role. A leading `@` is accepted.
+        role: String,
+        /// Review decision: approve, reject, or needs-revision.
+        #[arg(value_parser = parse_plan_review_decision)]
+        decision: PlanReviewDecision,
+        /// Human-readable reason. Required for reject and needs-revision.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Override a blocking authority-scoped plan review decision.
+    Override {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// CodeRoom thread id.
+        thread: String,
+        /// Role whose blocking review is overruled.
+        #[arg(long)]
+        role: String,
+        /// Human-readable override reason.
+        #[arg(long)]
+        reason: String,
+    },
     /// Record verification evidence.
     Verify {
         /// Project root. Defaults to the current working directory.
@@ -639,6 +669,10 @@ fn parse_gate_phase(s: &str) -> Result<GatePhase, String> {
 
 fn parse_artifact_kind(s: &str) -> Result<GateArtifactKind, String> {
     GateArtifactKind::parse(s).map_err(|error| error.to_string())
+}
+
+fn parse_plan_review_decision(s: &str) -> Result<PlanReviewDecision, String> {
+    PlanReviewDecision::parse(s).map_err(|error| error.to_string())
 }
 
 fn parse_date(s: &str) -> std::result::Result<chrono::NaiveDate, String> {
@@ -1005,6 +1039,70 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
             println!("recorded reviewer for {}", ledger.thread_id);
             Ok(())
         }
+        GateCmd::RoleReview {
+            project,
+            thread,
+            role,
+            decision,
+            reason,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let record = coderoom::gate::record_role_review(
+                &root,
+                RoleReviewInput {
+                    thread_id: thread.clone(),
+                    role,
+                    decision,
+                    reason,
+                },
+            )?;
+            append_crep_event(
+                &root,
+                &CrepEvent::PlanReviewed {
+                    role: record.reviewer.role.clone(),
+                    decision: record.decision,
+                    plan_sha: record.plan_sha.clone(),
+                },
+            )?;
+            println!(
+                "recorded {} review from @{} for {} ({})",
+                record.decision.label(),
+                record.reviewer.role,
+                thread,
+                short_sha(&record.plan_sha)
+            );
+            Ok(())
+        }
+        GateCmd::Override {
+            project,
+            thread,
+            role,
+            reason,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let override_record = coderoom::gate::record_plan_override(
+                &root,
+                PlanOverrideInput {
+                    thread_id: thread.clone(),
+                    role,
+                    reason,
+                },
+            )?;
+            append_crep_event(
+                &root,
+                &CrepEvent::PlanOverridden {
+                    role: override_record.role.clone(),
+                    reason: override_record.reason.clone(),
+                },
+            )?;
+            println!(
+                "overrode @{} plan review for {} ({})",
+                override_record.role,
+                thread,
+                short_sha(&override_record.plan_sha)
+            );
+            Ok(())
+        }
         GateCmd::Verify {
             project,
             thread,
@@ -1064,6 +1162,10 @@ fn append_crep_event(root: &Path, event: &CrepEvent) -> Result<()> {
         .open(&path)?;
     writeln!(file, "{}", serde_json::to_string(event)?)?;
     Ok(())
+}
+
+fn short_sha(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
 }
 
 fn normalize_role(role: &str) -> String {

@@ -4,7 +4,7 @@
 //! evidence is present, named, and linked to local files; it does not claim
 //! an implementation is semantically correct.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -13,7 +13,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::Engine;
-use crate::config::CODEROOM_DIR;
+use crate::config::{AuthorityScope, Config, CODEROOM_DIR};
+use crate::manifest::sha256_file;
 
 /// Subdirectory inside `.coderoom/` that stores per-thread gate ledgers.
 pub const GATES_DIR: &str = "gates";
@@ -338,6 +339,80 @@ pub struct GateReview {
     pub created_at: String,
 }
 
+/// Binding plan review decision recorded by an authority-scoped role.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanReviewDecision {
+    /// Role approves the current plan SHA for its intersecting scopes.
+    Approve,
+    /// Role rejects the current plan SHA. Blocks signoff until override or re-review.
+    Reject,
+    /// Role asks for changes before approval. Blocks signoff until re-review.
+    NeedsRevision,
+}
+
+impl PlanReviewDecision {
+    /// Parse a user-facing decision token.
+    pub fn parse(input: &str) -> Result<Self> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "approve" | "approved" => Ok(Self::Approve),
+            "reject" | "rejected" => Ok(Self::Reject),
+            "needs-revision" | "needs_revision" | "needsrevision" => Ok(Self::NeedsRevision),
+            other => bail!(
+                "unknown plan review decision `{other}`; use approve, reject, or needs-revision"
+            ),
+        }
+    }
+
+    /// Compact label for CLI output and CREP.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Approve => "approve",
+            Self::Reject => "reject",
+            Self::NeedsRevision => "needs-revision",
+        }
+    }
+
+    fn blocks_signoff(self) -> bool {
+        matches!(self, Self::Reject | Self::NeedsRevision)
+    }
+}
+
+/// Persisted authority-scoped plan review.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GateRoleReviewRecord {
+    /// Review decision.
+    pub decision: PlanReviewDecision,
+    /// Human-readable reason for reject/needs-revision, or optional approval note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Reviewer role and model metadata resolved from config.
+    pub reviewer: GateActor,
+    /// SHA-256 of the plan artifact content at review time.
+    pub plan_sha: String,
+    /// Plan artifact path reviewed.
+    pub plan_path: String,
+    /// Plan scopes this role reviewed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<AuthorityScope>,
+    /// Creation timestamp.
+    pub created_at: String,
+}
+
+/// Explicit user override for a blocking authority review.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatePlanOverride {
+    /// Role whose blocking review is overruled.
+    pub role: String,
+    /// User-provided reason.
+    pub reason: String,
+    /// Plan SHA the override applies to.
+    pub plan_sha: String,
+    /// Creation timestamp.
+    pub created_at: String,
+}
+
 /// Recorded verification command or cited evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateVerification {
@@ -411,6 +486,12 @@ pub struct GateLedger {
     /// Recorded review turns.
     #[serde(default)]
     pub reviewers: Vec<GateReview>,
+    /// Binding authority-scoped plan review decisions.
+    #[serde(default)]
+    pub role_reviews: Vec<GateRoleReviewRecord>,
+    /// User overrides for binding plan review blocks.
+    #[serde(default)]
+    pub plan_overrides: Vec<GatePlanOverride>,
     /// Recorded verification evidence.
     #[serde(default)]
     pub verifications: Vec<GateVerification>,
@@ -495,6 +576,30 @@ pub struct VerificationInput {
     pub evidence: String,
 }
 
+/// Parameters for recording an authority-scoped plan review.
+#[derive(Debug, Clone)]
+pub struct RoleReviewInput {
+    /// Thread id.
+    pub thread_id: String,
+    /// Reviewer role.
+    pub role: String,
+    /// Review decision.
+    pub decision: PlanReviewDecision,
+    /// Optional reason.
+    pub reason: Option<String>,
+}
+
+/// Parameters for overriding an authority-scoped plan review block.
+#[derive(Debug, Clone)]
+pub struct PlanOverrideInput {
+    /// Thread id.
+    pub thread_id: String,
+    /// Role whose block is overruled.
+    pub role: String,
+    /// User-provided reason.
+    pub reason: String,
+}
+
 /// Parameters for an explicit phase transition.
 #[derive(Debug, Clone)]
 pub struct PhaseAdvanceInput {
@@ -536,6 +641,8 @@ pub struct GateValidation {
     pub reasons: Vec<String>,
     /// Non-blocking warnings.
     pub warnings: Vec<String>,
+    /// Current authority review status, when a plan artifact is present.
+    pub plan_review_status: Option<PlanReviewStatus>,
 }
 
 impl GateValidation {
@@ -544,6 +651,85 @@ impl GateValidation {
     pub fn passed(&self) -> bool {
         self.result == GateResult::Pass
     }
+}
+
+/// Status of the current plan's authority-scoped reviews.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanReviewStatus {
+    /// Plan artifact path.
+    pub plan_path: String,
+    /// Current plan SHA.
+    pub plan_sha: String,
+    /// Scopes declared by the plan artifact.
+    pub scopes: Vec<AuthorityScope>,
+    /// Required reviewer statuses.
+    pub required: Vec<PlanReviewerStatus>,
+    /// Plan scopes that are partially uncovered after at least one match exists.
+    pub uncovered_scopes: Vec<AuthorityScope>,
+    /// Non-blocking status warnings.
+    pub warnings: Vec<String>,
+}
+
+/// One required authority reviewer's status for the current plan SHA.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanReviewerStatus {
+    /// Role name.
+    pub role: String,
+    /// Intersecting authority scopes.
+    pub scopes: Vec<AuthorityScope>,
+    /// Latest recorded decision, if any.
+    pub decision: Option<PlanReviewDecision>,
+    /// Decision reason, if any.
+    pub reason: Option<String>,
+    /// Whether the latest decision was for an older plan SHA.
+    pub stale: bool,
+    /// Whether a user override covers this role for the current plan SHA.
+    pub overridden: bool,
+}
+
+impl PlanReviewStatus {
+    fn blocking_reasons(&self) -> Vec<String> {
+        let mut reasons = Vec::new();
+        if !self.uncovered_scopes.is_empty() {
+            reasons.push(format!(
+                "plan scopes lack authority coverage: {}",
+                format_scopes(&self.uncovered_scopes)
+            ));
+        }
+        for reviewer in &self.required {
+            if reviewer.overridden {
+                continue;
+            }
+            match reviewer.decision {
+                None => reasons.push(format!("authority review missing from @{}", reviewer.role)),
+                Some(_) if reviewer.stale => reasons.push(format!(
+                    "authority review from @{} is stale for current plan SHA",
+                    reviewer.role
+                )),
+                Some(PlanReviewDecision::Approve) => {}
+                Some(decision) if decision.blocks_signoff() => {
+                    let reason = reviewer
+                        .reason
+                        .as_deref()
+                        .map_or(String::new(), |reason| format!(": {reason}"));
+                    reasons.push(format!(
+                        "authority review from @{} is {}{reason}",
+                        reviewer.role,
+                        decision.label()
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        reasons
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanArtifactInfo {
+    path: String,
+    sha: String,
+    scopes: Vec<AuthorityScope>,
 }
 
 /// Outcome of installing gate templates.
@@ -594,6 +780,8 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
         implementer: input.implementer,
         artifacts: Vec::new(),
         reviewers: Vec::new(),
+        role_reviews: Vec::new(),
+        plan_overrides: Vec::new(),
         verifications: Vec::new(),
         bypasses: Vec::new(),
         phase_blocks: Vec::new(),
@@ -727,6 +915,165 @@ pub fn record_verification(project_root: &Path, input: VerificationInput) -> Res
     })
 }
 
+/// Record an authority-scoped plan review decision for the current plan SHA.
+pub fn record_role_review(
+    project_root: &Path,
+    input: RoleReviewInput,
+) -> Result<GateRoleReviewRecord> {
+    let RoleReviewInput {
+        thread_id,
+        role,
+        decision,
+        reason,
+    } = input;
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        bail!("thread id cannot be empty");
+    }
+    ensure_evidence_writes_allowed(project_root, thread_id, "plan review evidence")?;
+    let role = normalize_gate_role(&role)?;
+    let reason = reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if decision.blocks_signoff() && reason.is_none() {
+        bail!("{} reviews require --reason", decision.label());
+    }
+
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    ensure_gate_dirs(&coderoom_dir)?;
+    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let plan = current_plan_artifact(project_root, &ledger)?;
+    let config = load_authority_config(project_root)?;
+    let entry = config
+        .roles
+        .get(&role)
+        .with_context(|| format!("@{role} is not declared in .coderoom/config.toml"))?;
+    let scopes = intersect_scopes(&entry.authority, &plan.scopes);
+    if scopes.is_empty() {
+        bail!(
+            "@{role} has no authority over current plan scopes: {}",
+            format_scopes(&plan.scopes)
+        );
+    }
+    let role_config = config
+        .role_config(&role, &coderoom_dir)
+        .with_context(|| format!("@{role} has no resolved role config"))?;
+    let model = role_config
+        .model
+        .filter(|model| !model.trim().is_empty())
+        .with_context(|| {
+            format!(
+                "@{role} has no resolved model; set default_model or roles.{role}.model in config"
+            )
+        })?;
+    let record = GateRoleReviewRecord {
+        decision,
+        reason,
+        reviewer: GateActor {
+            role: role.clone(),
+            engine: role_config.engine,
+            model,
+            turn_id: None,
+            thread_id: Some(ledger.thread_id.clone()),
+        },
+        plan_sha: plan.sha.clone(),
+        plan_path: plan.path.clone(),
+        scopes,
+        created_at: now_string(),
+    };
+
+    write_role_review_record(project_root, &ledger.thread_id, &role, &record)?;
+    ledger
+        .role_reviews
+        .retain(|review| review.reviewer.role != role);
+    ledger.role_reviews.push(record.clone());
+    if decision.blocks_signoff() {
+        ledger.result = GateResult::Incomplete;
+    }
+    ledger.push_history(
+        "plan_reviewed",
+        format!(
+            "@{role} recorded {} for {} ({})",
+            decision.label(),
+            record.plan_path,
+            short_sha(&record.plan_sha)
+        ),
+    );
+    save_ledger(&coderoom_dir, &ledger)?;
+    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    Ok(record)
+}
+
+/// Record an explicit user override for a blocking authority-scoped review.
+pub fn record_plan_override(
+    project_root: &Path,
+    input: PlanOverrideInput,
+) -> Result<GatePlanOverride> {
+    let PlanOverrideInput {
+        thread_id,
+        role,
+        reason,
+    } = input;
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        bail!("thread id cannot be empty");
+    }
+    ensure_evidence_writes_allowed(project_root, thread_id, "plan review overrides")?;
+    let role = normalize_gate_role(&role)?;
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("override reason cannot be empty");
+    }
+
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    ensure_gate_dirs(&coderoom_dir)?;
+    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let status = plan_review_status(project_root, &ledger)?;
+    let Some(reviewer) = status
+        .required
+        .iter()
+        .find(|reviewer| reviewer.role == role)
+    else {
+        bail!(
+            "@{role} is not required for current plan scopes: {}",
+            format_scopes(&status.scopes)
+        );
+    };
+    match (reviewer.decision, reviewer.stale) {
+        (Some(decision), false) if decision.blocks_signoff() => {}
+        (Some(_), true) => bail!("@{role} review is stale; re-review the current plan SHA instead"),
+        (Some(PlanReviewDecision::Approve), false) => {
+            bail!("@{role} has approved the current plan; nothing to override")
+        }
+        (None, _) => bail!("@{role} has not rejected the current plan; nothing to override"),
+        _ => bail!("@{role} has no blocking review to override"),
+    }
+
+    let override_record = GatePlanOverride {
+        role: role.clone(),
+        reason: reason.to_owned(),
+        plan_sha: status.plan_sha.clone(),
+        created_at: now_string(),
+    };
+    write_plan_override_record(project_root, &ledger.thread_id, &role, &override_record)?;
+    ledger
+        .plan_overrides
+        .retain(|entry| !(entry.role == role && entry.plan_sha == override_record.plan_sha));
+    ledger.plan_overrides.push(override_record.clone());
+    ledger.push_history(
+        "plan_overridden",
+        format!(
+            "@{role} veto overridden for {}: {reason}",
+            short_sha(&override_record.plan_sha)
+        ),
+    );
+    save_ledger(&coderoom_dir, &ledger)?;
+    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    Ok(override_record)
+}
+
 /// Explicitly advance or roll back a gate phase.
 pub fn advance_phase(project_root: &Path, input: &PhaseAdvanceInput) -> Result<PhaseTransition> {
     let thread_id = input.thread_id.trim();
@@ -778,6 +1125,7 @@ pub fn advance_phase(project_root: &Path, input: &PhaseAdvanceInput) -> Result<P
                 to.label()
             );
         }
+        validate_phase_transition(project_root, &ledger, from, to)?;
         ledger.phase = to;
         ledger.push_history(
             "phase_advanced",
@@ -870,6 +1218,62 @@ pub fn validate(project_root: &Path, thread_id: Option<&str>) -> Result<GateVali
     Ok(validate_ledger(project_root, &ledger))
 }
 
+/// Return the authority-scoped review status for the current plan artifact.
+pub fn plan_review_status(project_root: &Path, ledger: &GateLedger) -> Result<PlanReviewStatus> {
+    let plan = current_plan_artifact(project_root, ledger)?;
+    let config = load_authority_config(project_root)?;
+    let review_records = latest_role_review_records(project_root, ledger)?;
+    let override_records = latest_plan_override_records(project_root, ledger)?;
+    let mut required = Vec::new();
+    let mut covered = BTreeSet::new();
+    let mut roles: Vec<_> = config.roles.iter().collect();
+    roles.sort_by_key(|(role, _)| *role);
+
+    for (role, entry) in roles {
+        let scopes = intersect_scopes(&entry.authority, &plan.scopes);
+        if scopes.is_empty() {
+            continue;
+        }
+        covered.extend(scopes.iter().copied());
+        let review = review_records.get(role);
+        let override_record = override_records.get(role);
+        required.push(PlanReviewerStatus {
+            role: role.clone(),
+            scopes,
+            decision: review.map(|record| record.decision),
+            reason: review.and_then(|record| record.reason.clone()),
+            stale: review.is_some_and(|record| record.plan_sha != plan.sha),
+            overridden: override_record.is_some_and(|record| record.plan_sha == plan.sha),
+        });
+    }
+
+    let uncovered_scopes = if required.is_empty() {
+        Vec::new()
+    } else {
+        plan.scopes
+            .iter()
+            .copied()
+            .filter(|scope| !covered.contains(scope))
+            .collect()
+    };
+    let mut warnings = Vec::new();
+    if required.is_empty() {
+        warnings.push(format!(
+            "plan scopes have no matching authority role: {}",
+            format_scopes(&plan.scopes)
+        ));
+    }
+
+    Ok(PlanReviewStatus {
+        plan_path: plan.path,
+        plan_sha: plan.sha,
+        scopes: plan.scopes,
+        required,
+        uncovered_scopes,
+        warnings,
+    })
+}
+
 /// Close a gate only when validation passes, or when a bypass reason is provided.
 pub fn close(
     project_root: &Path,
@@ -929,6 +1333,50 @@ pub fn format_status(ledger: &GateLedger, validation: &GateValidation) -> String
     let _ = writeln!(out, "artifacts: {}", ledger.artifacts.len());
     let _ = writeln!(out, "reviewers: {}", ledger.reviewers.len());
     let _ = writeln!(out, "verifications: {}", ledger.verifications.len());
+    if let Some(status) = &validation.plan_review_status {
+        let _ = writeln!(
+            out,
+            "\nplan review: {} ({})",
+            status.plan_path,
+            short_sha(&status.plan_sha)
+        );
+        let _ = writeln!(out, "scopes: {}", format_scopes(&status.scopes));
+        if status.required.is_empty() {
+            let _ = writeln!(out, "required reviewers: none");
+        } else {
+            let _ = writeln!(out, "required reviewers:");
+            for reviewer in &status.required {
+                let mut state = if reviewer.overridden {
+                    "overridden".to_owned()
+                } else if reviewer.stale {
+                    "stale".to_owned()
+                } else {
+                    reviewer.decision.map_or_else(
+                        || "unreviewed".to_owned(),
+                        |decision| decision.label().to_owned(),
+                    )
+                };
+                if let Some(reason) = &reviewer.reason {
+                    state.push_str(": ");
+                    state.push_str(reason);
+                }
+                let _ = writeln!(
+                    out,
+                    "- @{} [{}]: {}",
+                    reviewer.role,
+                    format_scopes(&reviewer.scopes),
+                    state
+                );
+            }
+        }
+        if !status.uncovered_scopes.is_empty() {
+            let _ = writeln!(
+                out,
+                "uncovered scopes: {}",
+                format_scopes(&status.uncovered_scopes)
+            );
+        }
+    }
     if let Some(block) = ledger.phase_blocks.last() {
         let _ = writeln!(
             out,
@@ -1024,6 +1472,22 @@ fn validate_ledger(project_root: &Path, ledger: &GateLedger) -> GateValidation {
         validate_tier1(project_root, ledger, &mut reasons, &mut warnings);
     }
 
+    let plan_review_status = match maybe_plan_review_status(project_root, ledger) {
+        Ok(status) => {
+            if let Some(status) = &status {
+                warnings.extend(status.warnings.clone());
+                if ledger.tier == GateTier::Tier1 {
+                    reasons.extend(status.blocking_reasons());
+                }
+            }
+            status
+        }
+        Err(error) => {
+            reasons.push(format!("plan review status is invalid: {error:#}"));
+            None
+        }
+    };
+
     let result = if reasons.is_empty() {
         if ledger.result == GateResult::Bypassed {
             GateResult::Bypassed
@@ -1042,6 +1506,7 @@ fn validate_ledger(project_root: &Path, ledger: &GateLedger) -> GateValidation {
         result,
         reasons,
         warnings,
+        plan_review_status,
     }
 }
 
@@ -1404,6 +1869,386 @@ fn meaningful_evidence(evidence: &str) -> bool {
     )
 }
 
+fn validate_phase_transition(
+    project_root: &Path,
+    ledger: &GateLedger,
+    from: GatePhase,
+    to: GatePhase,
+) -> Result<()> {
+    match (from, to) {
+        (GatePhase::Plan, GatePhase::Review) => {
+            let path = phase_artifact_path(project_root, &ledger.thread_id, GatePhase::Plan);
+            if !path.is_file() {
+                bail!(
+                    "cannot advance gate `{}` from `plan` to `review`; plan artifact is missing at {}",
+                    ledger.thread_id,
+                    path.display()
+                );
+            }
+            let label = project_relative_path(project_root, &path);
+            plan_artifact_from_path(&label, &path)?;
+            Ok(())
+        }
+        (GatePhase::Review, GatePhase::Signoff) => {
+            let status = plan_review_status(project_root, ledger)?;
+            let blockers = status.blocking_reasons();
+            if blockers.is_empty() {
+                return Ok(());
+            }
+            let mut message = format!(
+                "cannot advance gate `{}` from `review` to `signoff`; plan reviews are incomplete:",
+                ledger.thread_id
+            );
+            for blocker in blockers {
+                let _ = write!(message, "\n- {blocker}");
+            }
+            bail!("{message}");
+        }
+        _ => Ok(()),
+    }
+}
+
+fn maybe_plan_review_status(
+    project_root: &Path,
+    ledger: &GateLedger,
+) -> Result<Option<PlanReviewStatus>> {
+    if current_plan_path(project_root, ledger).is_none() {
+        return Ok(None);
+    }
+    plan_review_status(project_root, ledger).map(Some)
+}
+
+fn current_plan_artifact(project_root: &Path, ledger: &GateLedger) -> Result<PlanArtifactInfo> {
+    let Some((path, absolute_path)) = current_plan_path(project_root, ledger) else {
+        bail!(
+            "plan artifact is missing; expected {}",
+            phase_artifact_path(project_root, &ledger.thread_id, GatePhase::Plan).display()
+        );
+    };
+    plan_artifact_from_path(&path, &absolute_path)
+}
+
+fn current_plan_path(project_root: &Path, ledger: &GateLedger) -> Option<(String, PathBuf)> {
+    let phase_path = phase_artifact_path(project_root, &ledger.thread_id, GatePhase::Plan);
+    if phase_path.is_file() {
+        return Some((project_relative_path(project_root, &phase_path), phase_path));
+    }
+    ledger
+        .artifacts
+        .iter()
+        .rev()
+        .filter(|artifact| artifact.kind == GateArtifactKind::Plan)
+        .map(|artifact| {
+            (
+                artifact.path.clone(),
+                resolve_project_path(project_root, &artifact.path),
+            )
+        })
+        .find(|(_, path)| path.is_file())
+}
+
+fn plan_artifact_from_path(path: &str, absolute_path: &Path) -> Result<PlanArtifactInfo> {
+    let content = std::fs::read_to_string(absolute_path)
+        .with_context(|| format!("reading plan artifact {}", absolute_path.display()))?;
+    let scopes = parse_plan_scopes(&content)
+        .with_context(|| format!("parsing scopes from plan artifact {path}"))?;
+    Ok(PlanArtifactInfo {
+        path: path.to_owned(),
+        sha: sha256_file(absolute_path)?,
+        scopes,
+    })
+}
+
+fn parse_plan_scopes(content: &str) -> Result<Vec<AuthorityScope>> {
+    let Some(frontmatter) = plan_frontmatter(content) else {
+        bail!("plan artifact must start with frontmatter declaring `scopes`");
+    };
+    let lines: Vec<&str> = frontmatter.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = strip_inline_comment(line).trim();
+        if let Some(rest) = trimmed.strip_prefix("scopes:") {
+            let rest = rest.trim();
+            if !rest.is_empty() {
+                return parse_scope_values(rest);
+            }
+            let mut values = Vec::new();
+            for child in lines.iter().skip(index + 1) {
+                let child_trimmed = strip_inline_comment(child).trim();
+                if child_trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(value) = child_trimmed.strip_prefix('-') {
+                    values.push(value.trim().to_owned());
+                    continue;
+                }
+                break;
+            }
+            return parse_scope_tokens(values);
+        }
+        if let Some(rest) = trimmed.strip_prefix("scopes =") {
+            return parse_scope_values(rest.trim());
+        }
+    }
+    bail!("plan artifact frontmatter must declare `scopes`");
+}
+
+fn plan_frontmatter(content: &str) -> Option<String> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut frontmatter = String::new();
+    for line in lines {
+        if matches!(line.trim(), "---" | "...") {
+            return Some(frontmatter);
+        }
+        frontmatter.push_str(line);
+        frontmatter.push('\n');
+    }
+    None
+}
+
+fn parse_scope_values(raw: &str) -> Result<Vec<AuthorityScope>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        bail!("`scopes` cannot be empty");
+    }
+    let values = if raw.starts_with('[') && raw.ends_with(']') {
+        raw.trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    } else if raw.contains(',') {
+        raw.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    } else {
+        vec![raw.to_owned()]
+    };
+    parse_scope_tokens(values)
+}
+
+fn parse_scope_tokens(values: Vec<String>) -> Result<Vec<AuthorityScope>> {
+    if values.is_empty() {
+        bail!("`scopes` cannot be empty");
+    }
+    let mut parsed = BTreeSet::new();
+    for value in values {
+        let normalized = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_ascii_lowercase()
+            .replace('_', "-");
+        let Some(scope) = AuthorityScope::parse(&normalized) else {
+            bail!(
+                "unknown plan scope `{}`; expected one of: {}",
+                value.trim(),
+                AuthorityScope::expected_values()
+            );
+        };
+        parsed.insert(scope);
+    }
+    Ok(AuthorityScope::ALL
+        .into_iter()
+        .filter(|scope| parsed.contains(scope))
+        .collect())
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    line.split_once('#').map_or(line, |(before, _)| before)
+}
+
+fn load_authority_config(project_root: &Path) -> Result<Config> {
+    Config::load(project_root).with_context(|| "loading role authority config")
+}
+
+fn latest_role_review_records(
+    project_root: &Path,
+    ledger: &GateLedger,
+) -> Result<BTreeMap<String, GateRoleReviewRecord>> {
+    let mut records = BTreeMap::new();
+    for record in &ledger.role_reviews {
+        insert_latest_role_review(&mut records, record.clone());
+    }
+    let dir = role_reviews_dir(project_root, &ledger.thread_id);
+    if dir.is_dir() {
+        for entry in
+            std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("toml") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let record: GateRoleReviewRecord =
+                toml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+            insert_latest_role_review(&mut records, record);
+        }
+    }
+    Ok(records)
+}
+
+fn insert_latest_role_review(
+    records: &mut BTreeMap<String, GateRoleReviewRecord>,
+    record: GateRoleReviewRecord,
+) {
+    let role = record.reviewer.role.clone();
+    let replace = records
+        .get(&role)
+        .is_none_or(|existing| record.created_at >= existing.created_at);
+    if replace {
+        records.insert(role, record);
+    }
+}
+
+fn latest_plan_override_records(
+    project_root: &Path,
+    ledger: &GateLedger,
+) -> Result<BTreeMap<String, GatePlanOverride>> {
+    let mut records = BTreeMap::new();
+    for record in &ledger.plan_overrides {
+        insert_latest_plan_override(&mut records, record.clone());
+    }
+    let dir = plan_overrides_dir(project_root, &ledger.thread_id);
+    if dir.is_dir() {
+        for entry in
+            std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("toml") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let record: GatePlanOverride =
+                toml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+            insert_latest_plan_override(&mut records, record);
+        }
+    }
+    Ok(records)
+}
+
+fn insert_latest_plan_override(
+    records: &mut BTreeMap<String, GatePlanOverride>,
+    record: GatePlanOverride,
+) {
+    let replace = records
+        .get(&record.role)
+        .is_none_or(|existing| record.created_at >= existing.created_at);
+    if replace {
+        records.insert(record.role.clone(), record);
+    }
+}
+
+fn write_role_review_record(
+    project_root: &Path,
+    thread_id: &str,
+    role: &str,
+    record: &GateRoleReviewRecord,
+) -> Result<()> {
+    let path = role_review_path(project_root, thread_id, role);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let content = toml::to_string_pretty(record)?;
+    std::fs::write(&path, ensure_trailing_newline(&content))
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+fn write_plan_override_record(
+    project_root: &Path,
+    thread_id: &str,
+    role: &str,
+    record: &GatePlanOverride,
+) -> Result<()> {
+    let path = plan_override_path(project_root, thread_id, role);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let content = toml::to_string_pretty(record)?;
+    std::fs::write(&path, ensure_trailing_newline(&content))
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+fn role_review_path(project_root: &Path, thread_id: &str, role: &str) -> PathBuf {
+    role_reviews_dir(project_root, thread_id).join(format!("{}.toml", sanitize_thread_id(role)))
+}
+
+fn role_reviews_dir(project_root: &Path, thread_id: &str) -> PathBuf {
+    project_root
+        .join(CODEROOM_DIR)
+        .join(GATES_DIR)
+        .join(sanitize_thread_id(thread_id))
+        .join("reviews")
+}
+
+fn plan_override_path(project_root: &Path, thread_id: &str, role: &str) -> PathBuf {
+    plan_overrides_dir(project_root, thread_id).join(format!("{}.toml", sanitize_thread_id(role)))
+}
+
+fn plan_overrides_dir(project_root: &Path, thread_id: &str) -> PathBuf {
+    project_root
+        .join(CODEROOM_DIR)
+        .join(GATES_DIR)
+        .join(sanitize_thread_id(thread_id))
+        .join("overrides")
+}
+
+fn intersect_scopes(left: &[AuthorityScope], right: &[AuthorityScope]) -> Vec<AuthorityScope> {
+    let left: BTreeSet<_> = left.iter().copied().collect();
+    let right: BTreeSet<_> = right.iter().copied().collect();
+    AuthorityScope::ALL
+        .into_iter()
+        .filter(|scope| left.contains(scope) && right.contains(scope))
+        .collect()
+}
+
+fn format_scopes(scopes: &[AuthorityScope]) -> String {
+    let set: BTreeSet<_> = scopes.iter().copied().collect();
+    let labels: Vec<_> = AuthorityScope::ALL
+        .iter()
+        .copied()
+        .filter(|scope| set.contains(scope))
+        .map(AuthorityScope::as_str)
+        .collect();
+    if labels.is_empty() {
+        "(none)".to_owned()
+    } else {
+        labels.join(", ")
+    }
+}
+
+fn normalize_gate_role(role: &str) -> Result<String> {
+    let role = role.trim().trim_start_matches('@');
+    if role.is_empty() {
+        bail!("role cannot be empty");
+    }
+    Ok(role.to_owned())
+}
+
+fn project_relative_path(project_root: &Path, path: &Path) -> String {
+    path.strip_prefix(project_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn short_sha(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
+}
+
 fn update_ledger(
     project_root: &Path,
     thread_id: &str,
@@ -1580,6 +2425,192 @@ mod tests {
             turn_id: Some(format!("turn-{role}")),
             thread_id: Some("thread-1".to_owned()),
         }
+    }
+
+    fn write_gate_config(root: &Path, body: &str, roles: &[&str]) {
+        let coderoom = root.join(CODEROOM_DIR);
+        std::fs::create_dir_all(coderoom.join("roles")).unwrap();
+        std::fs::write(coderoom.join("config.toml"), body).unwrap();
+        for role in roles {
+            std::fs::write(
+                coderoom.join("roles").join(format!("{role}.md")),
+                "priors\n",
+            )
+            .unwrap();
+        }
+    }
+
+    fn write_plan(root: &Path, thread_id: &str, body: &str) {
+        let path = phase_artifact_path(root, thread_id, GatePhase::Plan);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, body).unwrap();
+    }
+
+    fn plan_with_scopes(scopes: &str, body: &str) -> String {
+        format!(
+            "---\nscopes: [{scopes}]\n---\n\n# Plan\n\n{body}\n\n## Sign-off Checklist\n\n| ID | Owner | Check | Evidence |\n| - | - | - | - |\n| SO-1 | host | Ready | TBD |\n"
+        )
+    }
+
+    #[test]
+    fn parses_plan_scope_frontmatter() {
+        let scopes = parse_plan_scopes(
+            "---\nscopes:\n  - infra\n  - data_policy\n  - \"deployment\"\n---\nbody\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            scopes,
+            vec![
+                AuthorityScope::Deployment,
+                AuthorityScope::Infra,
+                AuthorityScope::DataPolicy
+            ]
+        );
+    }
+
+    #[test]
+    fn plan_review_status_warns_when_no_authority_role_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_gate_config(
+            tmp.path(),
+            r#"
+default_engine = "cc"
+default_model = "claude-sonnet-4"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.backend]
+authority = ["dependencies"]
+"#,
+            &["pm", "backend"],
+        );
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "plan signoff".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Plan,
+                implementer: Some(actor("pm", Engine::Cc, "claude-sonnet-4")),
+            },
+        )
+        .unwrap();
+        write_plan(tmp.path(), "thread-1", &plan_with_scopes("infra", "change"));
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+
+        let status = plan_review_status(tmp.path(), &ledger).unwrap();
+
+        assert!(status.required.is_empty());
+        assert!(status.blocking_reasons().is_empty());
+        assert!(status
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("no matching authority role")));
+    }
+
+    #[test]
+    fn partial_scope_coverage_blocks_signoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_gate_config(
+            tmp.path(),
+            r#"
+default_engine = "cc"
+default_model = "claude-sonnet-4"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.sre]
+authority = ["infra"]
+"#,
+            &["pm", "sre"],
+        );
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "plan signoff".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Review,
+                implementer: Some(actor("pm", Engine::Cc, "claude-sonnet-4")),
+            },
+        )
+        .unwrap();
+        write_plan(
+            tmp.path(),
+            "thread-1",
+            &plan_with_scopes("infra, deployment", "change"),
+        );
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+
+        let status = plan_review_status(tmp.path(), &ledger).unwrap();
+
+        assert_eq!(status.uncovered_scopes, vec![AuthorityScope::Deployment]);
+        assert!(status
+            .blocking_reasons()
+            .iter()
+            .any(|reason| reason.contains("lack authority coverage")));
+    }
+
+    #[test]
+    fn plan_sha_change_invalidates_role_review() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_gate_config(
+            tmp.path(),
+            r#"
+default_engine = "cc"
+default_model = "claude-sonnet-4"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.sre]
+engine = "codex"
+model = "gpt-5"
+authority = ["infra"]
+"#,
+            &["pm", "sre"],
+        );
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "plan signoff".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Review,
+                implementer: Some(actor("pm", Engine::Cc, "claude-sonnet-4")),
+            },
+        )
+        .unwrap();
+        write_plan(tmp.path(), "thread-1", &plan_with_scopes("infra", "first"));
+        record_role_review(
+            tmp.path(),
+            RoleReviewInput {
+                thread_id: "thread-1".to_owned(),
+                role: "sre".to_owned(),
+                decision: PlanReviewDecision::Approve,
+                reason: None,
+            },
+        )
+        .unwrap();
+        write_plan(
+            tmp.path(),
+            "thread-1",
+            &plan_with_scopes("infra", "changed"),
+        );
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+
+        let status = plan_review_status(tmp.path(), &ledger).unwrap();
+
+        assert!(status.required[0].stale);
+        assert!(status
+            .blocking_reasons()
+            .iter()
+            .any(|reason| reason.contains("stale")));
     }
 
     #[test]
@@ -1949,13 +2980,23 @@ mod tests {
     #[test]
     fn cross_model_review_can_satisfy_tier1() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        write_gate_config(
+            tmp.path(),
+            r#"
+default_engine = "cc"
+default_model = "claude-sonnet-4"
+host_role = "host"
+
+[roles.host]
+"#,
+            &["host"],
+        );
         write_project_file(tmp.path(), "src/lib.rs", "pub fn ok() {}\n");
         write_project_file(tmp.path(), "docs/research.md", "Evidence: src/lib.rs:1\n");
         write_project_file(
             tmp.path(),
             "docs/plan.md",
-            "## Sign-off Checklist\n\n| ID | Predicate | Method | Pass |\n| SO-1 | builds | cargo test | pass |\n",
+            &plan_with_scopes("infra", "builds"),
         );
         write_project_file(
             tmp.path(),

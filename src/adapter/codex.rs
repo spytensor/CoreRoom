@@ -1200,6 +1200,8 @@ fn stamp_event_ids(event: &mut CrepEvent, turn_id: &str, thread_id: &str) {
         CrepEvent::TurnDispatched { .. }
         | CrepEvent::PhaseAdvanced { .. }
         | CrepEvent::PhaseBlocked { .. }
+        | CrepEvent::PlanReviewed { .. }
+        | CrepEvent::PlanOverridden { .. }
         | CrepEvent::RoleStarted { .. }
         | CrepEvent::RoleSessionUpdated { .. }
         | CrepEvent::RoleStopped { .. } => {}
