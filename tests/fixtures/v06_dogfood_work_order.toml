@@ -1,0 +1,35 @@
+schemaVersion = 1
+id = "WO-0212"
+title = "v0.6 end-to-end host-led dogfood validation"
+objective = "Prove the host-led v0.6 Engineering Control Room flow from natural-language request through issue, context, gate, PR evidence, and tracker closure."
+githubIssue = 212
+phase = "v0.6.0 - Engineering Control Room"
+epic = "Evidence / Tracker Closure"
+gateThread = "thread-v06-dogfood"
+branch = "feat/v0.6-212-host-led-dogfood-validation"
+pullRequest = 228
+status = "closed"
+acceptanceCriteria = [
+  "Start from a natural-language user request to @host.",
+  "Host classifies the request.",
+  "Host proposes a WorkOrder.",
+  "Host identifies required sources.",
+  "Host builds a ContextPack.",
+  "Host delegates to at least two roles.",
+  "Gate reaches signoff before implementation.",
+  "Evidence Packet is generated.",
+  "GitHub Issue / PR / tracker update are linked.",
+  "Final host summary includes remaining risks and rollback.",
+]
+requiredEvidence = [
+  "changed-files",
+  "validation",
+  "gate-ledger",
+  "role-reviews",
+  "pull-request",
+  "risks",
+  "rollback",
+  "tracker-update",
+]
+trackerIssue = 202
+trackerCheckbox = "#212 - v0.6 end-to-end dogfood validation"

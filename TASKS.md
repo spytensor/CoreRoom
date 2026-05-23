@@ -21,7 +21,7 @@ evidence packets, and mandatory tracker closure.
 - [x] #209: Define WorkOrder-scoped ContextPack.
 - [x] #210: Define Evidence Packet model.
 - [x] #211: Enforce tracker update protocol and PR evidence template.
-- [ ] #212: Add end-to-end host-led dogfood validation.
+- [x] #212: Add end-to-end host-led dogfood validation.
 
 ## Notes
 
