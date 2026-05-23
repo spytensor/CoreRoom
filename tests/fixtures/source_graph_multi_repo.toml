@@ -1,0 +1,124 @@
+schemaVersion = 1
+
+[[nodes]]
+sourceId = "app"
+kind = "project-file"
+pin = "sha256:app-v1"
+trustLevel = "project"
+owner = "host"
+visibleRoles = ["host", "engineer", "qa"]
+purpose = "Current project implementation under review."
+workOrders = ["WO-0216"]
+path = "src/"
+
+[[nodes]]
+sourceId = "core-api"
+kind = "local-repo"
+pin = "commit:core-api-v1"
+trustLevel = "internal"
+owner = "platform"
+visibleRoles = ["host", "engineer"]
+purpose = "Dependent API repository that app integrates with."
+workOrders = ["WO-0216"]
+path = "../core-api"
+
+[[nodes]]
+sourceId = "public-api-doc"
+kind = "url-snapshot"
+pin = "snapshot:docs-v1"
+trustLevel = "external-doc"
+owner = "platform"
+visibleRoles = ["host", "engineer"]
+purpose = "Pinned remote API documentation snapshot."
+workOrders = ["WO-0216"]
+url = "https://example.com/api/docs"
+snapshotRef = "snapshots/public-api-doc-v1.md"
+
+[[nodes]]
+sourceId = "security-policy"
+kind = "policy-doc"
+pin = "sha256:security-v1"
+trustLevel = "policy"
+owner = "security"
+visibleRoles = ["host", "security"]
+purpose = "Policy constraints for dependency context handling."
+workOrders = ["WO-0216"]
+path = "docs/policy/security.md"
+
+[[nodes]]
+sourceId = "design-system"
+kind = "design-reference"
+pin = "commit:design-v1"
+trustLevel = "internal"
+owner = "design"
+visibleRoles = ["host", "frontend", "engineer"]
+purpose = "Shared UI component and token reference."
+workOrders = ["WO-0216"]
+path = "../design-system"
+
+[[nodes]]
+sourceId = "deployment-runbook"
+kind = "runbook"
+pin = "sha256:runbook-v1"
+trustLevel = "internal"
+owner = "sre"
+visibleRoles = ["host", "sre"]
+purpose = "Operational runbook for release impact review."
+workOrders = ["WO-0216"]
+path = "docs/runbooks/deploy.md"
+
+[[nodes]]
+sourceId = "release-checklist"
+kind = "release-checklist"
+pin = "sha256:release-v1"
+trustLevel = "internal"
+owner = "qa"
+visibleRoles = ["host", "qa"]
+purpose = "Release readiness checklist for v0.7."
+workOrders = ["WO-0216"]
+path = "docs/release/checklist.md"
+
+[[edges]]
+from = "app"
+to = "core-api"
+relation = "depends-on"
+reason = "The project code depends on the Core API repository contract."
+owner = "platform"
+trustLevel = "internal"
+workOrders = ["WO-0216"]
+
+[[edges]]
+from = "public-api-doc"
+to = "core-api"
+relation = "documents"
+reason = "The remote documentation snapshots the public API behavior."
+owner = "platform"
+trustLevel = "external-doc"
+workOrders = ["WO-0216"]
+
+[[edges]]
+from = "security-policy"
+to = "app"
+relation = "constrains"
+reason = "Policy limits which sources can be exposed to roles."
+owner = "security"
+trustLevel = "policy"
+workOrders = ["WO-0216"]
+
+[[edges]]
+from = "design-system"
+to = "app"
+relation = "documents"
+reason = "Design-system reference informs UI-facing changes."
+owner = "design"
+trustLevel = "internal"
+workOrders = ["WO-0216"]
+
+[[edges]]
+from = "release-checklist"
+to = "app"
+relation = "releases-with"
+reason = "Release checklist must be cited before release readiness."
+owner = "qa"
+trustLevel = "internal"
+workOrders = ["WO-0216"]

@@ -340,6 +340,24 @@ decision, confirmation status, output, safety findings, and rollback hint.
 Safety controls must report stale sessions, blocked human-input paths, repeated
 action warnings, and circuit-breaker failures before `@host` claims progress.
 
+## v0.7 Source Graph
+
+The Source Registry lists individual project sources. The v0.7 Source Graph
+adds relationships between those sources so `@host` can explain multi-repo and
+external-document context without loading every source into every role.
+
+Each graph node records source id, kind, pin, trust level, owner, visible roles,
+purpose, and WorkOrder relevance. Nodes cover project files, local repos, git
+repos, policy docs, API specs, design references, runbooks, release checklists,
+and URL snapshots. Edges record dependency, documentation, constraint,
+implementation, verification, or release-readiness relationships.
+
+Drift is loud. `@host` must report changed commits, changed file hashes, stale
+URL snapshots, missing sources, trust changes, and role-visibility changes.
+Source refresh plans require explicit confirmation and never allow silent
+remote refresh. ContextPacks may cite graph source ids and graph paths, but
+role visibility is checked per source slice before delegation.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline

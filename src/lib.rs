@@ -36,6 +36,7 @@ pub mod priors;
 pub mod prompt_cmd;
 pub mod repl;
 pub mod role;
+pub mod source_graph;
 pub mod source_registry;
 pub mod tracker;
 pub mod turn;

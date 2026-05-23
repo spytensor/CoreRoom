@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status from Issue, branch, PR, CI, Evidence Packet, and tracker facts.
 - Added the v0.7 host action layer for structured host-owned actions,
   confirmation policy mapping, audit events, and loop safety controls.
+- Added the v0.7 Source Graph model for multi-repo/project context, graph
+  paths, pinned source citations, drift checks, and no-silent-refresh plans.
 
 ## [0.5.0] - 2026-05-23
 
