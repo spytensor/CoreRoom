@@ -31,6 +31,7 @@ use coderoom::gate::{
     ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, PhaseAdvanceInput,
     PlanOverrideInput, PlanReviewDecision, ReviewInput, RoleReviewInput, VerificationInput,
 };
+use coderoom::init::{InitHookMode, InitPreset};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -56,6 +57,15 @@ enum Cmd {
         /// For dotfile repos / onboarding scripts.
         #[arg(short = 'y', long = "yes")]
         yes: bool,
+        /// Also scaffold Claude Code PreToolUse hooks under `.claude/`.
+        #[arg(long)]
+        with_claude_hooks: bool,
+        /// Re-apply the latest Claude hook template to an existing project.
+        #[arg(long)]
+        upgrade_hooks: bool,
+        /// Starter role preset: default or team.
+        #[arg(long, value_parser = parse_init_preset, default_value = "default")]
+        preset: InitPreset,
     },
     /// Manage roles in the current project's `.coderoom/config.toml`.
     Role {
@@ -675,6 +685,10 @@ fn parse_plan_review_decision(s: &str) -> Result<PlanReviewDecision, String> {
     PlanReviewDecision::parse(s).map_err(|error| error.to_string())
 }
 
+fn parse_init_preset(s: &str) -> Result<InitPreset, String> {
+    InitPreset::parse(s).map_err(|error| error.to_string())
+}
+
 fn parse_date(s: &str) -> std::result::Result<chrono::NaiveDate, String> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| format!("must be YYYY-MM-DD: {e}"))
 }
@@ -709,7 +723,8 @@ fn main() -> Result<()> {
     let needs_engine = !matches!(
         cli.command,
         Some(
-            Cmd::Role { .. }
+            Cmd::Init { .. }
+                | Cmd::Role { .. }
                 | Cmd::Config { .. }
                 | Cmd::Prompt { .. }
                 | Cmd::Gate { .. }
@@ -725,12 +740,26 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => run_start(None, false, false, false),
-        Some(Cmd::Init { project, yes }) => {
-            let opts = if yes {
+        Some(Cmd::Init {
+            project,
+            yes,
+            with_claude_hooks,
+            upgrade_hooks,
+            preset,
+        }) => {
+            let mut opts = if yes {
                 coderoom::init::InitOptions::accepted_defaults()
             } else {
                 coderoom::init::InitOptions::manual()
             };
+            opts.hook_mode = if with_claude_hooks {
+                InitHookMode::InstallOrUpgrade
+            } else if upgrade_hooks {
+                InitHookMode::UpgradeExisting
+            } else {
+                InitHookMode::None
+            };
+            opts.preset = preset;
             coderoom::init::run(&project_root_or_cwd(project)?, opts)
         }
         Some(Cmd::Role { command }) => run_role_cmd(command),

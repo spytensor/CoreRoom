@@ -100,7 +100,7 @@ fn snapshot_init_role_picker() {
         Path::new("/repo/codeRoom"),
         &scan,
         &sample_choices(),
-        1,
+        4,
     ));
     insta::assert_snapshot!(rendered, @r"
 pick roles · setting up coderoom in codeRoom
@@ -109,6 +109,9 @@ space toggles · ↑↓ moves · enter continues · esc backs out
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
 
     [x] ● @host        orchestrates requests and keeps the room coherent · req…
+    [ ] ● @engineer    implements changes across the project
+    [ ] ● @reviewer    reviews plans and code for regressions
+    [ ] ● @sre         runtime reliability, deploys, operations
   > [x] ● @backend     APIs, services, storage boundaries
     [ ] ● @frontend    UI, components, routing, client-side state
     [x] ● @security    authn, authz, threat modeling
@@ -129,7 +132,7 @@ fn snapshot_init_role_expansion_picker() {
         Path::new("/repo/codeRoom"),
         &scan,
         &sample_choices(),
-        2,
+        4,
     ));
     insta::assert_snapshot!(rendered, @r"
 suggest roles · setting up coderoom in codeRoom
@@ -139,8 +142,11 @@ detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
 CodeRoom found only @host. Choose the specialists to add:
 
     [x] ● @host        orchestrates requests and keeps the room coherent · exi…
-    [x] ● @backend     APIs, services, storage boundaries
-  > [ ] ● @frontend    UI, components, routing, client-side state
+    [ ] ● @engineer    implements changes across the project
+    [ ] ● @reviewer    reviews plans and code for regressions
+    [ ] ● @sre         runtime reliability, deploys, operations
+  > [x] ● @backend     APIs, services, storage boundaries
+    [ ] ● @frontend    UI, components, routing, client-side state
     [x] ● @security    authn, authz, threat modeling
     [ ] ● @data        schemas, migrations, query patterns
     [ ] ● @devops      CI/CD, infra, deploys, runtime health
@@ -357,11 +363,13 @@ fn init_yes_output_passes_config_validation() {
 }
 
 #[test]
-fn init_refuses_to_overwrite_existing_dir() {
+fn init_is_idempotent_when_coderoom_exists() {
     let tmp = TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
-    let err = run(tmp.path(), InitOptions::auto()).expect_err("should refuse to overwrite");
-    assert!(err.to_string().contains("already exists"), "got: {err}");
+    run(tmp.path(), InitOptions::auto()).expect("first init");
+    let before = std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+    run(tmp.path(), InitOptions::auto()).expect("second init should be no-op");
+    let after = std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+    assert_eq!(before, after);
 }
 
 #[test]
@@ -464,28 +472,53 @@ fn default_priors_templates_stay_compact() {
 }
 
 #[test]
-fn detected_stack_creates_extra_roles_in_config() {
+fn init_seeds_default_starter_roles() {
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
     run(tmp.path(), InitOptions::auto()).expect("init");
 
     let cfg = Config::load_test(tmp.path()).expect("valid config");
-    // Cargo.toml → host + backend + security
     assert!(cfg.roles.contains_key("host"));
-    assert!(cfg.roles.contains_key("backend"));
-    assert!(cfg.roles.contains_key("security"));
+    assert!(cfg.roles.contains_key("engineer"));
+    assert!(cfg.roles.contains_key("reviewer"));
 
     let coderoom = tmp.path().join(CODEROOM_DIR);
     assert!(coderoom
         .join(ROLES_DIR)
-        .join("backend")
+        .join("engineer")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
     assert!(coderoom
         .join(ROLES_DIR)
-        .join("security")
+        .join("reviewer")
         .join(crate::manifest::ROLE_PRIORS_FILE)
         .is_file());
+}
+
+#[test]
+fn team_preset_adds_sre_security_and_qa_with_authority_fields() {
+    let tmp = TempDir::new().unwrap();
+    let mut options = InitOptions::auto();
+    options.preset = InitPreset::Team;
+    run(tmp.path(), options).expect("init");
+
+    let cfg_text =
+        std::fs::read_to_string(tmp.path().join(CODEROOM_DIR).join(CONFIG_FILE)).unwrap();
+    let cfg = Config::load_test(tmp.path()).expect("valid config");
+    for role in ["host", "engineer", "reviewer", "sre", "security", "qa"] {
+        assert!(cfg.roles.contains_key(role), "missing {role}");
+        assert!(tmp
+            .path()
+            .join(CODEROOM_DIR)
+            .join(ROLES_DIR)
+            .join(role)
+            .join(crate::manifest::KNOWLEDGE_DIR)
+            .is_dir());
+    }
+    assert!(cfg_text.contains("[roles.sre]"));
+    assert!(cfg_text.contains("[roles.security]"));
+    assert!(cfg_text.contains("[roles.qa]"));
+    assert_eq!(cfg_text.matches("authority = []").count(), 3);
 }
 
 #[test]
@@ -494,27 +527,26 @@ fn role_template_substitutes_role_name() {
     std::fs::write(tmp.path().join("go.mod"), "module x\n").unwrap();
     run(tmp.path(), InitOptions::auto()).expect("init");
 
-    let backend_priors = std::fs::read_to_string(
+    let engineer_priors = std::fs::read_to_string(
         tmp.path()
             .join(CODEROOM_DIR)
             .join(ROLES_DIR)
-            .join("backend")
+            .join("engineer")
             .join(crate::manifest::ROLE_PRIORS_FILE),
     )
     .unwrap();
     // Template's `{ROLE}` placeholder should be replaced.
-    assert!(!backend_priors.contains("{ROLE}"));
-    assert!(!backend_priors.contains("{HOST}"));
-    assert!(!backend_priors.contains("{PEERS}"));
-    assert!(backend_priors.contains("@host"));
-    assert!(backend_priors.contains("@backend"));
+    assert!(!engineer_priors.contains("{ROLE}"));
+    assert!(!engineer_priors.contains("{HOST}"));
+    assert!(!engineer_priors.contains("{PEERS}"));
+    assert!(engineer_priors.contains("@host"));
+    assert!(engineer_priors.contains("@engineer"));
 }
 
 #[test]
 fn planned_files_lists_in_render_order() {
-    let coderoom = PathBuf::from("/tmp/p/.coderoom");
     let paths = planned_files(
-        &coderoom,
+        Path::new("/tmp/p"),
         &[
             RolePlan {
                 name: "host".into(),
@@ -525,6 +557,7 @@ fn planned_files_lists_in_render_order() {
                 engine: Engine::Cc,
             },
         ],
+        true,
     );
     let display: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
     assert_eq!(
@@ -542,6 +575,8 @@ fn planned_files_lists_in_render_order() {
             "/tmp/p/.coderoom/gate-templates/precommit-gate.md",
             "/tmp/p/.coderoom/gate-templates/signoff-gate.md",
             "/tmp/p/.coderoom/.gitignore",
+            "/tmp/p/.claude/settings.json",
+            "/tmp/p/.claude/.coderoom-managed.json",
         ]
     );
 }

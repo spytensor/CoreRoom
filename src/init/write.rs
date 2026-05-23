@@ -102,6 +102,9 @@ fn render_config(roles: &[RolePlan]) -> String {
         if role.engine != DEFAULT_ENGINE {
             let _ = writeln!(out, "engine = \"{}\"", role.engine.as_str());
         }
+        if declares_empty_authority(&role.name) {
+            let _ = writeln!(out, "authority = []");
+        }
         match role.engine {
             Engine::Codex => {
                 let _ = writeln!(
@@ -122,6 +125,10 @@ fn render_config(roles: &[RolePlan]) -> String {
         let _ = writeln!(out);
     }
     out
+}
+
+fn declares_empty_authority(role: &str) -> bool {
+    matches!(role, "sre" | "security" | "qa")
 }
 
 fn write_file(path: &Path, content: &str) -> Result<()> {
