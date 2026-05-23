@@ -1,7 +1,7 @@
 //! Host-led WorkOrder model and GitHub Issue binding helpers.
 //!
 //! WorkOrders are project-level coordination records. They do not replace
-//! GitHub Issues; they bind local CodeRoom state to the issue, gate thread,
+//! GitHub Issues; they bind local CoreRoom state to the issue, gate thread,
 //! branch, PR, tracker row, and evidence expectations that `@host` must manage.
 
 use std::fmt::Write as _;
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 
-/// Subdirectory inside `.coderoom/` that stores project WorkOrders.
+/// Subdirectory inside `.coreroom/` that stores project WorkOrders.
 pub const WORK_ORDERS_DIR: &str = "work-orders";
 
 /// Current persisted WorkOrder schema version.
@@ -403,7 +403,7 @@ pub struct ConfirmedGitHubIssueBinding {
     pub confirmed_by: String,
 }
 
-/// Save a WorkOrder under `.coderoom/work-orders/<id>.toml`.
+/// Save a WorkOrder under `.coreroom/work-orders/<id>.toml`.
 pub fn save_work_order(project_root: &Path, work_order: &WorkOrder) -> Result<PathBuf> {
     work_order.validate()?;
     let path = work_order_path(project_root, &work_order.id)?;
@@ -431,7 +431,7 @@ pub fn load_work_order(path: &Path) -> Result<WorkOrder> {
 pub fn work_order_path(project_root: &Path, id: &str) -> Result<PathBuf> {
     validate_work_order_id(id)?;
     Ok(project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(WORK_ORDERS_DIR)
         .join(format!("{id}.toml")))
 }

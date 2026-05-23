@@ -218,36 +218,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "coderoom"
-version = "0.5.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "base64",
- "chrono",
- "clap",
- "crossterm",
- "dirs",
- "fs2",
- "insta",
- "nix",
- "predicates",
- "pretty_assertions",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "signal-hook 0.4.4",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "unicode-width",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -278,6 +248,36 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "coreroom"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "base64",
+ "chrono",
+ "clap",
+ "crossterm",
+ "dirs",
+ "fs2",
+ "insta",
+ "nix",
+ "predicates",
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signal-hook 0.4.4",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-width",
+]
 
 [[package]]
 name = "cpufeatures"

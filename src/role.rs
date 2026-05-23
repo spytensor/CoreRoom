@@ -1,7 +1,7 @@
 //! `cr role add/list/rm` implementations.
 //!
-//! Each command mutates `.coderoom/config.toml` and/or
-//! `.coderoom/roles/<name>/priors.md` with the same validation discipline that
+//! Each command mutates `.coreroom/config.toml` and/or
+//! `.coreroom/roles/<name>/priors.md` with the same validation discipline that
 //! [`crate::config::Config::load`] enforces at REPL startup, so the
 //! generated state is always loadable.
 
@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::adapter::{Engine, PermissionMode};
-use crate::config::{AuthorityScope, Config, RoleEntry, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use crate::config::{AuthorityScope, Config, RoleEntry, CONFIG_FILE, COREROOM_DIR, ROLES_DIR};
 use crate::config_layered::ProjectConfigRaw;
 use crate::{liveness, manifest};
 
@@ -19,7 +19,7 @@ use crate::{liveness, manifest};
 /// expected to replace this with project-specific guidance.
 const DEFAULT_ROLE_PRIORS: &str = include_str!("init_defaults/role_template.md");
 
-/// One role to append to an existing `.coderoom/` project config.
+/// One role to append to an existing `.coreroom/` project config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RoleAddition {
     /// Role name without the leading `@`.
@@ -34,7 +34,7 @@ pub(crate) struct RoleAddition {
 
 /// Add a new role. Updates `config.toml` (inserts `[roles.<name>]` with
 /// optional engine/model overrides), then creates an empty priors file
-/// at `.coderoom/roles/<name>/priors.md` if one doesn't already exist.
+/// at `.coreroom/roles/<name>/priors.md` if one doesn't already exist.
 pub fn add(
     project_root: &Path,
     name: &str,
@@ -42,12 +42,12 @@ pub fn add(
     model: Option<&str>,
 ) -> Result<()> {
     validate_name(name)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    if !coderoom_dir.is_dir() {
-        bail!("{} not found — run `cr init` first", coderoom_dir.display());
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    if !coreroom_dir.is_dir() {
+        bail!("{} not found — run `cr init` first", coreroom_dir.display());
     }
 
-    let mut raw = read_project_raw(&coderoom_dir)?;
+    let mut raw = read_project_raw(&coreroom_dir)?;
     if raw.roles.contains_key(name) {
         bail!("role `{name}` already exists in {CONFIG_FILE}");
     }
@@ -64,19 +64,19 @@ pub fn add(
         authority: Vec::new(),
     };
     raw.roles.insert(name.to_owned(), entry);
-    write_project_raw(&coderoom_dir, &raw)?;
+    write_project_raw(&coreroom_dir, &raw)?;
 
-    let priors_path = manifest::preferred_role_priors_path(&coderoom_dir, name);
+    let priors_path = manifest::preferred_role_priors_path(&coreroom_dir, name);
     if priors_path.exists() {
-        std::fs::create_dir_all(manifest::knowledge_dir(&coderoom_dir, name))
+        std::fs::create_dir_all(manifest::knowledge_dir(&coreroom_dir, name))
             .with_context(|| format!("creating knowledge dir for `{name}`"))?;
-    } else if manifest::legacy_role_priors_path(&coderoom_dir, name).is_file() {
-        manifest::ensure_role_dir_layout(&coderoom_dir, name)
+    } else if manifest::legacy_role_priors_path(&coreroom_dir, name).is_file() {
+        manifest::ensure_role_dir_layout(&coreroom_dir, name)
             .with_context(|| format!("migrating legacy priors for `{name}`"))?;
     } else {
         let peers = role_peers(&raw, name);
         manifest::create_role_layout(
-            &coderoom_dir,
+            &coreroom_dir,
             name,
             &render_role_template(name, &raw.host_role, &peers),
         )
@@ -101,18 +101,18 @@ pub fn add(
 pub fn attach(project_root: &Path, name: &str, source: &Path, alias: Option<&str>) -> Result<()> {
     let name = name.strip_prefix('@').unwrap_or(name);
     validate_name(name)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let raw = read_project_raw(&coreroom_dir)?;
     if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
     }
 
-    let outcome = manifest::attach_knowledge(&coderoom_dir, name, source, alias)?;
+    let outcome = manifest::attach_knowledge(&coreroom_dir, name, source, alias)?;
     if let Some(legacy) = outcome.migrated_legacy {
         println!(
             "migrated legacy priors {} -> {}",
             legacy.display(),
-            manifest::preferred_role_priors_path(&coderoom_dir, name).display()
+            manifest::preferred_role_priors_path(&coreroom_dir, name).display()
         );
     }
     println!("✓ attached {} to @{name}", outcome.entry.name);
@@ -125,13 +125,13 @@ pub fn attach(project_root: &Path, name: &str, source: &Path, alias: Option<&str
 pub fn detach(project_root: &Path, name: &str, doc_name: &str) -> Result<()> {
     let name = name.strip_prefix('@').unwrap_or(name);
     validate_name(name)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let raw = read_project_raw(&coreroom_dir)?;
     if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
     }
 
-    let outcome = manifest::detach_knowledge(&coderoom_dir, name, doc_name)?;
+    let outcome = manifest::detach_knowledge(&coreroom_dir, name, doc_name)?;
     println!("✓ detached {} from @{name}", outcome.entry.name);
     if !outcome.removed_file {
         println!("  file was already missing: {}", outcome.path.display());
@@ -143,19 +143,19 @@ pub fn detach(project_root: &Path, name: &str, doc_name: &str) -> Result<()> {
 pub fn knowledge(project_root: &Path, name: &str, with_liveness: bool) -> Result<()> {
     let name = name.strip_prefix('@').unwrap_or(name);
     validate_name(name)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let raw = read_project_raw(&coreroom_dir)?;
     if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
     }
 
-    let entries = manifest::knowledge_inventory(&coderoom_dir, name)?;
+    let entries = manifest::knowledge_inventory(&coreroom_dir, name)?;
     if entries.is_empty() {
         println!("(no knowledge attached for @{name})");
         return Ok(());
     }
     let liveness_doc = if with_liveness {
-        Some(liveness::read(&coderoom_dir, name)?)
+        Some(liveness::read(&coreroom_dir, name)?)
     } else {
         None
     };
@@ -206,12 +206,12 @@ fn truncate_timestamp(value: &str) -> &str {
 /// before `config.toml` is updated, so a file-write failure cannot
 /// leave config pointing at a missing role priors file.
 pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Result<usize> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    if !coderoom_dir.is_dir() {
-        bail!("{} not found — run `cr init` first", coderoom_dir.display());
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    if !coreroom_dir.is_dir() {
+        bail!("{} not found — run `cr init` first", coreroom_dir.display());
     }
 
-    let raw = read_project_raw(&coderoom_dir)?;
+    let raw = read_project_raw(&coreroom_dir)?;
     let mut to_add = Vec::new();
     for addition in additions {
         validate_name(&addition.name)?;
@@ -224,18 +224,18 @@ pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Resul
         return Ok(0);
     }
 
-    let updated_config = append_roles_config_body(&coderoom_dir, &to_add)?;
+    let updated_config = append_roles_config_body(&coreroom_dir, &to_add)?;
 
-    let roles_dir = coderoom_dir.join(ROLES_DIR);
+    let roles_dir = coreroom_dir.join(ROLES_DIR);
     std::fs::create_dir_all(&roles_dir)
         .with_context(|| format!("creating {}", roles_dir.display()))?;
     for addition in &to_add {
-        let priors_path = manifest::preferred_role_priors_path(&coderoom_dir, &addition.name);
+        let priors_path = manifest::preferred_role_priors_path(&coreroom_dir, &addition.name);
         if priors_path.exists() {
-            std::fs::create_dir_all(manifest::knowledge_dir(&coderoom_dir, &addition.name))
+            std::fs::create_dir_all(manifest::knowledge_dir(&coreroom_dir, &addition.name))
                 .with_context(|| format!("creating knowledge dir for `{}`", addition.name))?;
-        } else if manifest::legacy_role_priors_path(&coderoom_dir, &addition.name).is_file() {
-            manifest::ensure_role_dir_layout(&coderoom_dir, &addition.name)
+        } else if manifest::legacy_role_priors_path(&coreroom_dir, &addition.name).is_file() {
+            manifest::ensure_role_dir_layout(&coreroom_dir, &addition.name)
                 .with_context(|| format!("migrating legacy priors for `{}`", addition.name))?;
         } else {
             let mut peers = raw.roles.keys().cloned().collect::<Vec<_>>();
@@ -247,7 +247,7 @@ pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Resul
             );
             peers.sort();
             manifest::create_role_layout(
-                &coderoom_dir,
+                &coreroom_dir,
                 &addition.name,
                 &render_role_template(&addition.name, &raw.host_role, &peers),
             )
@@ -255,7 +255,7 @@ pub(crate) fn add_many(project_root: &Path, additions: &[RoleAddition]) -> Resul
         }
     }
 
-    write_project_text(&coderoom_dir, &updated_config)?;
+    write_project_text(&coreroom_dir, &updated_config)?;
 
     Ok(to_add.len())
 }
@@ -298,13 +298,13 @@ pub fn list(project_root: &Path) -> Result<()> {
 /// Print one role's effective identity surface.
 pub fn show(project_root: &Path, name: &str) -> Result<()> {
     let cfg = Config::load(project_root)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let coreroom_dir = project_root.join(COREROOM_DIR);
     let entry = cfg
         .roles
         .get(name)
         .with_context(|| format!("no such role: @{name}"))?;
     let role_cfg = cfg
-        .role_config(name, &coderoom_dir)
+        .role_config(name, &coreroom_dir)
         .with_context(|| format!("role `{name}` is declared but has invalid config"))?;
 
     println!("@{name}");
@@ -332,8 +332,8 @@ pub fn show(project_root: &Path, name: &str) -> Result<()> {
 /// Remove a role. Refuses if it's the configured host. Removes both the
 /// `[roles.<name>]` table and the role priors/knowledge directory.
 pub fn rm(project_root: &Path, name: &str) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let mut raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let mut raw = read_project_raw(&coreroom_dir)?;
 
     if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
@@ -346,14 +346,14 @@ pub fn rm(project_root: &Path, name: &str) -> Result<()> {
     }
 
     raw.roles.remove(name);
-    write_project_raw(&coderoom_dir, &raw)?;
+    write_project_raw(&coreroom_dir, &raw)?;
 
-    let legacy_path = manifest::legacy_role_priors_path(&coderoom_dir, name);
+    let legacy_path = manifest::legacy_role_priors_path(&coreroom_dir, name);
     if legacy_path.is_file() {
         std::fs::remove_file(&legacy_path)
             .with_context(|| format!("removing {}", legacy_path.display()))?;
     }
-    let role_dir = manifest::role_dir(&coderoom_dir, name);
+    let role_dir = manifest::role_dir(&coreroom_dir, name);
     if role_dir.is_dir() {
         std::fs::remove_dir_all(&role_dir)
             .with_context(|| format!("removing {}", role_dir.display()))?;
@@ -364,18 +364,18 @@ pub fn rm(project_root: &Path, name: &str) -> Result<()> {
 }
 
 /// Promote an existing role to be the project host. This persists the
-/// `host_role` field in `.coderoom/config.toml`; the REPL `/host`
+/// `host_role` field in `.coreroom/config.toml`; the REPL `/host`
 /// command is the session-only counterpart.
 pub fn set_host(project_root: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let mut raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let mut raw = read_project_raw(&coreroom_dir)?;
 
     if !raw.roles.contains_key(name) {
         bail!("no such role: @{name}");
     }
     name.clone_into(&mut raw.host_role);
-    write_project_raw(&coderoom_dir, &raw)?;
+    write_project_raw(&coreroom_dir, &raw)?;
 
     println!("✓ @{name} is now the host role");
     Ok(())
@@ -386,22 +386,22 @@ pub fn set_owner(project_root: &Path, name: &str, owner: &str) -> Result<()> {
     if owner.trim().is_empty() {
         bail!("owner must be non-empty");
     }
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let mut raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let mut raw = read_project_raw(&coreroom_dir)?;
     let entry = raw
         .roles
         .get_mut(name)
         .with_context(|| format!("no such role: @{name}"))?;
     entry.owner = Some(owner.trim().to_owned());
-    write_project_raw(&coderoom_dir, &raw)?;
+    write_project_raw(&coreroom_dir, &raw)?;
     println!("✓ @{name} owner set to {}", owner.trim());
     Ok(())
 }
 
 /// Replace an existing role's authority scopes.
 pub fn set_authority(project_root: &Path, name: &str, scopes: &[AuthorityScope]) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let mut raw = read_project_raw(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let mut raw = read_project_raw(&coreroom_dir)?;
     let entry = raw
         .roles
         .get_mut(name)
@@ -411,7 +411,7 @@ pub fn set_authority(project_root: &Path, name: &str, scopes: &[AuthorityScope])
     normalized.dedup();
     entry.authority = normalized;
     let summary = authority_summary(&entry.authority);
-    write_project_raw(&coderoom_dir, &raw)?;
+    write_project_raw(&coreroom_dir, &raw)?;
     println!("✓ @{name} authority set to [{summary}]");
     Ok(())
 }
@@ -439,8 +439,8 @@ fn validate_name(name: &str) -> Result<()> {
 /// This keeps role-edit round-trips free of user-layer values (e.g.
 /// the user's `default_engine` won't accidentally end up in the
 /// committed project file when `cr role add` writes back).
-fn read_project_raw(coderoom_dir: &Path) -> Result<ProjectConfigRaw> {
-    let path = coderoom_dir.join(CONFIG_FILE);
+fn read_project_raw(coreroom_dir: &Path) -> Result<ProjectConfigRaw> {
+    let path = coreroom_dir.join(CONFIG_FILE);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let raw: ProjectConfigRaw =
@@ -448,20 +448,20 @@ fn read_project_raw(coderoom_dir: &Path) -> Result<ProjectConfigRaw> {
     Ok(raw)
 }
 
-fn write_project_raw(coderoom_dir: &Path, raw: &ProjectConfigRaw) -> Result<()> {
+fn write_project_raw(coreroom_dir: &Path, raw: &ProjectConfigRaw) -> Result<()> {
     let body = toml::to_string_pretty(raw).map_err(|e| anyhow!("serializing config.toml: {e}"))?;
-    write_project_text(coderoom_dir, &body)?;
+    write_project_text(coreroom_dir, &body)?;
     Ok(())
 }
 
-fn write_project_text(coderoom_dir: &Path, body: &str) -> Result<()> {
-    let path = coderoom_dir.join(CONFIG_FILE);
+fn write_project_text(coreroom_dir: &Path, body: &str) -> Result<()> {
+    let path = coreroom_dir.join(CONFIG_FILE);
     std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
 
-fn append_roles_config_body(coderoom_dir: &Path, additions: &[RoleAddition]) -> Result<String> {
-    let path = coderoom_dir.join(CONFIG_FILE);
+fn append_roles_config_body(coreroom_dir: &Path, additions: &[RoleAddition]) -> Result<String> {
+    let path = coreroom_dir.join(CONFIG_FILE);
     let mut body =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     if !body.ends_with('\n') {

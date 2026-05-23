@@ -296,7 +296,7 @@ fn claude_hook_settings(
         message: format!("locating current cr binary for permission hook: {source}"),
     })?;
     let mut command = format!(
-        "{} __coderoom-hook-decision --mode {}",
+        "{} __coreroom-hook-decision --mode {}",
         shell_quote(&current_exe),
         mode.as_str()
     );
@@ -317,7 +317,7 @@ fn claude_hook_settings(
         }
     });
     let mut file = tempfile::Builder::new()
-        .prefix("coderoom-cc-hooks-")
+        .prefix("coreroom-cc-hooks-")
         .suffix(".json")
         .tempfile()
         .map_err(|source| AdapterError::Engine {
@@ -541,7 +541,7 @@ fn extract_permission_denials(
                 .get("reason")
                 .or_else(|| denial.get("message"))
                 .and_then(Value::as_str)
-                .unwrap_or("denied by CodeRoom permission hook")
+                .unwrap_or("denied by CoreRoom permission hook")
                 .to_owned();
             CrepEvent::PermissionDenied {
                 role: role.to_owned(),

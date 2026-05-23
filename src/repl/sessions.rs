@@ -2,7 +2,7 @@
 //!
 //! Engine adapters that support session resume emit the session id
 //! they created on `RoleStarted` or `RoleSessionUpdated`. `cr start`
-//! writes that id to `.coderoom/sessions/ids/<role>.id`; the next
+//! writes that id to `.coreroom/sessions/ids/<role>.id`; the next
 //! invocation reads it back and threads it into `RoleConfig` so the
 //! engine resumes the prior conversation instead of starting fresh.
 //! Per amendment A-006, resume is the default behaviour — the user
@@ -23,13 +23,13 @@ use crossterm::style::Stylize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::init::{read_key, WizardKey, WizardTerminal};
 use crate::output;
 
-/// Directory under a project's `.coderoom/` holding per-role session
+/// Directory under a project's `.coreroom/` holding per-role session
 /// ids. Created on demand by [`write_session_id`]. The default
-/// `.coderoom/.gitignore` excludes `sessions/`; session ids are
+/// `.coreroom/.gitignore` excludes `sessions/`; session ids are
 /// pointers into the engine's local storage and should not be
 /// committed.
 ///
@@ -55,7 +55,7 @@ pub(super) struct RoomSession {
 /// Path of the session-id file for `role` under `project_root`.
 pub(super) fn session_id_path(project_root: &Path, role: &str) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(SESSIONS_DIR)
         .join(SESSION_IDS_SUBDIR)
         .join(format!("{role}.id"))
@@ -63,7 +63,7 @@ pub(super) fn session_id_path(project_root: &Path, role: &str) -> PathBuf {
 
 fn room_sessions_dir(project_root: &Path) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(SESSIONS_DIR)
         .join(ROOM_SESSIONS_SUBDIR)
 }
@@ -74,7 +74,7 @@ fn room_session_path(project_root: &Path, id: &str) -> PathBuf {
 
 fn current_room_path(project_root: &Path) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(SESSIONS_DIR)
         .join(CURRENT_ROOM_FILE)
 }
@@ -108,7 +108,7 @@ pub(super) fn read_session_id(project_root: &Path, role: &str) -> io::Result<Opt
 }
 
 /// Write `session_id` as the latest session for `role`. Overwrites
-/// any previous value. Creates the parent `.coderoom/sessions/`
+/// any previous value. Creates the parent `.coreroom/sessions/`
 /// directory on demand.
 pub(super) fn write_session_id(
     project_root: &Path,
@@ -124,7 +124,7 @@ pub(super) fn write_session_id(
 
 fn read_all_session_ids(project_root: &Path) -> io::Result<BTreeMap<String, String>> {
     let dir = project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(SESSIONS_DIR)
         .join(SESSION_IDS_SUBDIR);
     let mut ids = BTreeMap::new();
@@ -342,7 +342,7 @@ pub(super) fn render_session_picker(
     let _ = writeln!(
         out,
         "{}",
-        "Resume which CodeRoom session?".with(output::TEXT).bold()
+        "Resume which CoreRoom session?".with(output::TEXT).bold()
     );
     let _ = writeln!(
         out,
@@ -409,7 +409,7 @@ pub(super) fn clear_session_id(project_root: &Path, role: &str) -> io::Result<()
 #[allow(dead_code, reason = "wired by PR-7 (cr start --fresh)")]
 pub(super) fn clear_all(project_root: &Path) -> io::Result<()> {
     let dir = project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(SESSIONS_DIR)
         .join(SESSION_IDS_SUBDIR);
     match fs::remove_dir_all(&dir) {
@@ -426,7 +426,7 @@ mod tests {
 
     fn fixture() -> TempDir {
         let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(CODEROOM_DIR)).unwrap();
+        fs::create_dir_all(dir.path().join(COREROOM_DIR)).unwrap();
         dir
     }
 
@@ -662,7 +662,7 @@ mod tests {
         // The ids subdir is gone, but `sessions/` parent stays.
         assert!(!project
             .path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(SESSIONS_DIR)
             .join(SESSION_IDS_SUBDIR)
             .exists());
@@ -675,12 +675,12 @@ mod tests {
     #[test]
     fn clear_all_preserves_init_wizard_marker() {
         // The init wizard's role-suggestions-dismissed marker lives
-        // at .coderoom/sessions/role-suggestions-dismissed (sibling
+        // at .coreroom/sessions/role-suggestions-dismissed (sibling
         // of our ids/ subdir). `cr start --fresh` must not delete
         // it — otherwise the role-expansion picker would re-fire
         // on every fresh start, which the user already dismissed.
         let project = fixture();
-        let sessions_dir = project.path().join(CODEROOM_DIR).join(SESSIONS_DIR);
+        let sessions_dir = project.path().join(COREROOM_DIR).join(SESSIONS_DIR);
         fs::create_dir_all(&sessions_dir).unwrap();
         let marker = sessions_dir.join("role-suggestions-dismissed");
         fs::write(&marker, "1").unwrap();

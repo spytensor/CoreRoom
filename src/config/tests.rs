@@ -3,15 +3,15 @@ use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
 
-/// Build a minimal, valid `.coderoom/` tree with `pm` and `backend` roles.
+/// Build a minimal, valid `.coreroom/` tree with `pm` and `backend` roles.
 fn fixture(toml_body: &str) -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let coderoom_dir = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom_dir.join(ROLES_DIR)).unwrap();
-    fs::write(coderoom_dir.join(CONFIG_FILE), toml_body).unwrap();
-    fs::write(coderoom_dir.join(ROLES_DIR).join("pm.md"), "pm priors\n").unwrap();
+    let coreroom_dir = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(coreroom_dir.join(ROLES_DIR)).unwrap();
+    fs::write(coreroom_dir.join(CONFIG_FILE), toml_body).unwrap();
+    fs::write(coreroom_dir.join(ROLES_DIR).join("pm.md"), "pm priors\n").unwrap();
     fs::write(
-        coderoom_dir.join(ROLES_DIR).join("backend.md"),
+        coreroom_dir.join(ROLES_DIR).join("backend.md"),
         "backend priors\n",
     )
     .unwrap();
@@ -52,15 +52,15 @@ host_role = "pm"
 "#,
     );
     let cfg = Config::load_test(tmp.path()).unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
 
-    let pm = cfg.role_config("pm", &coderoom).unwrap();
+    let pm = cfg.role_config("pm", &coreroom).unwrap();
     assert_eq!(pm.name, "pm");
     assert_eq!(pm.engine, Engine::Cc);
     assert_eq!(pm.model.as_deref(), Some("opus"));
     assert_eq!(pm.permission_mode, PermissionMode::Ask);
 
-    let backend = cfg.role_config("backend", &coderoom).unwrap();
+    let backend = cfg.role_config("backend", &coreroom).unwrap();
     assert_eq!(backend.engine, Engine::Cc); // inherited
     assert_eq!(backend.model.as_deref(), Some("opus")); // inherited
     assert_eq!(backend.permission_mode, PermissionMode::Ask); // inherited
@@ -84,16 +84,16 @@ model = "o3"
 permission_mode = "bypass"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     // create the security priors so validation passes
     fs::write(
-        coderoom.join(ROLES_DIR).join("security.md"),
+        coreroom.join(ROLES_DIR).join("security.md"),
         "security priors\n",
     )
     .unwrap();
 
     let cfg = Config::load_test(tmp.path()).unwrap();
-    let security = cfg.role_config("security", &coderoom).unwrap();
+    let security = cfg.role_config("security", &coreroom).unwrap();
     assert_eq!(security.engine, Engine::Codex);
     assert_eq!(security.model.as_deref(), Some("o3"));
     assert_eq!(security.permission_mode, PermissionMode::Bypass);
@@ -164,15 +164,15 @@ host_role = "pm"
 engine = "codex"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     fs::write(
-        coderoom.join(ROLES_DIR).join("security.md"),
+        coreroom.join(ROLES_DIR).join("security.md"),
         "security priors\n",
     )
     .unwrap();
 
     let cfg = Config::load_test(tmp.path()).unwrap();
-    let security = cfg.role_config("security", &coderoom).unwrap();
+    let security = cfg.role_config("security", &coreroom).unwrap();
     assert_eq!(security.engine, Engine::Codex);
     assert_eq!(security.permission_mode, PermissionMode::Bypass);
 }
@@ -192,15 +192,15 @@ engine = "codex"
 permission_mode = "ask"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     fs::write(
-        coderoom.join(ROLES_DIR).join("security.md"),
+        coreroom.join(ROLES_DIR).join("security.md"),
         "security priors\n",
     )
     .unwrap();
 
     let cfg = Config::load_test(tmp.path()).unwrap();
-    let security = cfg.role_config("security", &coderoom).unwrap();
+    let security = cfg.role_config("security", &coreroom).unwrap();
     assert_eq!(security.engine, Engine::Codex);
     assert_eq!(security.permission_mode, PermissionMode::Ask);
 }
@@ -251,7 +251,7 @@ host_role = "pm"
 #[test]
 fn missing_config_file_surfaces_io_error() {
     let tmp = TempDir::new().unwrap();
-    // don't even create .coderoom/
+    // don't even create .coreroom/
     match Config::load_test(tmp.path()).expect_err("missing config should error") {
         ConfigError::Read { .. } => {}
         other => panic!("unexpected error: {other:?}"),

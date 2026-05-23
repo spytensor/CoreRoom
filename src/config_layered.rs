@@ -1,6 +1,6 @@
-//! Three-layer config loader: user (`~/.config/coderoom/config.toml`)
-//! → project (`.coderoom/config.toml`) → project-local
-//! (`.coderoom/config.local.toml`).
+//! Three-layer config loader: user (`~/.config/coreroom/config.toml`)
+//! → project (`.coreroom/config.toml`) → project-local
+//! (`.coreroom/config.local.toml`).
 //!
 //! See [`merge`] for the precedence rules. The crate-public surface is
 //! [`load`], which returns a [`crate::config::Config`] — the merged
@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::{Engine, PermissionMode};
-use crate::config::{Config, ConfigError, ConfigResult, RoleEntry, CODEROOM_DIR, CONFIG_FILE};
+use crate::config::{Config, ConfigError, ConfigResult, RoleEntry, CONFIG_FILE, COREROOM_DIR};
 
-/// File name of the project-local override file inside `.coderoom/`.
+/// File name of the project-local override file inside `.coreroom/`.
 /// Always gitignored once it exists.
 pub const CONFIG_LOCAL_FILE: &str = "config.local.toml";
 
@@ -60,18 +60,18 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub enum Layer {
     /// Built into the binary.
     Builtin,
-    /// `~/.config/coderoom/config.toml`.
+    /// `~/.config/coreroom/config.toml`.
     User,
-    /// `<project>/.coderoom/config.toml`.
+    /// `<project>/.coreroom/config.toml`.
     Project,
-    /// `<project>/.coderoom/config.local.toml`.
+    /// `<project>/.coreroom/config.local.toml`.
     Local,
 }
 
 // ---- Raw layer types ---------------------------------------------------
 
 /// User-layer config: every field optional. Lives at
-/// `$XDG_CONFIG_HOME/coderoom/config.toml`.
+/// `$XDG_CONFIG_HOME/coreroom/config.toml`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserConfig {
@@ -80,7 +80,7 @@ pub struct UserConfig {
     pub schema_version: Option<u32>,
 
     /// Deprecated pre-layered user default. Accepted for compatibility
-    /// with old `~/Library/Application Support/coderoom/config.toml`
+    /// with old `~/Library/Application Support/coreroom/config.toml`
     /// files and treated like `[defaults].engine`.
     #[serde(default, skip_serializing)]
     pub engine: Option<Engine>,
@@ -89,7 +89,7 @@ pub struct UserConfig {
     #[serde(default, skip_serializing)]
     pub permission_mode: Option<PermissionMode>,
     /// Deprecated v0.1-era budget hint. Accepted so older top-level
-    /// user config files do not prevent CodeRoom from starting.
+    /// user config files do not prevent CoreRoom from starting.
     #[serde(default, skip_serializing)]
     pub budget_per_role_usd: Option<f64>,
 
@@ -131,7 +131,7 @@ pub struct UserDefaults {
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
     /// Deprecated v0.1-era budget hint. Accepted so older user config
-    /// files do not prevent CodeRoom from starting; live spend limits
+    /// files do not prevent CoreRoom from starting; live spend limits
     /// are not enforced by the current runtime.
     #[serde(default)]
     pub budget_per_role_usd: Option<f64>,
@@ -195,7 +195,7 @@ const fn default_true() -> bool {
 }
 
 /// Project-layer raw shape. Tolerant of missing fields so older
-/// `.coderoom/config.toml` files still load. Required: `host_role`,
+/// `.coreroom/config.toml` files still load. Required: `host_role`,
 /// `[roles]` (may be empty).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,7 +204,7 @@ pub struct ProjectConfigRaw {
     #[serde(default)]
     pub schema_version: Option<u32>,
     /// Deprecated v0.1-era budget hint. Accepted so older project
-    /// `.coderoom/config.toml` files do not prevent CodeRoom from
+    /// `.coreroom/config.toml` files do not prevent CoreRoom from
     /// starting; ignored by the current runtime and omitted on writes.
     #[serde(default, skip_serializing)]
     pub budget_per_role_usd: Option<f64>,
@@ -247,7 +247,7 @@ pub struct EngineProjectEntry {
     pub api_key_env: Option<String>,
 }
 
-/// Project-local override layer at `.coderoom/config.local.toml`.
+/// Project-local override layer at `.coreroom/config.local.toml`.
 /// Always gitignored. Today carries machine-local engine path and
 /// `api_key_env` overrides.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -292,22 +292,22 @@ impl TryFrom<String> for EngineKey {
 // ---- Path resolution ---------------------------------------------------
 
 /// Path to the user-layer config file. Honors `XDG_CONFIG_HOME` on
-/// Linux/macOS, falls back to `~/.config/coderoom/config.toml`. On
-/// Windows uses `%APPDATA%\coderoom\config.toml`.
+/// Linux/macOS, falls back to `~/.config/coreroom/config.toml`. On
+/// Windows uses `%APPDATA%\coreroom\config.toml`.
 ///
 /// Returns `None` if the OS gave us no usable home / config dir
 /// (rare; happens in some docker minimal images and CI sandboxes
 /// without `$HOME` set).
 #[must_use]
 pub fn user_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("coderoom").join("config.toml"))
+    dirs::config_dir().map(|d| d.join("coreroom").join("config.toml"))
 }
 
 /// Path to the project-local override file inside the given project
 /// root.
 #[must_use]
 pub fn local_config_path(project_root: &Path) -> PathBuf {
-    project_root.join(CODEROOM_DIR).join(CONFIG_LOCAL_FILE)
+    project_root.join(COREROOM_DIR).join(CONFIG_LOCAL_FILE)
 }
 
 // ---- Loading -----------------------------------------------------------
@@ -318,8 +318,8 @@ pub fn local_config_path(project_root: &Path) -> PathBuf {
 /// user layer entirely. Tests pass an explicit path here to keep
 /// loading hermetic.
 pub fn load(project_root: &Path, user_path: Option<&Path>) -> ConfigResult<Config> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let project_path = coderoom_dir.join(CONFIG_FILE);
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let project_path = coreroom_dir.join(CONFIG_FILE);
     let local_path = local_config_path(project_root);
 
     let user = match user_path {
@@ -334,7 +334,7 @@ pub fn load(project_root: &Path, user_path: Option<&Path>) -> ConfigResult<Confi
     };
 
     let merged = merge(user.as_ref(), &project, local.as_ref())?;
-    merged.validate(&coderoom_dir)?;
+    merged.validate(&coreroom_dir)?;
     Ok(merged)
 }
 
@@ -383,7 +383,7 @@ fn validate_user_layer(cfg: &UserConfig, path: &Path) -> ConfigResult<()> {
             path: path.to_path_buf(),
             field: "host_role".into(),
             why: "host_role names a [roles.<name>] block in the project's \
-                  .coderoom/config.toml. declare it there instead."
+                  .coreroom/config.toml. declare it there instead."
                 .into(),
         });
     }
@@ -393,7 +393,7 @@ fn validate_user_layer(cfg: &UserConfig, path: &Path) -> ConfigResult<()> {
             path: path.to_path_buf(),
             field: format!("[roles.{}]", names.join(", ")),
             why: "the set of roles is the project's division of labour. \
-                  declare them in the repo's .coderoom/config.toml."
+                  declare them in the repo's .coreroom/config.toml."
                 .into(),
         });
     }
@@ -407,8 +407,8 @@ fn validate_project_layer(cfg: &ProjectConfigRaw, path: &Path) -> ConfigResult<(
                 path: path.to_path_buf(),
                 field: format!("engines.{}.bin", key.0.as_str()),
                 why: "binary paths are machine-specific. put them in the user \
-                      config (~/.config/coderoom/config.toml) or in this \
-                      project's .coderoom/config.local.toml (gitignored)."
+                      config (~/.config/coreroom/config.toml) or in this \
+                      project's .coreroom/config.local.toml (gitignored)."
                     .into(),
             });
         }
@@ -417,7 +417,7 @@ fn validate_project_layer(cfg: &ProjectConfigRaw, path: &Path) -> ConfigResult<(
                 path: path.to_path_buf(),
                 field: format!("engines.{}.api_key_env", key.0.as_str()),
                 why: "auth-token references must not be committed. put them \
-                      in the user config or .coderoom/config.local.toml."
+                      in the user config or .coreroom/config.local.toml."
                     .into(),
             });
         }

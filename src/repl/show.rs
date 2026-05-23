@@ -3,14 +3,14 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::bus::MessageBus;
-use crate::config::{Config, CODEROOM_DIR};
+use crate::config::{Config, COREROOM_DIR};
 use crate::crep::CrepEvent;
 use crate::output;
 use crate::work;
 
 use super::render::render_event;
 
-/// Filters applied by `cr show` while replaying `.coderoom/messages.jsonl`.
+/// Filters applied by `cr show` while replaying `.coreroom/messages.jsonl`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShowOptions {
     /// Role name to render. Stored without a leading `@`.
@@ -24,11 +24,11 @@ pub struct ShowOptions {
     pub tail: Option<usize>,
 }
 
-/// Replay events in `.coderoom/messages.jsonl` through the same renderer
+/// Replay events in `.coreroom/messages.jsonl` through the same renderer
 /// the live REPL uses. Used by `cr show`.
 pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let log_path = coderoom_dir.join("messages.jsonl");
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let log_path = coreroom_dir.join("messages.jsonl");
     if !log_path.is_file() {
         println!("(no messages — has `cr start` ever run in this project?)");
         return Ok(());

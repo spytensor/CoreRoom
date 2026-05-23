@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 
-/// File inside `.coderoom/` that stores the project source registry.
+/// File inside `.coreroom/` that stores the project source registry.
 pub const SOURCE_REGISTRY_FILE: &str = "source-registry.toml";
 
 /// Current persisted Source Registry schema version.
@@ -337,7 +337,7 @@ pub struct ConfirmedSourceRegistration {
     pub confirmed_by: String,
 }
 
-/// Save a source registry to `.coderoom/source-registry.toml`.
+/// Save a source registry to `.coreroom/source-registry.toml`.
 pub fn save_source_registry(project_root: &Path, registry: &SourceRegistry) -> Result<PathBuf> {
     registry.validate(project_root)?;
     let path = source_registry_path(project_root);
@@ -363,7 +363,7 @@ pub fn load_source_registry(path: &Path, project_root: &Path) -> Result<SourceRe
 
 /// Return the canonical source registry path for a project root.
 pub fn source_registry_path(project_root: &Path) -> PathBuf {
-    project_root.join(CODEROOM_DIR).join(SOURCE_REGISTRY_FILE)
+    project_root.join(COREROOM_DIR).join(SOURCE_REGISTRY_FILE)
 }
 
 fn default_schema_version() -> u32 {

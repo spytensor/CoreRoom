@@ -3,8 +3,8 @@ use crate::config::ROLES_DIR;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
-fn write_minimal_project(coderoom: &Path, body_extra: &str) {
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+fn write_minimal_project(coreroom: &Path, body_extra: &str) {
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     let body = format!(
         r#"
 default_engine = "cc"
@@ -15,8 +15,8 @@ host_role = "host"
 {body_extra}
 "#
     );
-    std::fs::write(coderoom.join(CONFIG_FILE), body).unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    std::fs::write(coreroom.join(CONFIG_FILE), body).unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
 }
 
 fn write_user(path: &Path, body: &str) {
@@ -27,8 +27,8 @@ fn write_user(path: &Path, body: &str) {
 #[test]
 fn project_only_loads_unchanged() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
     let cfg = load(tmp.path(), None).expect("load");
     assert_eq!(cfg.default_engine, Engine::Cc);
     assert_eq!(cfg.permission_mode, PermissionMode::Ask);
@@ -46,10 +46,10 @@ fn project_permission_mode_overrides_user_default() {
 permission_mode = "auto"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 permission_mode = "bypass"
@@ -59,7 +59,7 @@ host_role = "host"
 "#,
     )
     .unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
     let cfg = load(tmp.path(), Some(&user_path)).expect("load");
     assert_eq!(cfg.permission_mode, PermissionMode::Bypass);
 }
@@ -75,11 +75,11 @@ fn user_default_engine_picked_when_project_omits_it() {
 engine = "codex"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     // Project intentionally omits default_engine.
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 host_role = "host"
 
@@ -87,7 +87,7 @@ host_role = "host"
 "#,
     )
     .unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
 
     let cfg = load(tmp.path(), Some(&user_path)).expect("load");
     assert_eq!(cfg.default_engine, Engine::Codex);
@@ -105,8 +105,8 @@ engine = "cc"
 budget_per_role_usd = 0.5
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
 
     let cfg = load(tmp.path(), Some(&user_path)).expect("legacy budget hint should load");
     assert_eq!(cfg.default_engine, Engine::Cc);
@@ -124,11 +124,11 @@ permission_mode = "auto"
 budget_per_role_usd = 0.5
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
+    let coreroom = tmp.path().join(COREROOM_DIR);
     // Project intentionally omits default_engine and permission_mode.
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 host_role = "host"
 
@@ -136,7 +136,7 @@ host_role = "host"
 "#,
     )
     .unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
 
     let cfg = load(tmp.path(), Some(&user_path)).expect("legacy top-level user defaults load");
     assert_eq!(cfg.default_engine, Engine::Codex);
@@ -146,10 +146,10 @@ host_role = "host"
 #[test]
 fn legacy_project_budget_hint_is_accepted_but_ignored() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 budget_per_role_usd = 0.50
@@ -159,7 +159,7 @@ host_role = "host"
 "#,
     )
     .unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
 
     let cfg = load(tmp.path(), None).expect("legacy project budget hint should load");
     assert_eq!(cfg.default_engine, Engine::Cc);
@@ -176,8 +176,8 @@ fn project_engine_overrides_user_engine() {
 engine = "codex"
 "#,
     );
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, ""); // project: cc
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, ""); // project: cc
     let cfg = load(tmp.path(), Some(&user_path)).expect("load");
     assert_eq!(cfg.default_engine, Engine::Cc);
 }
@@ -187,8 +187,8 @@ fn user_layer_with_roles_is_rejected() {
     let tmp = TempDir::new().unwrap();
     let user_path = tmp.path().join("user-config.toml");
     write_user(&user_path, "[roles.backend]\n");
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
     let err = load(tmp.path(), Some(&user_path)).expect_err("user roles must be rejected");
     match err {
         ConfigError::Forbidden { field, .. } => assert!(field.starts_with("[roles.")),
@@ -201,8 +201,8 @@ fn user_layer_with_host_role_is_rejected() {
     let tmp = TempDir::new().unwrap();
     let user_path = tmp.path().join("user-config.toml");
     write_user(&user_path, r#"host_role = "stolen""#);
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
     let err = load(tmp.path(), Some(&user_path)).expect_err("user host_role must be rejected");
     match err {
         ConfigError::Forbidden { field, .. } => assert_eq!(field, "host_role"),
@@ -213,11 +213,11 @@ fn user_layer_with_host_role_is_rejected() {
 #[test]
 fn project_layer_with_engine_bin_is_rejected() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "x").unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "x").unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 host_role = "host"
@@ -239,11 +239,11 @@ bin = "/opt/claude"
 #[test]
 fn project_layer_with_engine_api_key_env_is_rejected() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "x").unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "x").unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 default_engine = "cc"
 host_role = "host"
@@ -265,10 +265,10 @@ api_key_env = "ANTHROPIC_API_KEY"
 #[test]
 fn local_layer_can_carry_engine_bin() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
     std::fs::write(
-        coderoom.join(CONFIG_LOCAL_FILE),
+        coreroom.join(CONFIG_LOCAL_FILE),
         r#"
 [engines.cc]
 bin = "/opt/claude"
@@ -282,8 +282,8 @@ bin = "/opt/claude"
 #[test]
 fn missing_user_path_does_not_error() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_minimal_project(&coderoom, "");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_minimal_project(&coreroom, "");
     let nonexistent = tmp.path().join("does-not-exist.toml");
     let cfg = load(tmp.path(), Some(&nonexistent)).expect("missing user is fine");
     assert_eq!(cfg.default_engine, Engine::Cc);
@@ -292,12 +292,12 @@ fn missing_user_path_does_not_error() {
 #[test]
 fn missing_default_engine_in_all_layers_errors() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "x").unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "x").unwrap();
     // No default_engine anywhere.
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 host_role = "host"
 
@@ -341,11 +341,11 @@ fn merged_always_include_unions_layers_then_filters_never() {
 #[test]
 fn schema_version_is_accepted_but_not_required() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    std::fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    std::fs::write(coderoom.join(ROLES_DIR).join("host.md"), "x").unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    std::fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
+    std::fs::write(coreroom.join(ROLES_DIR).join("host.md"), "x").unwrap();
     std::fs::write(
-        coderoom.join(CONFIG_FILE),
+        coreroom.join(CONFIG_FILE),
         r#"
 schema_version = 1
 default_engine = "cc"

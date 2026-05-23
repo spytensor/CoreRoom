@@ -190,7 +190,7 @@ pub struct RoleConfig {
     /// overrides are available.
     pub permission_policy_path: Option<PathBuf>,
     /// Optional Unix-domain-socket path the adapter should expose to
-    /// hook subprocesses via `CODEROOM_PERMISSION_SOCKET`. Set when the
+    /// hook subprocesses via `COREROOM_PERMISSION_SOCKET`. Set when the
     /// REPL has a live permission bridge listening; `None` for headless
     /// `cr show` / smoke tests where no user is available to prompt.
     pub permission_socket_path: Option<PathBuf>,
@@ -201,7 +201,7 @@ pub struct RoleConfig {
     /// `None` starts a fresh session.
     ///
     /// Per amendment A-006, the REPL populates this from
-    /// `.coderoom/sessions/ids/<role>.id` so `cr start` behaves like
+    /// `.coreroom/sessions/ids/<role>.id` so `cr start` behaves like
     /// `claude --continue` / `codex --resume` — the user does not lose
     /// their working context between invocations.
     pub resume_session_id: Option<String>,

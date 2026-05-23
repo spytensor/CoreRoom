@@ -5,13 +5,13 @@ use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
 
-use coderoom::config::CODEROOM_DIR;
+use coreroom::config::COREROOM_DIR;
 
 fn write_fixture_config(project: &Path) {
-    let coderoom = project.join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join("roles")).expect("roles dir");
+    let coreroom = project.join(COREROOM_DIR);
+    fs::create_dir_all(coreroom.join("roles")).expect("roles dir");
     fs::write(
-        coderoom.join("config.toml"),
+        coreroom.join("config.toml"),
         r#"
 default_engine = "cc"
 default_model = "claude-sonnet-4"
@@ -38,7 +38,7 @@ authority = ["secrets"]
     .expect("config");
     for role in ["pm", "sre", "release", "security"] {
         fs::write(
-            coderoom.join("roles").join(format!("{role}.md")),
+            coreroom.join("roles").join(format!("{role}.md")),
             "priors\n",
         )
         .expect("priors");
@@ -47,7 +47,7 @@ authority = ["secrets"]
 
 fn write_plan(project: &Path, thread: &str, scopes: &str) {
     let path = project
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join("gates")
         .join(thread)
         .join("plan.md");
@@ -131,14 +131,14 @@ fn plan_signoff_happy_path_requires_all_matching_authority_roles() {
 
     assert!(tmp
         .path()
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join("gates")
         .join("42")
         .join("reviews")
         .join("sre.toml")
         .is_file());
     let log =
-        fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("messages.jsonl")).expect("log");
+        fs::read_to_string(tmp.path().join(COREROOM_DIR).join("messages.jsonl")).expect("log");
     assert!(log.contains(r#""type":"plan_reviewed""#));
 }
 
@@ -218,6 +218,6 @@ fn plan_signoff_reject_then_override_path() {
         .stdout(predicate::str::contains("advanced 43: review -> signoff"));
 
     let log =
-        fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("messages.jsonl")).expect("log");
+        fs::read_to_string(tmp.path().join(COREROOM_DIR).join("messages.jsonl")).expect("log");
     assert!(log.contains(r#""type":"plan_overridden""#));
 }

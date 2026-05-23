@@ -1,5 +1,5 @@
 //! `cr cost` — per-role spend summary derived from
-//! `.coderoom/messages.jsonl`.
+//! `.coreroom/messages.jsonl`.
 //!
 //! v0.1 sums `RoleSpoke.cost_usd` by role across the entire log
 //! (or, with `--since`, from the given date forward). Cache reads are
@@ -14,7 +14,7 @@ use anyhow::Result;
 use chrono::NaiveDate;
 
 use crate::bus::MessageBus;
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::crep::CrepEvent;
 
 /// Aggregate stats for a single role.
@@ -43,7 +43,7 @@ pub async fn aggregate(
     project_root: &Path,
     since: Option<NaiveDate>,
 ) -> Result<BTreeMap<String, RoleStats>> {
-    let log_path = project_root.join(CODEROOM_DIR).join("messages.jsonl");
+    let log_path = project_root.join(COREROOM_DIR).join("messages.jsonl");
     if !log_path.is_file() {
         return Ok(BTreeMap::new());
     }
@@ -151,9 +151,9 @@ mod tests {
     use tempfile::TempDir;
 
     fn write_log(tmp: &TempDir, events: &[CrepEvent]) -> std::path::PathBuf {
-        let coderoom = tmp.path().join(CODEROOM_DIR);
-        std::fs::create_dir_all(&coderoom).unwrap();
-        let log = coderoom.join("messages.jsonl");
+        let coreroom = tmp.path().join(COREROOM_DIR);
+        std::fs::create_dir_all(&coreroom).unwrap();
+        let log = coreroom.join("messages.jsonl");
         let mut body = String::new();
         for e in events {
             body.push_str(&serde_json::to_string(e).unwrap());

@@ -13,13 +13,13 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::Engine;
-use crate::config::{AuthorityScope, Config, CODEROOM_DIR};
+use crate::config::{AuthorityScope, Config, COREROOM_DIR};
 use crate::manifest::sha256_file;
 
-/// Subdirectory inside `.coderoom/` that stores per-thread gate ledgers.
+/// Subdirectory inside `.coreroom/` that stores per-thread gate ledgers.
 pub const GATES_DIR: &str = "gates";
 
-/// Subdirectory inside `.coderoom/` that stores reusable SDLC gate templates.
+/// Subdirectory inside `.coreroom/` that stores reusable SDLC gate templates.
 pub const GATE_TEMPLATES_DIR: &str = "gate-templates";
 
 const ACTIVE_GATE_FILE: &str = "active";
@@ -36,7 +36,7 @@ const SIGNOFF_GATE_TEMPLATE: &str = include_str!("gate_templates/signoff-gate.md
 /// Built-in SDLC gate template asset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GateTemplate {
-    /// File name written under `.coderoom/gate-templates/`.
+    /// File name written under `.coreroom/gate-templates/`.
     pub filename: &'static str,
     /// Template body.
     pub content: &'static str,
@@ -286,16 +286,16 @@ impl GateArtifactKind {
 /// Actor metadata for implementers and reviewers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateActor {
-    /// CodeRoom role name.
+    /// CoreRoom role name.
     pub role: String,
     /// Engine used by that role.
     pub engine: Engine,
     /// Engine model identifier.
     pub model: String,
-    /// CodeRoom turn id, when known.
+    /// CoreRoom turn id, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-    /// CodeRoom thread id, when known.
+    /// CoreRoom thread id, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
 }
@@ -310,7 +310,7 @@ pub struct GateArtifact {
     /// Producing role, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// CodeRoom turn id, when known.
+    /// CoreRoom turn id, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     /// Creation timestamp.
@@ -464,12 +464,12 @@ pub struct GateHistoryEntry {
     pub detail: String,
 }
 
-/// Persistent SDLC gate ledger stored under `.coderoom/gates/`.
+/// Persistent SDLC gate ledger stored under `.coreroom/gates/`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateLedger {
     /// Schema version.
     pub schema_version: u32,
-    /// CodeRoom thread id or user-provided work id.
+    /// CoreRoom thread id or user-provided work id.
     pub thread_id: String,
     /// Work item title.
     pub feature: String,
@@ -741,9 +741,9 @@ pub struct TemplateInstallOutcome {
     pub skipped: usize,
 }
 
-/// Install default SDLC gate templates under `.coderoom/gate-templates/`.
-pub fn install_templates(coderoom_dir: &Path, overwrite: bool) -> Result<TemplateInstallOutcome> {
-    let dir = coderoom_dir.join(GATE_TEMPLATES_DIR);
+/// Install default SDLC gate templates under `.coreroom/gate-templates/`.
+pub fn install_templates(coreroom_dir: &Path, overwrite: bool) -> Result<TemplateInstallOutcome> {
+    let dir = coreroom_dir.join(GATE_TEMPLATES_DIR);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let mut written = 0usize;
     let mut skipped = 0usize;
@@ -768,8 +768,8 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
     if input.feature.trim().is_empty() {
         bail!("feature cannot be empty");
     }
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
     let now = now_string();
     let mut ledger = GateLedger {
         schema_version: LEDGER_SCHEMA_VERSION,
@@ -798,7 +798,7 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
             ledger.feature
         ),
     );
-    save_ledger(&coderoom_dir, &ledger)?;
+    save_ledger(&coreroom_dir, &ledger)?;
     ensure_phase_artifact(
         project_root,
         &ledger,
@@ -807,15 +807,15 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
         "init",
         None,
     )?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(ledger)
 }
 
 /// Load a selected ledger, defaulting to the active gate.
 pub fn load(project_root: &Path, thread_id: Option<&str>) -> Result<GateLedger> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let thread_id = selected_thread_id(&coderoom_dir, thread_id)?;
-    load_ledger(&coderoom_dir, &thread_id)
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let thread_id = selected_thread_id(&coreroom_dir, thread_id)?;
+    load_ledger(&coreroom_dir, &thread_id)
 }
 
 /// Record implementer metadata on an existing ledger.
@@ -941,15 +941,15 @@ pub fn record_role_review(
         bail!("{} reviews require --reason", decision.label());
     }
 
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
-    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
+    let mut ledger = load_ledger(&coreroom_dir, thread_id)?;
     let plan = current_plan_artifact(project_root, &ledger)?;
     let config = load_authority_config(project_root)?;
     let entry = config
         .roles
         .get(&role)
-        .with_context(|| format!("@{role} is not declared in .coderoom/config.toml"))?;
+        .with_context(|| format!("@{role} is not declared in .coreroom/config.toml"))?;
     let scopes = intersect_scopes(&entry.authority, &plan.scopes);
     if scopes.is_empty() {
         bail!(
@@ -958,7 +958,7 @@ pub fn record_role_review(
         );
     }
     let role_config = config
-        .role_config(&role, &coderoom_dir)
+        .role_config(&role, &coreroom_dir)
         .with_context(|| format!("@{role} has no resolved role config"))?;
     let model = role_config
         .model
@@ -1001,8 +1001,8 @@ pub fn record_role_review(
             short_sha(&record.plan_sha)
         ),
     );
-    save_ledger(&coderoom_dir, &ledger)?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    save_ledger(&coreroom_dir, &ledger)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(record)
 }
 
@@ -1027,9 +1027,9 @@ pub fn record_plan_override(
         bail!("override reason cannot be empty");
     }
 
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
-    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
+    let mut ledger = load_ledger(&coreroom_dir, thread_id)?;
     let status = plan_review_status(project_root, &ledger)?;
     let Some(reviewer) = status
         .required
@@ -1069,8 +1069,8 @@ pub fn record_plan_override(
             short_sha(&override_record.plan_sha)
         ),
     );
-    save_ledger(&coderoom_dir, &ledger)?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    save_ledger(&coreroom_dir, &ledger)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(override_record)
 }
 
@@ -1084,9 +1084,9 @@ pub fn advance_phase(project_root: &Path, input: &PhaseAdvanceInput) -> Result<P
     if actor.is_empty() {
         bail!("phase actor cannot be empty");
     }
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
-    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
+    let mut ledger = load_ledger(&coreroom_dir, thread_id)?;
     let from = ledger.phase;
     let to = input.to;
     if from == to {
@@ -1148,8 +1148,8 @@ pub fn advance_phase(project_root: &Path, input: &PhaseAdvanceInput) -> Result<P
         actor,
         transition.rollback_reason.as_deref(),
     )?;
-    save_ledger(&coderoom_dir, &ledger)?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    save_ledger(&coreroom_dir, &ledger)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(transition)
 }
 
@@ -1168,9 +1168,9 @@ pub fn record_phase_block(
     if role.is_empty() {
         bail!("phase block role cannot be empty");
     }
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
-    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
+    let mut ledger = load_ledger(&coreroom_dir, thread_id)?;
     let block = GatePhaseBlock {
         phase: ledger.phase,
         role: role.to_owned(),
@@ -1183,8 +1183,8 @@ pub fn record_phase_block(
         "phase_blocked",
         format!("{} blocked by @{role}: {reason}", ledger.phase.label()),
     );
-    save_ledger(&coderoom_dir, &ledger)?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    save_ledger(&coreroom_dir, &ledger)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(block)
 }
 
@@ -1409,9 +1409,9 @@ pub fn runtime_prompt_context(
     turn_id: &str,
     thread_id: &str,
 ) -> String {
-    let template_hint = ".coderoom/gate-templates/";
+    let template_hint = ".coreroom/gate-templates/";
     let mut out = String::new();
-    let _ = writeln!(out, "\n\n---\n\nCodeRoom runtime context:");
+    let _ = writeln!(out, "\n\n---\n\nCoreRoom runtime context:");
     let _ = writeln!(out, "- turn_id: {turn_id}");
     let _ = writeln!(out, "- thread_id: {thread_id}");
     if role == host_role {
@@ -1421,7 +1421,7 @@ pub fn runtime_prompt_context(
         );
         let _ = writeln!(
             out,
-            "- Tier 0/read-only work reports inline; do not write `.coderoom/` gate or review evidence unless the user explicitly asks for a ledger."
+            "- Tier 0/read-only work reports inline; do not write `.coreroom/` gate or review evidence unless the user explicitly asks for a ledger."
         );
         let _ = writeln!(
             out,
@@ -1438,7 +1438,7 @@ pub fn runtime_prompt_context(
         );
         let _ = writeln!(
             out,
-            "- For Tier 0/read-only review, cite evidence inline and do not write `.coderoom/` review artifacts."
+            "- For Tier 0/read-only review, cite evidence inline and do not write `.coreroom/` review artifacts."
         );
     }
     out
@@ -2188,7 +2188,7 @@ fn role_review_path(project_root: &Path, thread_id: &str, role: &str) -> PathBuf
 
 fn role_reviews_dir(project_root: &Path, thread_id: &str) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(GATES_DIR)
         .join(sanitize_thread_id(thread_id))
         .join("reviews")
@@ -2200,7 +2200,7 @@ fn plan_override_path(project_root: &Path, thread_id: &str, role: &str) -> PathB
 
 fn plan_overrides_dir(project_root: &Path, thread_id: &str) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(GATES_DIR)
         .join(sanitize_thread_id(thread_id))
         .join("overrides")
@@ -2254,42 +2254,42 @@ fn update_ledger(
     thread_id: &str,
     update: impl FnOnce(&mut GateLedger),
 ) -> Result<GateLedger> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    ensure_gate_dirs(&coderoom_dir)?;
-    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    ensure_gate_dirs(&coreroom_dir)?;
+    let mut ledger = load_ledger(&coreroom_dir, thread_id)?;
     update(&mut ledger);
-    save_ledger(&coderoom_dir, &ledger)?;
-    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    save_ledger(&coreroom_dir, &ledger)?;
+    write_active_thread(&coreroom_dir, &ledger.thread_id)?;
     Ok(ledger)
 }
 
-fn ensure_gate_dirs(coderoom_dir: &Path) -> Result<()> {
-    let gates_dir = coderoom_dir.join(GATES_DIR);
+fn ensure_gate_dirs(coreroom_dir: &Path) -> Result<()> {
+    let gates_dir = coreroom_dir.join(GATES_DIR);
     std::fs::create_dir_all(&gates_dir)
         .with_context(|| format!("creating {}", gates_dir.display()))?;
     Ok(())
 }
 
-fn load_ledger(coderoom_dir: &Path, thread_id: &str) -> Result<GateLedger> {
-    let path = ledger_path(coderoom_dir, thread_id);
+fn load_ledger(coreroom_dir: &Path, thread_id: &str) -> Result<GateLedger> {
+    let path = ledger_path(coreroom_dir, thread_id);
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("reading gate ledger {}", path.display()))?;
     serde_json::from_str(&content).with_context(|| format!("parsing {}", path.display()))
 }
 
-fn save_ledger(coderoom_dir: &Path, ledger: &GateLedger) -> Result<()> {
-    ensure_gate_dirs(coderoom_dir)?;
-    let path = ledger_path(coderoom_dir, &ledger.thread_id);
+fn save_ledger(coreroom_dir: &Path, ledger: &GateLedger) -> Result<()> {
+    ensure_gate_dirs(coreroom_dir)?;
+    let path = ledger_path(coreroom_dir, &ledger.thread_id);
     let content = serde_json::to_string_pretty(ledger)?;
     std::fs::write(&path, ensure_trailing_newline(&content))
         .with_context(|| format!("writing {}", path.display()))
 }
 
-fn selected_thread_id(coderoom_dir: &Path, explicit: Option<&str>) -> Result<String> {
+fn selected_thread_id(coreroom_dir: &Path, explicit: Option<&str>) -> Result<String> {
     if let Some(thread_id) = explicit.map(str::trim).filter(|id| !id.is_empty()) {
         return Ok(thread_id.to_owned());
     }
-    let active_path = coderoom_dir.join(GATES_DIR).join(ACTIVE_GATE_FILE);
+    let active_path = coreroom_dir.join(GATES_DIR).join(ACTIVE_GATE_FILE);
     let content = std::fs::read_to_string(&active_path)
         .with_context(|| format!("reading active gate pointer {}", active_path.display()))?;
     let thread_id = content.trim();
@@ -2299,18 +2299,18 @@ fn selected_thread_id(coderoom_dir: &Path, explicit: Option<&str>) -> Result<Str
     Ok(thread_id.to_owned())
 }
 
-fn write_active_thread(coderoom_dir: &Path, thread_id: &str) -> Result<()> {
-    ensure_gate_dirs(coderoom_dir)?;
-    let active_path = coderoom_dir.join(GATES_DIR).join(ACTIVE_GATE_FILE);
+fn write_active_thread(coreroom_dir: &Path, thread_id: &str) -> Result<()> {
+    ensure_gate_dirs(coreroom_dir)?;
+    let active_path = coreroom_dir.join(GATES_DIR).join(ACTIVE_GATE_FILE);
     std::fs::write(&active_path, format!("{thread_id}\n"))
         .with_context(|| format!("writing {}", active_path.display()))
 }
 
-/// Return `.coderoom/gates/<thread>/<phase>.md` for a phase artifact.
+/// Return `.coreroom/gates/<thread>/<phase>.md` for a phase artifact.
 #[must_use]
 pub fn phase_artifact_path(project_root: &Path, thread_id: &str, phase: GatePhase) -> PathBuf {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(GATES_DIR)
         .join(sanitize_thread_id(thread_id))
         .join(format!("{}.md", phase.label()))
@@ -2355,8 +2355,8 @@ fn ensure_phase_artifact(
     Ok(path)
 }
 
-fn ledger_path(coderoom_dir: &Path, thread_id: &str) -> PathBuf {
-    coderoom_dir
+fn ledger_path(coreroom_dir: &Path, thread_id: &str) -> PathBuf {
+    coreroom_dir
         .join(GATES_DIR)
         .join(format!("{}.json", sanitize_thread_id(thread_id)))
 }
@@ -2428,12 +2428,12 @@ mod tests {
     }
 
     fn write_gate_config(root: &Path, body: &str, roles: &[&str]) {
-        let coderoom = root.join(CODEROOM_DIR);
-        std::fs::create_dir_all(coderoom.join("roles")).unwrap();
-        std::fs::write(coderoom.join("config.toml"), body).unwrap();
+        let coreroom = root.join(COREROOM_DIR);
+        std::fs::create_dir_all(coreroom.join("roles")).unwrap();
+        std::fs::write(coreroom.join("config.toml"), body).unwrap();
         for role in roles {
             std::fs::write(
-                coderoom.join("roles").join(format!("{role}.md")),
+                coreroom.join("roles").join(format!("{role}.md")),
                 "priors\n",
             )
             .unwrap();
@@ -2616,7 +2616,7 @@ authority = ["infra"]
     #[test]
     fn tier1_missing_evidence_is_incomplete() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        std::fs::create_dir_all(tmp.path().join(COREROOM_DIR)).unwrap();
         init(
             tmp.path(),
             GateInit {
@@ -2890,7 +2890,7 @@ authority = ["infra"]
     #[test]
     fn tier0_rejects_hidden_review_evidence_writes() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        std::fs::create_dir_all(tmp.path().join(COREROOM_DIR)).unwrap();
         init(
             tmp.path(),
             GateInit {
@@ -2930,7 +2930,7 @@ authority = ["infra"]
     #[test]
     fn tier0_rejects_artifact_and_verification_writes() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        std::fs::create_dir_all(tmp.path().join(COREROOM_DIR)).unwrap();
         init(
             tmp.path(),
             GateInit {
@@ -3081,7 +3081,7 @@ host_role = "host"
     #[test]
     fn close_requires_bypass_reason_when_incomplete() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(CODEROOM_DIR)).unwrap();
+        std::fs::create_dir_all(tmp.path().join(COREROOM_DIR)).unwrap();
         init(
             tmp.path(),
             GateInit {

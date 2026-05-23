@@ -3,7 +3,7 @@ id = "CTX-WO-0212"
 workOrder = "WO-0212"
 
 [[entries]]
-sourceId = "coderoom-architecture"
+sourceId = "coreroom-architecture"
 path = "docs/architecture.md"
 reason = "Engineer needs the architecture boundary for host-led project control."
 targetRoles = ["engineer"]

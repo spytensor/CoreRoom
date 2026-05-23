@@ -1,6 +1,6 @@
-# Contributing to CodeRoom
+# Contributing to CoreRoom
 
-Thank you for your interest. CodeRoom's design is opinionated and the
+Thank you for your interest. CoreRoom's design is opinionated and the
 architecture is locked at v0.1 (see [`docs/architecture.md`](docs/architecture.md)).
 This document covers how to land a change without surprises.
 

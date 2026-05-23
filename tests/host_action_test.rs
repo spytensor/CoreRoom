@@ -1,6 +1,6 @@
 //! Host action layer fixtures.
 
-use coderoom::host_action::{
+use coreroom::host_action::{
     evaluate_host_action, ActionConfirmationRule, ActionConfirmationStatus, ActionOutcome,
     HostActionRequest,
 };

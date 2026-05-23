@@ -27,7 +27,7 @@ Categories:
 - `insufficient-context`: missing facts prevent safe classification; ask a
   narrow question or request the missing source.
 
-Tier 0 stays inline. Do not write `.coderoom/` gate or review artifacts for
+Tier 0 stays inline. Do not write `.coreroom/` gate or review artifacts for
 Tier 0 unless the user explicitly asks for a ledger. Persistent WorkOrder,
 constitution, and release/audit paths need explicit confirmation before
 state changes.

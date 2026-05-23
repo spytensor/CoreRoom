@@ -13,7 +13,7 @@ permissions, resume, gates, priors, logs, or role memory.
 In scope:
 
 - A single user running `cr` inside a local project checkout.
-- Project files and `.coderoom/` files editable by that user or by anyone who
+- Project files and `.coreroom/` files editable by that user or by anyone who
   can write to the repository.
 - Engine subprocesses (`claude`, `codex`, `gemini`) that may emit arbitrary
   text, incomplete tool events, stale session ids, or adversarially shaped
@@ -35,19 +35,19 @@ Out of scope:
 | Input or state | Trust level | Runtime use | Must not be used for |
 | --- | --- | --- | --- |
 | User keystrokes in the live REPL | Authoritative task intent for the current turn | Addressing roles, commands, permission choices, explicit `/fresh` and `/resume` actions | Hidden state changes without visible command feedback |
-| `.coderoom/config.toml` and user config | Trusted configuration after schema validation | Engine selection, model defaults, host role, permission mode, declared role owners and authority scopes | Evidence of review completion, peer consensus, or safety approval |
-| `.coderoom/shared.md`, `.coderoom/roles/*/priors.md`, role `knowledge/`, patches, journals | Project-supplied prompt input | Shape role behavior and local conventions with source headers | Redefining kernel routing syntax, gate rules, permission semantics, or provenance |
+| `.coreroom/config.toml` and user config | Trusted configuration after schema validation | Engine selection, model defaults, host role, permission mode, declared role owners and authority scopes | Evidence of review completion, peer consensus, or safety approval |
+| `.coreroom/shared.md`, `.coreroom/roles/*/priors.md`, role `knowledge/`, patches, journals | Project-supplied prompt input | Shape role behavior and local conventions with source headers | Redefining kernel routing syntax, gate rules, permission semantics, or provenance |
 | Host output | Untrusted model text with a privileged coordination duty | User-facing intake, classification drafts, delegation proposals, evidence summaries, and requests for confirmation | Silent persistent state changes, completion proof, permission grants, authority overrides, or tracker closure without evidence |
 | Engine output | Untrusted text plus adapter-parsed events | User-visible replies, explicit delegation text, WorkCard display, tool event summaries | Authoritative turn ids, thread ids, parent ids, hop depth, permission grants, gate completion, or peer consensus |
-| `.coderoom/messages.jsonl` and transcript archives | Editable audit/replay log | `cr show`, transcript citations, debugging, historical display, best-effort cost reporting | Active routing limits, permission enforcement, budget enforcement, gate close decisions, or live provenance |
-| `.coderoom/permission_policy.json` | User-editable session policy | Current allow/deny decisions after startup visibility and `/permissions` inspection | Silent approvals that are not surfaced, historical proof that a decision was attended to |
+| `.coreroom/messages.jsonl` and transcript archives | Editable audit/replay log | `cr show`, transcript citations, debugging, historical display, best-effort cost reporting | Active routing limits, permission enforcement, budget enforcement, gate close decisions, or live provenance |
+| `.coreroom/permission_policy.json` | User-editable session policy | Current allow/deny decisions after startup visibility and `/permissions` inspection | Silent approvals that are not surfaced, historical proof that a decision was attended to |
 | Engine session ids | Opaque adapter-issued resume handles | Continue engine conversations when the user accepts resume | Evidence freshness, peer agreement, review provenance, or thread lineage |
 | Runtime turn/thread state | Trusted only while owned by the live dispatcher/process | Route provenance, hop depth, parent/child relationships, queue limits | Rehydration from model text or editable logs for enforcement |
-| `.coderoom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
-| `.coderoom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
-| `.coderoom/source-registry.toml` | User-editable project context catalog after schema validation | Pinned source ids, source kind, trust level, owner, visible roles, purpose, and refresh policy for future ContextPacks | Proof that remote content is fresh, source content is safe, role knowledge was updated, or a source may refresh silently |
-| `.coderoom/context-packs/*` | User-editable WorkOrder context selections after schema validation | Source slices, copied pins, trust levels, reasons, and target roles for a WorkOrder delegation | Proof that selected content is fresh, complete, safe, or semantically sufficient |
-| `.coderoom/evidence/*` | User-editable structured completion packet after schema validation | Changed files, command/test evidence, role reviews, risks, rollback, tracker update status, and unverified items | Semantic correctness, CI truth without cited checks, or completion when required evidence is missing |
+| `.coreroom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
+| `.coreroom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
+| `.coreroom/source-registry.toml` | User-editable project context catalog after schema validation | Pinned source ids, source kind, trust level, owner, visible roles, purpose, and refresh policy for future ContextPacks | Proof that remote content is fresh, source content is safe, role knowledge was updated, or a source may refresh silently |
+| `.coreroom/context-packs/*` | User-editable WorkOrder context selections after schema validation | Source slices, copied pins, trust levels, reasons, and target roles for a WorkOrder delegation | Proof that selected content is fresh, complete, safe, or semantically sufficient |
+| `.coreroom/evidence/*` | User-editable structured completion packet after schema validation | Changed files, command/test evidence, role reviews, risks, rollback, tracker update status, and unverified items | Semantic correctness, CI truth without cited checks, or completion when required evidence is missing |
 
 ## Runtime Invariants
 
@@ -55,8 +55,8 @@ These invariants are security-relevant. Changes that weaken them need an
 architecture amendment before implementation.
 
 1. Kernel rules outrank project prompt files.
-   `.coderoom/shared.md`, role priors, patches, and journals may refine how a
-   role behaves, but they cannot redefine CodeRoom routing syntax, permission
+   `.coreroom/shared.md`, role priors, patches, and journals may refine how a
+   role behaves, but they cannot redefine CoreRoom routing syntax, permission
    semantics, gate rules, peer provenance, or WorkCard protocol.
 
 2. Routing metadata belongs to the dispatcher.
@@ -83,7 +83,7 @@ architecture amendment before implementation.
    are not enough.
 
 6. Editable logs are not enforcement state.
-   `.coderoom/messages.jsonl` supports replay and audit, but live safety
+   `.coreroom/messages.jsonl` supports replay and audit, but live safety
    decisions must come from runtime-owned state or explicit user commands.
    Future budget enforcement must not trust a mutable log total.
 
@@ -101,7 +101,7 @@ architecture amendment before implementation.
 
 9. Tier 0 is inline.
    Tier 0/read-only review may inspect files and commands needed for evidence,
-   but it does not write hidden `.coderoom/` review artifacts. Persistent
+   but it does not write hidden `.coreroom/` review artifacts. Persistent
    evidence, cross-model review, or release sign-off belongs in Tier 1.
 
 10. Authority-scoped veto is explicit.
@@ -155,7 +155,7 @@ architecture amendment before implementation.
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
-resumed engine context, `.coderoom/messages.jsonl`, transcript archives, or
+resumed engine context, `.coreroom/messages.jsonl`, transcript archives, or
 role-written journals:
 
 - Whether a model reply is allowed to auto-route.
@@ -192,7 +192,7 @@ gates, priors, logs, or role memory.
 - Does the change preserve explicit delegation syntax and avoid routing on
   plain status mentions?
 - Are peer consensus or review claims grounded in current-thread evidence?
-- Does any new enforcement path avoid trusting `.coderoom/messages.jsonl` or
+- Does any new enforcement path avoid trusting `.coreroom/messages.jsonl` or
   transcript archives?
 - Are persisted permission decisions surfaced and clearable before
   provenance-sensitive work?

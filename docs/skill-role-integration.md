@@ -1,6 +1,6 @@
 # Skill-Role Layered Integration
 
-This document describes how engine-native skills compose into CodeRoom's role
+This document describes how engine-native skills compose into CoreRoom's role
 model without violating locked decision § 1 (wrapper, not runtime) or the
 four guardrails defined in `docs/core-philosophy.md`.
 
@@ -9,7 +9,7 @@ in `docs/proposed-amendments.md`.
 
 ## Problem
 
-Today CodeRoom spawns claude / codex / gemini subprocesses without any
+Today CoreRoom spawns claude / codex / gemini subprocesses without any
 isolation of the engine's skill discovery path. Every role inherits the
 user's global skill pool (`~/.claude/skills/`) plus the project-local
 `.claude/skills/`. Role differentiation is purely at the priors layer.
@@ -31,7 +31,7 @@ implement the skill; the skill does not have a viewpoint.
 
 ## Non-goals
 
-- No CodeRoom-side skill runtime. Skill body execution stays inside the
+- No CoreRoom-side skill runtime. Skill body execution stays inside the
   engine subprocess. Locked decision § 1.
 - No cross-engine skill homogenization. If codex or gemini lack a native
   equivalent, that is surfaced as `—` (per A-002), not faked with
@@ -42,16 +42,16 @@ implement the skill; the skill does not have a viewpoint.
 ## Layered pool
 
 Skills live in a fixed three-layer directory tree, all under
-`.coderoom/skills/`, mirroring the priors layering. Role-private skills
-sit under `.coderoom/skills/roles/<role>/` rather than nested inside the
-role's `.coderoom/roles/<role>/priors.md` file. Large domain documents belong
+`.coreroom/skills/`, mirroring the priors layering. Role-private skills
+sit under `.coreroom/skills/roles/<role>/` rather than nested inside the
+role's `.coreroom/roles/<role>/priors.md` file. Large domain documents belong
 in the role `knowledge/` mount; skills remain executable/reference bundles.
 
 ```
-.coderoom/
+.coreroom/
 ├── skills/
 │   ├── kernel/                # built-in. every role sees these.
-│   │                          # CodeRoom protocol helpers
+│   │                          # CoreRoom protocol helpers
 │   │                          # (e.g. journal-write).
 │   ├── shared/                # project-wide pool. role allowlist gates
 │   │                          # which subset a given role sees.
@@ -64,12 +64,12 @@ in the role `knowledge/` mount; skills remain executable/reference bundles.
 ```
 
 Each skill directory follows the engine's native skill format (currently a
-`SKILL.md` with frontmatter for claude). CodeRoom does not invent a new
+`SKILL.md` with frontmatter for claude). CoreRoom does not invent a new
 format.
 
 ## Allowlist mechanism
 
-Each role's `.coderoom/roles/<role>/priors.md` declares which skills it
+Each role's `.coreroom/roles/<role>/priors.md` declares which skills it
 surfaces in its frontmatter:
 
 ```yaml
@@ -83,7 +83,7 @@ skills:
 
 Default behavior when a role file omits the `skills:` block:
 
-- `kernel`: all visible. Kernel skills are CodeRoom protocol helpers; they
+- `kernel`: all visible. Kernel skills are CoreRoom protocol helpers; they
   exist precisely because every role needs them.
 - `shared`: none visible. Shared skills must be explicitly opted into so a
   new role does not silently inherit project-wide capabilities.
@@ -107,7 +107,7 @@ On role spawn, the role manager:
 1. Resolves the role's allowlist against current kernel and shared
    directory contents, then walks role-private skills.
 2. Materializes a per-role skill view at
-   `$XDG_RUNTIME_DIR/coderoom/<session>/<role>/skills/` containing
+   `$XDG_RUNTIME_DIR/coreroom/<session>/<role>/skills/` containing
    symlinks to the resolved skills. On platforms where symlinks are
    unreliable, falls back to copies.
 3. Points the engine subprocess at that view using the least-invasive
@@ -123,11 +123,11 @@ Per-engine wiring (engineering plan, not locked):
   for the subprocess without touching the user's real `~/.claude/`.
 - **codex**: codex has no native skill concept comparable to claude's.
   Where codex exposes equivalent surfaces (prompts, commands, MCP
-  servers), CodeRoom translates the allowlist into codex's native
+  servers), CoreRoom translates the allowlist into codex's native
   discovery. Where codex lacks an equivalent, that capability is rendered
   `—` in the capability matrix.
 - **gemini**: gemini lacks a native skill mechanism today. Skills are
-  reported as unsupported for gemini roles. CodeRoom does not fake the
+  reported as unsupported for gemini roles. CoreRoom does not fake the
   surface with priors injection.
 
 On role stop, the materialized view is removed. On crash, `cr doctor`
@@ -135,7 +135,7 @@ reaps orphan session directories.
 
 ## Auditability
 
-Every skill invocation visible to CodeRoom (claude stream-json, codex MCP
+Every skill invocation visible to CoreRoom (claude stream-json, codex MCP
 notification where applicable) becomes a first-class CREP event:
 
 ```
@@ -157,13 +157,13 @@ cannot observe does not get faked.
 Three alternatives were considered during the design synthesis and dropped.
 Listed for paper trail.
 
-### A. CodeRoom as skill broker
+### A. CoreRoom as skill broker
 
-CodeRoom would parse `<skill name=...>` tags in role output, execute the
+CoreRoom would parse `<skill name=...>` tags in role output, execute the
 skill body itself, and feed results back to the role.
 
 Rejected. Violates locked decision § 1 (wrapper, not runtime). This would
-make CodeRoom a tool execution path independent of the engine's permission
+make CoreRoom a tool execution path independent of the engine's permission
 contract, breaking the entire permission model.
 
 ### B. Per-role full sandbox without kernel layer
@@ -178,7 +178,7 @@ kernel capability becomes optional.
 
 ### C. Soft prompt-level allowlist
 
-Skills stay in the user's real `~/.claude/skills/`. CodeRoom only injects a
+Skills stay in the user's real `~/.claude/skills/`. CoreRoom only injects a
 system prompt sentence saying "you may only call [list]".
 
 Rejected. Soft isolation. A prompt injection across roles (the exact threat
@@ -188,12 +188,12 @@ the four guardrails.
 
 ## Migration impact
 
-Existing projects without `.coderoom/skills/` continue to work: skills
+Existing projects without `.coreroom/skills/` continue to work: skills
 resolve from the engine's native default discovery path. Adding the layered
 tree is opt-in per project. `cr skill init` scaffolds the directory and
 seeds role markdowns with empty `skills:` blocks.
 
-`priors_hash` (A-008) only mixes in skill content when `.coderoom/skills/`
+`priors_hash` (A-008) only mixes in skill content when `.coreroom/skills/`
 exists. Projects without skills see no change in `priors_hash` computation.
 
 ## Verification

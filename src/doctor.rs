@@ -1,10 +1,10 @@
-//! Project health checks for CodeRoom-managed files.
+//! Project health checks for CoreRoom-managed files.
 
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::liveness::{self, DEFAULT_STALE_DAYS};
 
 /// Options for `cr doctor`.
@@ -46,11 +46,11 @@ Examples:
 ";
 
 const LEGACY_SHARED_PROTOCOL: &str = "\
-# Shared CodeRoom protocol
+# Shared CoreRoom protocol
 
-You are running inside CodeRoom, a local multi-role coordination shell. The user remains accountable for all project changes; you provide role-scoped analysis, trade-offs, patches, and verification steps.
+You are running inside CoreRoom, a local multi-role coordination shell. The user remains accountable for all project changes; you provide role-scoped analysis, trade-offs, patches, and verification steps.
 
-Roles are addressed as `@name`. If a user writes `@backend ...`, only that role receives the message. In role replies, only a physical line that starts with `@name` (or a line-start list item like `- @a @b`) is a delegation that CodeRoom may route as `From @backend: <text>`. Use plain role names, not `@name`, for attribution, status, risk tables, or summaries.
+Roles are addressed as `@name`. If a user writes `@backend ...`, only that role receives the message. In role replies, only a physical line that starts with `@name` (or a line-start list item like `- @a @b`) is a delegation that CoreRoom may route as `From @backend: <text>`. Use plain role names, not `@name`, for attribution, status, risk tables, or summaries.
 
 Bare user text goes to the current host role. The host is a normal role, not a manager with special authority. Escalate to the host when you need direction, conflicting constraints resolved, or user confirmation.
 
@@ -60,14 +60,14 @@ Your effective prompt is assembled from shared priors, your role priors, active 
 ";
 
 const LEGACY_MARKERS: &[&str] = &[
-    "# Shared CodeRoom protocol",
+    "# Shared CoreRoom protocol",
     "Roles are addressed as `@name`",
     "From @backend: <text>",
     "Use `/patch` facts as explicit user-written corrections",
     "Your effective prompt is assembled from shared priors",
 ];
 
-/// Run CodeRoom project checks and optionally apply exact safe fixes.
+/// Run CoreRoom project checks and optionally apply exact safe fixes.
 pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
     check_shared(project_root, options.fix)?;
     report_liveness(project_root, options.stale_days)?;
@@ -75,11 +75,11 @@ pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
 }
 
 fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
-    let shared = project_root.join(CODEROOM_DIR).join("shared.md");
+    let shared = project_root.join(COREROOM_DIR).join("shared.md");
     let content = match std::fs::read_to_string(&shared) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            println!("ok: no .coderoom/shared.md found");
+            println!("ok: no .coreroom/shared.md found");
             return Ok(());
         }
         Err(error) => return Err(error).with_context(|| format!("reading {}", shared.display())),
@@ -87,7 +87,7 @@ fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
 
     match classify_shared(&content) {
         SharedProtocolStatus::Clean => {
-            println!("ok: shared.md contains no legacy CodeRoom protocol block");
+            println!("ok: shared.md contains no legacy CoreRoom protocol block");
             Ok(())
         }
         SharedProtocolStatus::LegacyExact | SharedProtocolStatus::LegacyMixed => {
@@ -96,12 +96,12 @@ fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
                 std::fs::write(&shared, fixed)
                     .with_context(|| format!("writing {}", shared.display()))?;
                 println!(
-                    "fixed: removed legacy CodeRoom protocol from {}",
+                    "fixed: removed legacy CoreRoom protocol from {}",
                     shared.display()
                 );
             } else {
                 println!(
-                    "warn: {} contains the old CodeRoom protocol template",
+                    "warn: {} contains the old CoreRoom protocol template",
                     shared.display()
                 );
                 println!("hint: run `cr doctor --fix` to remove the exact legacy block");
@@ -109,7 +109,7 @@ fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
             Ok(())
         }
         SharedProtocolStatus::LegacyEdited => bail!(
-            "{} appears to contain edited CodeRoom protocol text. Review it manually; \
+            "{} appears to contain edited CoreRoom protocol text. Review it manually; \
              doctor only rewrites exact legacy templates.",
             shared.display()
         ),
@@ -118,8 +118,8 @@ fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
 
 fn report_liveness(project_root: &Path, stale_days: i64) -> Result<()> {
     let stale_days = stale_days.max(0);
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    let stale = liveness::stale_segments(&coderoom_dir, stale_days)?;
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    let stale = liveness::stale_segments(&coreroom_dir, stale_days)?;
     if stale.is_empty() {
         println!("ok: no stale priors (threshold: {stale_days} days)");
         return Ok(());
@@ -196,9 +196,9 @@ mod tests {
 
     fn shared_project(content: &str) -> TempDir {
         let tmp = TempDir::new().unwrap();
-        let coderoom = tmp.path().join(CODEROOM_DIR);
-        fs::create_dir_all(&coderoom).unwrap();
-        fs::write(coderoom.join("shared.md"), content).unwrap();
+        let coreroom = tmp.path().join(COREROOM_DIR);
+        fs::create_dir_all(&coreroom).unwrap();
+        fs::write(coreroom.join("shared.md"), content).unwrap();
         tmp
     }
 
@@ -236,9 +236,9 @@ mod tests {
             },
         )
         .unwrap();
-        let body = fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("shared.md")).unwrap();
+        let body = fs::read_to_string(tmp.path().join(COREROOM_DIR).join("shared.md")).unwrap();
         assert!(body.contains("# Team-wide priors"));
-        assert!(!body.contains("# Shared CodeRoom protocol"));
+        assert!(!body.contains("# Shared CoreRoom protocol"));
     }
 
     #[test]
@@ -256,10 +256,10 @@ mod tests {
             },
         )
         .unwrap();
-        let body = fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("shared.md")).unwrap();
+        let body = fs::read_to_string(tmp.path().join(COREROOM_DIR).join("shared.md")).unwrap();
         assert!(body.contains("# Team-wide priors"));
         assert!(body.contains("## Preserved project priors"));
         assert!(body.contains("Use sqlx."));
-        assert!(!body.contains("# Shared CodeRoom protocol"));
+        assert!(!body.contains("# Shared CoreRoom protocol"));
     }
 }

@@ -6,7 +6,7 @@ use crossterm::style::Stylize;
 use crossterm::terminal;
 
 use crate::adapter::Engine;
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use crate::detect;
 use crate::output;
 
@@ -239,7 +239,7 @@ pub(super) fn render_engine_picker(
     let _ = writeln!(
         out,
         "{}",
-        "defaults are editable later in .coderoom/config.toml".dark_grey()
+        "defaults are editable later in .coreroom/config.toml".dark_grey()
     );
     out
 }
@@ -250,7 +250,7 @@ pub(super) fn render_confirm(
     plan: &[RolePlan],
 ) -> String {
     let project_name = project_name(project_root);
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let coreroom_dir = project_root.join(COREROOM_DIR);
     let mut out = String::new();
 
     push_header(
@@ -262,7 +262,7 @@ pub(super) fn render_confirm(
 
     let _ = writeln!(out, "will create:");
     let _ = writeln!(out);
-    push_tree_preview(&mut out, &coderoom_dir, plan);
+    push_tree_preview(&mut out, &coreroom_dir, plan);
     let _ = writeln!(out);
     print_role_plan_to_buffer(&mut out, plan);
 
@@ -354,11 +354,11 @@ fn push_engine_status_compact(out: &mut String, installed: &InstalledEngines) {
     }
 }
 
-fn push_tree_preview(out: &mut String, coderoom_dir: &Path, plan: &[RolePlan]) {
-    let dirname = coderoom_dir
+fn push_tree_preview(out: &mut String, coreroom_dir: &Path, plan: &[RolePlan]) {
+    let dirname = coreroom_dir
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or(CODEROOM_DIR);
+        .unwrap_or(COREROOM_DIR);
     let _ = writeln!(out, "{dirname}/");
     let _ = writeln!(
         out,

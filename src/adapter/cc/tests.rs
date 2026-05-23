@@ -310,7 +310,7 @@ fn hook_settings_points_at_hidden_hook_command() {
     let policy_path = tmp.path().join("permission_policy.json");
     let file = claude_hook_settings(PermissionMode::Auto, Some(&policy_path)).unwrap();
     let text = std::fs::read_to_string(file.path()).unwrap();
-    assert!(text.contains("__coderoom-hook-decision"));
+    assert!(text.contains("__coreroom-hook-decision"));
     assert!(text.contains("--mode auto"));
     assert!(text.contains("--policy-file"));
 }

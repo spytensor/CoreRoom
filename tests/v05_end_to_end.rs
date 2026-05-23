@@ -5,7 +5,7 @@ use predicates::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use coderoom::config::CODEROOM_DIR;
+use coreroom::config::COREROOM_DIR;
 
 const THREAD: &str = "v05-e2e";
 
@@ -18,13 +18,13 @@ fn project_arg(project: &Path) -> &str {
 }
 
 fn gate_dir(project: &Path) -> PathBuf {
-    project.join(CODEROOM_DIR).join("gates").join(THREAD)
+    project.join(COREROOM_DIR).join("gates").join(THREAD)
 }
 
 fn write_gate_file(project: &Path, name: &str, body: &str) -> String {
     let path = gate_dir(project).join(name);
     fs::write(&path, body).expect("write gate artifact");
-    format!(".coderoom/gates/{THREAD}/{name}")
+    format!(".coreroom/gates/{THREAD}/{name}")
 }
 
 fn assert_success(args: &[&str]) {
@@ -319,7 +319,7 @@ fn assert_final_state(root: &Path, project: &str) {
         .stdout(predicate::str::contains("no stale priors"));
 
     let log =
-        fs::read_to_string(root.join(CODEROOM_DIR).join("messages.jsonl")).expect("messages log");
+        fs::read_to_string(root.join(COREROOM_DIR).join("messages.jsonl")).expect("messages log");
     assert!(log.contains(r#""type":"phase_advanced""#));
     assert!(log.contains(r#""from":"intake""#));
     assert!(log.contains(r#""to":"closed""#));

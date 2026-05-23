@@ -14,7 +14,7 @@ const https = require('https');
 const { spawnSync } = require('child_process');
 
 const VERSION = require('./package.json').version;
-const REPO = 'spytensor/codeRoom';
+const REPO = 'spytensor/CoreRoom';
 
 function detectPlatform() {
   const platform = process.platform;
@@ -108,13 +108,13 @@ function sha256(filePath) {
 async function main() {
   // Skip when running inside the source checkout's own dev tree
   // (i.e. `npm install` from inside this repo). The condition: a
-  // sibling Cargo.toml whose top-level [package] name is `coderoom`.
+  // sibling Cargo.toml whose top-level [package] name is `coreroom`.
   try {
     const cargoToml = fs.readFileSync(
       path.join(__dirname, '..', 'Cargo.toml'),
       'utf8'
     );
-    if (/^name *= *"coderoom"/m.test(cargoToml)) { // matches the cargo crate name, not this npm package
+    if (/^name *= *"coreroom"/m.test(cargoToml)) { // matches the cargo crate name, not this npm package
 
       console.log(
         'coreroom: detected source checkout — skipping binary download. ' +

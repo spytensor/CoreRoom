@@ -119,7 +119,7 @@ violate the constitution.
 ├──────────────────────────────────────────────────────────┤
 │  Message Bus                                              │
 │    central event log, append-only JSONL                   │
-│    speaks the CodeRoom Event Protocol (CREP)              │
+│    speaks the CoreRoom Event Protocol (CREP)              │
 ├──────────────────────────────────────────────────────────┤
 │  Role Manager                                             │
 │    spawn / pace / refresh / stop role processes           │
@@ -161,7 +161,7 @@ Each is a one-liner with rationale. Detailed sections follow.
 5. **Permission modes are explicit.** `permission_mode = "ask" | "auto" |
    "bypass"` is resolved per role. Claude Code uses a settings-injected
    PreToolUse hook. Codex uses MCP approval requests when a live REPL bridge
-   is available. Gemini is bypass-only until CodeRoom can supervise its
+   is available. Gemini is bypass-only until CoreRoom can supervise its
    approvals. For compatibility with older generated configs, Codex/Gemini
    roles that omit a per-role permission mode resolve to bypass; explicit
    ask/auto on Gemini still fails fast.
@@ -171,7 +171,7 @@ Each is a one-liner with rationale. Detailed sections follow.
    route.
 7. **CC-style brief routing.** Cross-role `@` does NOT forward full chat
    history. Wrapper sends a brief = the `@`-paragraph + thread sticky +
-   pointer to `.coderoom/transcripts/`. Receiving role reads more on demand.
+   pointer to `.coreroom/transcripts/`. Receiving role reads more on demand.
 8. **Equal repo R/W for all roles.** Differentiation is priors, not
    permission walls.
 9. **Host role catches un-addressed text.** The user designates one role as
@@ -200,7 +200,7 @@ Each is a one-liner with rationale. Detailed sections follow.
 15. **Default-deny on hook failure.** If the PreToolUse hook script crashes,
     the wrapper treats it as deny + alerts the user. Never silent-approve.
 
-## CodeRoom Event Protocol (CREP)
+## CoreRoom Event Protocol (CREP)
 
 The internal lingua franca. Every engine adapter translates native events to
 these. UI, message bus, and patch logic only ever see CREP.
@@ -234,7 +234,7 @@ uses only explicit delegation blocks whose line starts with `@role:`.
 `cr-phase-block: <reason>` marker. The REPL strips the marker, records
 `PhaseBlocked`, and suppresses follow-up auto-routing for that blocked turn.
 
-JSONL append-only log at `.coderoom/messages.jsonl`. The full transcript view
+JSONL append-only log at `.coreroom/messages.jsonl`. The full transcript view
 the user sees is just a render of this stream filtered to events that humans
 care about (RoleStarted, RoleSpoke, ToolCallProposed/Executed summary,
 PermissionDenied, RoleStopped).
@@ -250,11 +250,11 @@ intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed
 `rejected` is a terminal branch from `review` or `signoff`. `cr gate phase
 <thread> <next-phase>` is the explicit transition command. It rejects skipped
 forward phases and regressions; rollback requires a justification via
-`--rollback`. Each entered phase creates `.coderoom/gates/<thread>/<phase>.md`
+`--rollback`. Each entered phase creates `.coreroom/gates/<thread>/<phase>.md`
 for structured notes, evidence, decisions, or blockers.
 
 The plan review binding is narrower than general peer review. Before
-`plan -> review`, `.coderoom/gates/<thread>/plan.md` must declare
+`plan -> review`, `.coreroom/gates/<thread>/plan.md` must declare
 frontmatter `scopes`, for example `scopes: [infra, deployment]`. Before
 `review -> signoff`, every configured role whose `authority` intersects those
 scopes must have approved the current plan SHA through
@@ -292,15 +292,15 @@ partial scope coverage is a blocker.
 - Spawn: `codex mcp-server` over stdio.
 - Wrapper acts as MCP client. Initialize → tools/list → tools/call.
 - Two tools available: `codex` (start session) and `codex-reply` (continue).
-- Session ID: the first `codex` result returns a `threadId`; CodeRoom persists
+- Session ID: the first `codex` result returns a `threadId`; CoreRoom persists
   it via `RoleSessionUpdated`, then uses `codex-reply` for later turns and
   future `cr start` resumes.
 - Permission: `permission_mode="ask"` maps to Codex `approval-policy="untrusted"`,
   `auto` maps to `on-request`, and `bypass` maps to `never`. In live REPL
   sessions, server-initiated `execCommandApproval` / `applyPatchApproval`
-  requests flow through CodeRoom's permission bridge and session policy.
+  requests flow through CoreRoom's permission bridge and session policy.
   `ask` and `auto` keep Codex's `workspace-write` command sandbox; `bypass`
-  uses `danger-full-access`, matching CodeRoom's yolo semantics for other
+  uses `danger-full-access`, matching CoreRoom's yolo semantics for other
   adapters.
   Missing per-role permission modes on Codex roles still resolve to bypass
   for older generated configs.
@@ -308,12 +308,12 @@ partial scope coverage is a blocker.
 ### Gemini adapter
 
 - Spawn: `gemini -p "<prompt>" --output-format stream-json -y`.
-- Prompt isolation: CodeRoom requires a Gemini CLI that advertises
+- Prompt isolation: CoreRoom requires a Gemini CLI that advertises
   `--system-instruction-file`. The unsafe inline-priors fallback is gated
-  behind `CODEROOM_GEMINI_UNTRUSTED_PRIORS=1`.
+  behind `COREROOM_GEMINI_UNTRUSTED_PRIORS=1`.
 - Output: `message` events become `RoleSpoke`; `tool_use` and `tool_result`
   become CREP `ToolCallProposed` / `ToolCallExecuted`.
-- Permission: Gemini remains bypass-only in CodeRoom until a hook or approval
+- Permission: Gemini remains bypass-only in CoreRoom until a hook or approval
   protocol can be supervised by the wrapper. Starting a Gemini role in `ask`
   or `auto` fails fast with a configuration error.
 
@@ -335,7 +335,7 @@ trait EngineAdapter {
 ## Knowledge model
 
 ```
-.coderoom/
+.coreroom/
 ├── config.toml                    # defaults, host_role, role owner/authority
 ├── roles/
 │   └── <role>/
@@ -389,7 +389,7 @@ authority = ["deployment", "infra", "secrets"]
 A role's effective system prompt is composed at spawn time:
 
 ```
-<built-in CodeRoom kernel protocol>
+<built-in CoreRoom kernel protocol>
 <shared.md project-wide priors>
 <role priors>
 <role knowledge documents>
@@ -398,8 +398,8 @@ A role's effective system prompt is composed at spawn time:
 <journal entries from last 7 days for this role>
 ```
 
-Role priors live in `.coderoom/roles/<role>/priors.md`. Legacy
-`.coderoom/roles/<role>.md` files remain loadable with a deprecation warning
+Role priors live in `.coreroom/roles/<role>/priors.md`. Legacy
+`.coreroom/roles/<role>.md` files remain loadable with a deprecation warning
 and are migrated automatically the first time `cr role attach` mutates that
 role. Mounted knowledge files live under `knowledge/` and are copied in with:
 
@@ -416,12 +416,12 @@ the SHA no longer matches, composition fails loudly. Composed priors warn above
 100KB and hard-error above 500KB unless the caller passes
 `--allow-large-priors`.
 
-Local liveness telemetry is stored in `.coderoom/liveness/<role>.json` and
+Local liveness telemetry is stored in `.coreroom/liveness/<role>.json` and
 is gitignored by default. A role-turn compose records each loaded shared,
 role, and knowledge segment with `last_matched_at` and `hit_count`; `cr doctor`
 uses that sidecar to surface stale priors without pruning them automatically.
 
-The built-in kernel is not copied into `.coderoom/`. It owns the routing
+The built-in kernel is not copied into `.coreroom/`. It owns the routing
 syntax (`@role: <brief>` delegation lines), peer brief envelope (`<<<peer-quote ...>>>>`,
 with legacy `From @role:` accepted during migration), patch/journal authority
 rules, and WorkCard `cr-task` block. User-editable project and role priors can
@@ -440,8 +440,8 @@ when sourced only from memory, priors, journals, or previous sessions.
 The team roster explicitly marks which role is host so non-host roles can
 escalate back to the user via `@<host>` when they need direction.
 
-`~/.coderoom/roles/` holds global role templates that a `cr role add backend`
-can scaffold from. Project-level `.coderoom/roles/<role>/priors.md` extends
+`~/.coreroom/roles/` holds global role templates that a `cr role add backend`
+can scaffold from. Project-level `.coreroom/roles/<role>/priors.md` extends
 or overrides the template.
 
 ### Patches
@@ -483,7 +483,7 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 | Patch directory bloat                | Hard 50-cap per role + FIFO archive at v0.1               |
 | Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Dispatcher-owned routing state. Auto-router only acts on explicit delegation lines that start with `@role:`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). User-origin depth is 0; each auto-route child is parent depth + 1; default max hop depth is 5. Fan-out and queued-turn limits are separate; chains also end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). |
 | Permission gate fail-open            | Hook script defaults to deny on any error; wrapper supervises hook process and treats non-zero exit without decision-file as deny |
-| Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coderoom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
+| Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coreroom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
 | Token cost runaway                   | User halts with `Ctrl-C` × 2 or `/halt`; cost per turn is surfaced in the WorkCard so runaway behavior is visible |
 | Role identity drift over months      | v0.2 `cr review` diffs journal-self vs priors-self and surfaces contradictions |
 
@@ -492,7 +492,7 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 ### CLI
 
 ```
-cr init                          # initialize .coderoom/, prompt for first roles
+cr init                          # initialize .coreroom/, prompt for first roles
                                  #   and which one is the host
 cr role add <name> [--engine cc|codex|gemini] [--model <model>] [--host]
 cr role list                     # marks the host with *

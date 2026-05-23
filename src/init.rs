@@ -1,4 +1,4 @@
-//! `cr init` — bootstrap a project's `.coderoom/` directory.
+//! `cr init` — bootstrap a project's `.coreroom/` directory.
 //!
 //! Default behaviour: scan the project (filename-only, **no network**),
 //! print a transparent summary of what was found and what will be
@@ -6,9 +6,9 @@
 //!
 //! Non-interactive mode (`cr init -y`) skips the prompts and accepts
 //! every default. `cr start` calls `run(.., InitOptions::auto())` when
-//! `.coderoom/` is missing, so first-time users only need one command.
+//! `.coreroom/` is missing, so first-time users only need one command.
 //!
-//! Re-running init is idempotent: existing `.coderoom/` files are left
+//! Re-running init is idempotent: existing `.coreroom/` files are left
 //! untouched, while opt-in hook scaffolding is merged into `.claude/`.
 
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use signal_hook::iterator::{Handle as SignalHandle, Signals};
 
 use crate::adapter::Engine;
-use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
+use crate::config::{Config, CONFIG_FILE, COREROOM_DIR, ROLES_DIR};
 use crate::detect;
 use crate::lock::LOCK_FILE;
 use crate::output;
@@ -53,7 +53,7 @@ use render::{
 use write::write_all;
 
 /// The host-role name baked into the wizard. `init` runs before
-/// `.coderoom/config.toml` is committed, so the host name is fixed at
+/// `.coreroom/config.toml` is committed, so the host name is fixed at
 /// "host" until the first `Config::load` after the wizard finishes.
 const WIZARD_HOST_ROLE: &str = "host";
 
@@ -107,7 +107,7 @@ pub enum InitHookMode {
     None,
     /// Install hooks for a fresh project, or merge them into an existing one.
     InstallOrUpgrade,
-    /// Only upgrade hooks in an already-initialized CodeRoom project.
+    /// Only upgrade hooks in an already-initialized CoreRoom project.
     UpgradeExisting,
 }
 
@@ -227,10 +227,10 @@ impl InitOptions {
     }
 }
 
-/// Initialize a project's `.coderoom/` directory at `project_root`.
+/// Initialize a project's `.coreroom/` directory at `project_root`.
 pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
-    if coderoom_dir.exists() {
+    let coreroom_dir = project_root.join(COREROOM_DIR);
+    if coreroom_dir.exists() {
         if options.hook_mode.enabled() {
             let hook = hooks::install_or_upgrade(project_root)?;
             print_hook_summary(&hook);
@@ -238,7 +238,7 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
             println!(
                 "{} {}",
                 "✓ unchanged".green().bold(),
-                coderoom_dir.display().to_string().bold()
+                coreroom_dir.display().to_string().bold()
             );
         }
         return Ok(());
@@ -247,7 +247,7 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     if matches!(options.hook_mode, InitHookMode::UpgradeExisting) {
         bail!(
             "{} is missing; run `cr init --with-claude-hooks` first",
-            coderoom_dir.display()
+            coreroom_dir.display()
         );
     }
 
@@ -289,8 +289,8 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
         default_plan
     };
 
-    write_all(&coderoom_dir, &role_plan)?;
-    crate::lock::write(&coderoom_dir, crate::priors::ComposeOptions::default())?;
+    write_all(&coreroom_dir, &role_plan)?;
+    crate::lock::write(&coreroom_dir, crate::priors::ComposeOptions::default())?;
     let hook = if options.hook_mode.enabled() {
         Some(hooks::install_or_upgrade(project_root)?)
     } else {
@@ -301,20 +301,20 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     println!(
         "{} {}",
         "✓ wrote".green().bold(),
-        coderoom_dir.display().to_string().bold()
+        coreroom_dir.display().to_string().bold()
     );
     if let Some(hook) = &hook {
         print_hook_summary(hook);
     }
     println!(
         "  {}",
-        "next: cr start   ·   edit .coderoom/roles/<role>/priors.md when you want deeper priors"
+        "next: cr start   ·   edit .coreroom/roles/<role>/priors.md when you want deeper priors"
             .dim()
     );
     Ok(())
 }
 
-/// Offer to expand an older/minimal `.coderoom/` that contains only
+/// Offer to expand an older/minimal `.coreroom/` that contains only
 /// the default `@host` role. Returns `true` when config changed and
 /// the caller should reload [`Config`] before spawning roles.
 pub fn offer_role_expansion(project_root: &Path, cfg: &Config) -> Result<bool> {
@@ -373,7 +373,7 @@ pub fn offer_role_expansion(project_root: &Path, cfg: &Config) -> Result<bool> {
     );
     println!(
         "  {}",
-        "review .coderoom/roles/<role>/priors.md when you want deeper project priors".dark_grey()
+        "review .coreroom/roles/<role>/priors.md when you want deeper project priors".dark_grey()
     );
     Ok(true)
 }
@@ -384,14 +384,14 @@ fn is_default_host_only(cfg: &Config) -> bool {
 
 fn role_suggestions_dismissed(project_root: &Path) -> bool {
     project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(ROLE_SUGGESTIONS_DISMISSED)
         .exists()
 }
 
 fn mark_role_suggestions_dismissed(project_root: &Path) {
     let marker = project_root
-        .join(CODEROOM_DIR)
+        .join(COREROOM_DIR)
         .join(ROLE_SUGGESTIONS_DISMISSED);
     if let Some(parent) = marker.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -416,7 +416,7 @@ fn prompt_role_expansion(scan: &detect::ProjectScan) -> Result<ExpansionPrompt> 
         .join(", ");
 
     println!();
-    println!("{} {}", "coderoom".bold(), "· role suggestions".dark_grey());
+    println!("{} {}", "coreroom".bold(), "· role suggestions".dark_grey());
     println!(
         "  {} {}",
         "only @host is configured; local scan suggests".dark_grey(),
@@ -531,13 +531,13 @@ fn role_additions_from_plan(plan: &[RolePlan], cfg: &Config) -> Vec<RoleAddition
 
 /// What `cr init` will create on disk, in render order.
 fn planned_files(project_root: &Path, roles: &[RolePlan], with_claude_hooks: bool) -> Vec<PathBuf> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let coreroom_dir = project_root.join(COREROOM_DIR);
     let mut paths = vec![
-        coderoom_dir.join(CONFIG_FILE),
-        coderoom_dir.join(LOCK_FILE),
-        coderoom_dir.join("shared.md"),
+        coreroom_dir.join(CONFIG_FILE),
+        coreroom_dir.join(LOCK_FILE),
+        coreroom_dir.join("shared.md"),
     ];
-    let roles_dir = coderoom_dir.join(ROLES_DIR);
+    let roles_dir = coreroom_dir.join(ROLES_DIR);
     for role in roles {
         paths.push(
             roles_dir
@@ -545,14 +545,14 @@ fn planned_files(project_root: &Path, roles: &[RolePlan], with_claude_hooks: boo
                 .join(crate::manifest::ROLE_PRIORS_FILE),
         );
     }
-    let gate_templates_dir = coderoom_dir.join(crate::gate::GATE_TEMPLATES_DIR);
+    let gate_templates_dir = coreroom_dir.join(crate::gate::GATE_TEMPLATES_DIR);
     for template in crate::gate::default_templates() {
         paths.push(gate_templates_dir.join(template.filename));
     }
-    paths.push(coderoom_dir.join(".gitignore"));
+    paths.push(coreroom_dir.join(".gitignore"));
     if with_claude_hooks {
         paths.push(project_root.join(".claude").join("settings.json"));
-        paths.push(project_root.join(".claude").join(".coderoom-managed.json"));
+        paths.push(project_root.join(".claude").join(".coreroom-managed.json"));
     }
     paths
 }
@@ -591,16 +591,16 @@ fn preferred_engine(installed: &InstalledEngines) -> Engine {
 /// for a wall of text, just a heads-up that we're setting things up.
 fn print_auto_intro(role_names: &[String]) {
     let role_list = role_names.join(", @");
-    println!("{} {}", "coderoom".bold(), "· first run setup".dark_grey());
+    println!("{} {}", "coreroom".bold(), "· first run setup".dark_grey());
     println!(
         "  {} @{} {}",
-        "no .coderoom/ found; bootstrapping".dark_grey(),
+        "no .coreroom/ found; bootstrapping".dark_grey(),
         role_list,
         "(engine defaults chosen automatically)".dark_grey()
     );
     println!(
         "  {}",
-        "edit .coderoom/roles/<role>/priors.md later to give each role real priors.".dark_grey()
+        "edit .coreroom/roles/<role>/priors.md later to give each role real priors.".dark_grey()
     );
     println!();
 }
@@ -624,7 +624,7 @@ fn print_full_summary(
         "{} {} {}",
         "cr init".bold(),
         "·".dark_grey(),
-        format!("setting up coderoom in {project_name}").dark_grey()
+        format!("setting up coreroom in {project_name}").dark_grey()
     );
     println!();
 
@@ -676,7 +676,7 @@ fn print_full_summary(
             "CLAUDE.md".bold(),
             line_count
         );
-        println!("    {}", "coderoom will leave it untouched.".dark_grey());
+        println!("    {}", "coreroom will leave it untouched.".dark_grey());
         println!();
     }
 }

@@ -6,8 +6,8 @@
 //! claude can't surface because we run with `--dangerously-skip-permissions`.
 //!
 //! Instead, the cc adapter exports a Unix-domain-socket path through the
-//! `CODEROOM_PERMISSION_SOCKET` environment variable, and the hook
-//! subprocess (which is `cr __coderoom-hook-decision` re-exec'd by claude)
+//! `COREROOM_PERMISSION_SOCKET` environment variable, and the hook
+//! subprocess (which is `cr __coreroom-hook-decision` re-exec'd by claude)
 //! connects to that socket and asks the REPL to surface a real prompt.
 //!
 //! The protocol is one JSON object per line in each direction. Each TCP-
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Environment variable carrying the socket path into the hook subprocess.
-pub const BRIDGE_ENV_VAR: &str = "CODEROOM_PERMISSION_SOCKET";
+pub const BRIDGE_ENV_VAR: &str = "COREROOM_PERMISSION_SOCKET";
 
 /// Wire-format protocol version. Bumped when the JSON shape changes in
 /// a way that older clients/servers can't ignore.
@@ -51,8 +51,8 @@ const CONNECT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// subprocess.
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
-    /// `CODEROOM_PERMISSION_SOCKET` was unset — there is no live REPL.
-    #[error("no live CodeRoom REPL bridge socket")]
+    /// `COREROOM_PERMISSION_SOCKET` was unset — there is no live REPL.
+    #[error("no live CoreRoom REPL bridge socket")]
     NoSocket,
     /// Failed to connect or talk over the socket.
     #[error("permission bridge IO error: {0}")]
@@ -161,7 +161,7 @@ impl Drop for BridgeResponder {
         // Defensive: if the prompt path panicked or returned without
         // calling .respond(), default to deny.
         let _ = self.0.try_send(BridgeResponse::deny(
-            "CodeRoom prompt path closed without a decision",
+            "CoreRoom prompt path closed without a decision",
         ));
     }
 }
@@ -269,9 +269,9 @@ async fn handle_connection(
     if let Err(error) = req_tx.try_send(sink) {
         let reason = match error {
             tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                "CodeRoom permission queue is full; rejecting request"
+                "CoreRoom permission queue is full; rejecting request"
             }
-            tokio::sync::mpsc::error::TrySendError::Closed(_) => "CodeRoom REPL is shutting down",
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => "CoreRoom REPL is shutting down",
         };
         let response = BridgeResponse::deny(reason);
         let _ = write_response(&mut writer, &response).await;
@@ -284,7 +284,7 @@ async fn handle_connection(
         .await
         .ok()
         .and_then(Result::ok)
-        .unwrap_or_else(|| BridgeResponse::deny("CodeRoom prompt path produced no decision"));
+        .unwrap_or_else(|| BridgeResponse::deny("CoreRoom prompt path produced no decision"));
 
     let _ = write_response(&mut writer, &response).await;
 }
@@ -373,7 +373,7 @@ pub async fn request_decision_async(
 }
 
 /// Synchronous client used by the hook subprocess. Connects to the
-/// socket pointed at by `CODEROOM_PERMISSION_SOCKET`, sends a request,
+/// socket pointed at by `COREROOM_PERMISSION_SOCKET`, sends a request,
 /// reads one response. Returns [`BridgeError::NoSocket`] if the env var
 /// is missing.
 pub fn request_decision_blocking(
@@ -447,7 +447,7 @@ mod tests {
 
     /// Both `client_returns_no_socket_when_env_var_missing` and
     /// `end_to_end_round_trip_over_unix_socket` mutate the process-wide
-    /// `CODEROOM_PERMISSION_SOCKET`. cargo runs tests in parallel; this
+    /// `COREROOM_PERMISSION_SOCKET`. cargo runs tests in parallel; this
     /// mutex serializes them so one test's `remove_var` can't race with
     /// the other's `set_var`. Tokio's async-aware `Mutex` is held across
     /// the round-trip's `.await` calls without tripping clippy.
@@ -507,7 +507,7 @@ mod tests {
     async fn client_returns_no_socket_when_env_var_missing() {
         let _guard = ENV_TEST_LOCK.lock().await;
         // SAFETY: this test mutates a process-global env var. In Rust 2024
-        // edition this is `unsafe`; CodeRoom builds on edition 2021 today
+        // edition this is `unsafe`; CoreRoom builds on edition 2021 today
         // so the call is safe but stays here as documentation.
         std::env::remove_var(BRIDGE_ENV_VAR);
         let err = request_decision_blocking("host", "Bash", &json!({}), "test").unwrap_err();

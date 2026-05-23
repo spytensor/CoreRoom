@@ -33,7 +33,7 @@ use crate::adapter::codex::CodexAdapter;
 use crate::adapter::gemini::GeminiAdapter;
 use crate::adapter::{CompactResult, Engine, EngineAdapter, PermissionMode, UserMessage};
 use crate::bus::MessageBus;
-use crate::config::{Config, CODEROOM_DIR};
+use crate::config::{Config, COREROOM_DIR};
 use crate::crep::{CrepEvent, StopReason, TurnOutcome};
 use crate::output;
 use crate::permissions::{BridgeHandle, BridgeRequestSink, PermissionPolicy};
@@ -157,7 +157,7 @@ impl DispatcherHandle {
 struct SpawnContext<'a> {
     cfg: &'a Config,
     adapters: &'a Adapters,
-    coderoom_dir: &'a Path,
+    coreroom_dir: &'a Path,
     permission_policy_path: &'a Path,
     /// `Some` when the live REPL has a permission bridge listening on
     /// the given socket path; `None` for headless contexts where there
@@ -176,7 +176,7 @@ pub struct RunOptions {
     pub permission_mode_override: Option<PermissionMode>,
     /// Start every role with a fresh engine session instead of
     /// resuming. Set by `cr start --fresh`. When true, the REPL
-    /// wipes `.coderoom/sessions/ids/` before spawning any role
+    /// wipes `.coreroom/sessions/ids/` before spawning any role
     /// (amendment A-006).
     pub fresh: bool,
     /// Allow composed role priors above the 500KB hard limit.
@@ -186,7 +186,7 @@ pub struct RunOptions {
 /// REPL entry point. Loads config, spawns every declared role, forwards
 /// each role's events into the bus, then enters the line-mode loop.
 ///
-/// If the project doesn't have a `.coderoom/` yet, this calls
+/// If the project doesn't have a `.coreroom/` yet, this calls
 /// [`crate::init::run`] first so first-time users get a working setup
 /// with a single `cr start`. The auto-init message tells the user
 /// where to edit the host role's priors, but the REPL proceeds anyway —
@@ -291,16 +291,16 @@ fn maybe_note_resumed_role(pending: &mut BTreeSet<String>, role: &str) {
 /// REPL entry point with explicit runtime options.
 #[allow(clippy::too_many_lines)]
 pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Result<()> {
-    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let coreroom_dir = project_root.join(COREROOM_DIR);
     let interactive_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    if !coderoom_dir.exists() {
+    if !coreroom_dir.exists() {
         let opts = if interactive_tty {
             crate::init::InitOptions::manual()
         } else {
             crate::init::InitOptions::auto()
         };
-        crate::init::run(project_root, opts).context("auto-initializing .coderoom/")?;
-        if !coderoom_dir.exists() {
+        crate::init::run(project_root, opts).context("auto-initializing .coreroom/")?;
+        if !coreroom_dir.exists() {
             return Ok(());
         }
         println!();
@@ -313,13 +313,13 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
             .with_context(|| format!("reloading config in {}", project_root.display()))?;
         println!();
     }
-    warn_if_priors_lock_drift(&coderoom_dir, options.allow_large_priors);
+    warn_if_priors_lock_drift(&coreroom_dir, options.allow_large_priors);
 
-    let first_run = is_first_run(&coderoom_dir);
-    print_home(&cfg, &coderoom_dir, project_root, first_run);
+    let first_run = is_first_run(&coreroom_dir);
+    print_home(&cfg, &coreroom_dir, project_root, first_run);
     crate::update::maybe_notify_on_start();
     if first_run {
-        mark_welcomed(&coderoom_dir).await;
+        mark_welcomed(&coreroom_dir).await;
     }
 
     // `--fresh` wipes the persisted per-role session ids so every
@@ -363,12 +363,12 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
         }
     }
 
-    let log_path = coderoom_dir.join("messages.jsonl");
+    let log_path = coreroom_dir.join("messages.jsonl");
     let bus = Arc::new(MessageBus::open(&log_path).await?);
 
     let adapters = Adapters::new();
 
-    let permission_policy_path = crate::permissions::policy_path_for_coderoom(&coderoom_dir);
+    let permission_policy_path = crate::permissions::policy_path_for_coreroom(&coreroom_dir);
     ensure_permission_policy(&permission_policy_path)?;
     surface_existing_permission_policy(&permission_policy_path);
     if options.permission_mode_override == Some(PermissionMode::Bypass) {
@@ -382,7 +382,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     // If the listener can't bind we fall back to a dead channel so the
     // downstream `select!` arms compile uniformly; the env var is then
     // not exported to adapters and hooks degrade to deny.
-    let socket_path = coderoom_dir.join(".permission-ipc.sock");
+    let socket_path = coreroom_dir.join(".permission-ipc.sock");
     let (bridge_handle, bridge_rx) = match crate::permissions::bridge::start(socket_path) {
         Ok((handle, rx)) => (Some(handle), rx),
         Err(error) => {
@@ -403,7 +403,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
         let spawn_context = SpawnContext {
             cfg: &cfg,
             adapters: &adapters,
-            coderoom_dir: &coderoom_dir,
+            coreroom_dir: &coreroom_dir,
             permission_policy_path: &permission_policy_path,
             permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
             permission_mode_override: options.permission_mode_override,
@@ -520,7 +520,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 let spawn_context = SpawnContext {
                     cfg: &cfg,
                     adapters: &adapters,
-                    coderoom_dir: &coderoom_dir,
+                    coreroom_dir: &coreroom_dir,
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
@@ -534,7 +534,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 let spawn_context = SpawnContext {
                     cfg: &cfg,
                     adapters: &adapters,
-                    coderoom_dir: &coderoom_dir,
+                    coreroom_dir: &coreroom_dir,
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
@@ -548,7 +548,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                 let spawn_context = SpawnContext {
                     cfg: &cfg,
                     adapters: &adapters,
-                    coderoom_dir: &coderoom_dir,
+                    coreroom_dir: &coreroom_dir,
                     permission_policy_path: &permission_policy_path,
                     permission_socket_path: bridge_handle.as_ref().map(BridgeHandle::socket_path),
                     permission_mode_override: options.permission_mode_override,
@@ -567,7 +567,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     .collect();
             }
             Command::Transcript(role) => {
-                show_transcript(&coderoom_dir, &role, &cfg.host_role).await;
+                show_transcript(&coreroom_dir, &role, &cfg.host_role).await;
             }
             Command::Journal(role) => {
                 write_journal(
@@ -576,7 +576,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &mut renderer_rx,
                     &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
-                    &coderoom_dir,
+                    &coreroom_dir,
                     &role,
                     &cfg.host_role,
                     &last_ctrl_c,
@@ -586,7 +586,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
             Command::Halt(target) => handle_halt(&roles, target.as_deref()).await,
             Command::Compact(target) => handle_compact(&roles, &target).await,
             Command::Welcome => {
-                print_home(&cfg, &coderoom_dir, project_root, false);
+                print_home(&cfg, &coreroom_dir, project_root, false);
             }
             Command::Allow(tool) => {
                 update_permission_policy(&permission_policy_path, &tool, true);
@@ -613,7 +613,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     output::bad(format!("no such role: @{role}"));
                     continue;
                 }
-                match priors::write_patch(&coderoom_dir, &role, &text) {
+                match priors::write_patch(&coreroom_dir, &role, &text) {
                     Ok(outcome) => {
                         output::ok(format!("patched @{role} → {}", outcome.path.display()));
                         if let Some(archived) = outcome.archived {
@@ -705,9 +705,9 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     Ok(())
 }
 
-fn warn_if_priors_lock_drift(coderoom_dir: &Path, allow_large_priors: bool) {
+fn warn_if_priors_lock_drift(coreroom_dir: &Path, allow_large_priors: bool) {
     let report = crate::lock::verify(
-        coderoom_dir,
+        coreroom_dir,
         priors::ComposeOptions {
             allow_large_priors,
             ..Default::default()
@@ -768,10 +768,10 @@ fn ensure_permission_policy(path: &Path) -> Result<()> {
 }
 
 fn ensure_permission_policy_gitignored(path: &Path) -> Result<()> {
-    let Some(coderoom_dir) = path.parent() else {
+    let Some(coreroom_dir) = path.parent() else {
         return Ok(());
     };
-    let ignore_path = coderoom_dir.join(".gitignore");
+    let ignore_path = coreroom_dir.join(".gitignore");
     let existing = std::fs::read_to_string(&ignore_path).unwrap_or_default();
     if existing
         .lines()
@@ -837,22 +837,22 @@ fn clear_permission_policy(path: &Path) {
     }
 }
 
-/// Marker file inside `.coderoom/` that tracks whether the first-run
+/// Marker file inside `.coreroom/` that tracks whether the first-run
 /// home copy has been shown. Hidden (leading dot) so it never shows up
 /// in `ls`-without-`-a`.
 const WELCOMED_MARKER: &str = ".welcomed";
 
 /// Whether to label the startup home screen as a freshly-created room
 /// or a returning project.
-fn is_first_run(coderoom_dir: &Path) -> bool {
-    !coderoom_dir.join(WELCOMED_MARKER).exists()
+fn is_first_run(coreroom_dir: &Path) -> bool {
+    !coreroom_dir.join(WELCOMED_MARKER).exists()
 }
 
 /// Drop a marker so future `cr start` runs use returning-project copy.
 /// Best-effort: a write failure here just means the user sees the
 /// first-run copy twice — not worth surfacing.
-async fn mark_welcomed(coderoom_dir: &Path) {
-    let _ = tokio::fs::write(coderoom_dir.join(WELCOMED_MARKER), b"").await;
+async fn mark_welcomed(coreroom_dir: &Path) {
+    let _ = tokio::fs::write(coreroom_dir.join(WELCOMED_MARKER), b"").await;
 }
 
 /// Send `text` to `role` and drain bus events until that role finishes
@@ -895,7 +895,7 @@ async fn send_and_drain(
     // are caught here so the user doesn't burn an API turn on a
     // request that adapters can't fulfil. Only the user-typed prompt
     // is validated; auto-routed follow-up briefs are constructed by
-    // CodeRoom itself and don't carry raw image refs.
+    // CoreRoom itself and don't carry raw image refs.
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let home = dirs::home_dir();
     if let Err(error) = crate::image_paths::parse_image_refs(text, &cwd, home.as_deref()) {
@@ -1838,7 +1838,7 @@ async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str) {
 const CANCEL_SLO: Duration = Duration::from_secs(5);
 
 /// Prompt the named role to write a journal entry, capture the reply,
-/// and persist it under `.coderoom/journal/YYYY-MM-DD/<role>.md`.
+/// and persist it under `.coreroom/journal/YYYY-MM-DD/<role>.md`.
 ///
 /// v0.1: free-form, no schema validation. The prompt asks for cited
 /// learnings explicitly so the saved markdown matches the structure
@@ -1853,7 +1853,7 @@ async fn write_journal(
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role: &str,
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
@@ -1905,7 +1905,7 @@ async fn write_journal(
     };
 
     let today = chrono::Local::now().date_naive();
-    let day_dir = coderoom_dir
+    let day_dir = coreroom_dir
         .join(priors::JOURNAL_DIR)
         .join(today.format("%Y-%m-%d").to_string());
     if let Err(error) = tokio::fs::create_dir_all(&day_dir).await {
@@ -1929,9 +1929,9 @@ async fn write_journal(
 
 /// In-REPL: print the last few RoleSpoke events for `role` from the
 /// active session's message log.
-async fn show_transcript(coderoom_dir: &Path, role: &str, host_role: &str) {
+async fn show_transcript(coreroom_dir: &Path, role: &str, host_role: &str) {
     const TAIL: usize = 5;
-    let log_path = coderoom_dir.join("messages.jsonl");
+    let log_path = coreroom_dir.join("messages.jsonl");
     if !log_path.is_file() {
         println!(
             "{}",
@@ -2009,7 +2009,7 @@ async fn refresh_role(
     // priors next turn. Best-effort — a missing or unreadable file
     // is fine.
     let project_root = context
-        .coderoom_dir
+        .coreroom_dir
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     if let Err(error) = sessions::clear_session_id(&project_root, role) {
@@ -2070,7 +2070,7 @@ async fn handle_resume(
         },
     };
 
-    output::system(format!("resuming CodeRoom session {}", session.id));
+    output::system(format!("resuming CoreRoom session {}", session.id));
     shutdown_all_roles(roles, StopReason::Refreshed);
     if let Err(error) = sessions::activate_room_session(project_root, &session) {
         output::bad(format!("activating session failed: {error}"));
@@ -2104,7 +2104,7 @@ async fn handle_fresh(
     roles: &mut HashMap<String, RunningRole>,
     project_root: &Path,
 ) {
-    output::system("restarting CodeRoom with fresh role sessions");
+    output::system("restarting CoreRoom with fresh role sessions");
     shutdown_all_roles(roles, StopReason::Refreshed);
     clear_all_sessions_for_fresh_start(project_root, "/fresh");
 
@@ -2137,7 +2137,7 @@ fn print_room_sessions(project_root: &Path) {
         output::hint("no saved room sessions yet");
         return;
     }
-    println!("saved CodeRoom sessions:");
+    println!("saved CoreRoom sessions:");
     for (index, session) in sessions.iter().enumerate() {
         let role_count = session.role_sessions.len();
         let marker = if session.id == current { "*" } else { " " };
@@ -2196,7 +2196,7 @@ fn is_resumable_session_id(engine: Engine, role: &str, session_id: &str) -> bool
         return false;
     }
 
-    // Older CodeRoom builds wrote synthetic placeholders for engines
+    // Older CoreRoom builds wrote synthetic placeholders for engines
     // whose real resumable id was not known at startup. Treat those as
     // non-resumable so an upgraded build does not feed `codex-qa` or
     // `gemini-security` into the engine's native resume path.
@@ -2209,8 +2209,8 @@ fn is_resumable_session_id(engine: Engine, role: &str, session_id: &str) -> bool
 
 async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRole> {
     let cfg = context.cfg;
-    let coderoom_dir = context.coderoom_dir;
-    let compose_dir = coderoom_dir.to_path_buf();
+    let coreroom_dir = context.coreroom_dir;
+    let compose_dir = coreroom_dir.to_path_buf();
     let compose_role = name.to_owned();
     let compose_options = priors::ComposeOptions {
         allow_large_priors: context.allow_large_priors,
@@ -2227,7 +2227,7 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
         .with_context(|| format!("staging priors for role `{name}`"))?;
 
     let mut role_cfg = cfg
-        .role_config(name, coderoom_dir)
+        .role_config(name, coreroom_dir)
         .with_context(|| format!("role `{name}` is declared but has invalid config"))?;
     priors_temp.path().clone_into(&mut role_cfg.priors_path);
     role_cfg.permission_policy_path = Some(context.permission_policy_path.to_path_buf());
@@ -2235,13 +2235,13 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
     if let Some(mode) = context.permission_mode_override {
         role_cfg.permission_mode = mode;
     }
-    // Resume from the prior session if `.coderoom/sessions/ids/<role>.id`
+    // Resume from the prior session if `.coreroom/sessions/ids/<role>.id`
     // is present (amendment A-006). If the engine rejects a stale id
     // (session was cleaned up locally, project moved disks), the first
     // spawn errors; we recover by clearing the stored id and retrying
     // once with a fresh conversation — so a broken resume never blocks
     // `cr start`.
-    let project_root = coderoom_dir
+    let project_root = coreroom_dir
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     if let Ok(Some(prior)) = sessions::read_session_id(&project_root, name) {
@@ -2308,7 +2308,7 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
 /// alive for as long as the engine subprocess might re-read the file.
 fn writepriors_tempfile(role: &str, composed: &str) -> Result<NamedTempFile> {
     let mut tempfile = tempfile::Builder::new()
-        .prefix(&format!("coderoom-priors-{role}-"))
+        .prefix(&format!("coreroom-priors-{role}-"))
         .suffix(".md")
         .tempfile()
         .context("creating priors tempfile")?;
@@ -2321,7 +2321,7 @@ fn writepriors_tempfile(role: &str, composed: &str) -> Result<NamedTempFile> {
 
 /// Forward all events from a role's `rx_events` into the shared bus.
 /// Side-effect: when an event carries a resumable session id, persist it
-/// into `.coderoom/sessions/ids/<role>.id` so the next `cr start` can
+/// into `.coreroom/sessions/ids/<role>.id` so the next `cr start` can
 /// resume the conversation (amendment A-006).
 fn spawn_event_forwarder(
     role: String,

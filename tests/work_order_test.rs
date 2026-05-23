@@ -2,14 +2,14 @@
 
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::work_order::{
+use coreroom::config::COREROOM_DIR;
+use coreroom::work_order::{
     load_work_order, save_work_order, HostIntentClassification, RequiredEvidence, WorkOrder,
     WorkOrderDraft, WorkOrderStatus, WORK_ORDERS_DIR,
 };
 
 #[test]
-fn work_order_roundtrips_under_coderoom_work_orders() {
+fn work_order_roundtrips_under_coreroom_work_orders() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut draft = WorkOrderDraft::new(
         "WO-0207",
@@ -43,7 +43,7 @@ fn work_order_roundtrips_under_coderoom_work_orders() {
     assert_eq!(
         path,
         tmp.path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join(WORK_ORDERS_DIR)
             .join("WO-0207.toml")
     );

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::manifest;
 use crate::priors::PriorsLayer;
 
-/// Directory under `.coderoom/` containing per-role liveness sidecars.
+/// Directory under `.coreroom/` containing per-role liveness sidecars.
 pub const LIVENESS_DIR: &str = "liveness";
 
 /// Default stale threshold for `cr doctor`.
@@ -84,15 +84,15 @@ impl RoleLiveness {
     }
 }
 
-/// Return `.coderoom/liveness/<role>.json`.
+/// Return `.coreroom/liveness/<role>.json`.
 #[must_use]
-pub fn path_for_role(coderoom_dir: &Path, role: &str) -> PathBuf {
-    coderoom_dir.join(LIVENESS_DIR).join(format!("{role}.json"))
+pub fn path_for_role(coreroom_dir: &Path, role: &str) -> PathBuf {
+    coreroom_dir.join(LIVENESS_DIR).join(format!("{role}.json"))
 }
 
 /// Read a role's liveness sidecar. Missing files return an empty document.
-pub fn read(coderoom_dir: &Path, role: &str) -> Result<RoleLiveness> {
-    let path = path_for_role(coderoom_dir, role);
+pub fn read(coreroom_dir: &Path, role: &str) -> Result<RoleLiveness> {
+    let path = path_for_role(coreroom_dir, role);
     match std::fs::read_to_string(&path) {
         Ok(text) => {
             serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
@@ -103,8 +103,8 @@ pub fn read(coderoom_dir: &Path, role: &str) -> Result<RoleLiveness> {
 }
 
 /// Write a role's liveness sidecar.
-pub fn write(coderoom_dir: &Path, doc: &RoleLiveness) -> Result<()> {
-    let path = path_for_role(coderoom_dir, &doc.role);
+pub fn write(coreroom_dir: &Path, doc: &RoleLiveness) -> Result<()> {
+    let path = path_for_role(coreroom_dir, &doc.role);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
@@ -118,9 +118,9 @@ pub fn write(coderoom_dir: &Path, doc: &RoleLiveness) -> Result<()> {
 /// Fine-grained model citation tracking is not available yet, so this uses
 /// the deterministic fallback from A-010: every segment loaded into the role
 /// prompt counts as matched for this turn.
-pub fn record_loaded(coderoom_dir: &Path, role: &str, layers: &[PriorsLayer]) -> Result<()> {
+pub fn record_loaded(coreroom_dir: &Path, role: &str, layers: &[PriorsLayer]) -> Result<()> {
     let now = now_rfc3339();
-    let mut doc = read(coderoom_dir, role)?;
+    let mut doc = read(coreroom_dir, role)?;
     doc.version = LIVENESS_VERSION;
     role.clone_into(&mut doc.role);
 
@@ -129,7 +129,7 @@ pub fn record_loaded(coderoom_dir: &Path, role: &str, layers: &[PriorsLayer]) ->
             .segments
             .get(&layer.path)
             .map(|segment| segment.attached_at.clone())
-            .or_else(|| attached_at_from_manifest(coderoom_dir, role, layer))
+            .or_else(|| attached_at_from_manifest(coreroom_dir, role, layer))
             .unwrap_or_else(|| now.clone());
         let segment = doc
             .segments
@@ -150,12 +150,12 @@ pub fn record_loaded(coderoom_dir: &Path, role: &str, layers: &[PriorsLayer]) ->
         segment.hit_count = segment.hit_count.saturating_add(1);
     }
 
-    write(coderoom_dir, &doc)
+    write(coreroom_dir, &doc)
 }
 
 /// Return stale liveness segments across all local sidecars.
-pub fn stale_segments(coderoom_dir: &Path, stale_days: i64) -> Result<Vec<StaleSegment>> {
-    let dir = coderoom_dir.join(LIVENESS_DIR);
+pub fn stale_segments(coreroom_dir: &Path, stale_days: i64) -> Result<Vec<StaleSegment>> {
+    let dir = coreroom_dir.join(LIVENESS_DIR);
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -179,7 +179,7 @@ pub fn stale_segments(coderoom_dir: &Path, stale_days: i64) -> Result<Vec<StaleS
 /// Return the liveness segment key for a mounted knowledge document.
 #[must_use]
 pub fn knowledge_segment_path(role: &str, name: &str) -> String {
-    format!(".coderoom/roles/{role}/knowledge/{name}")
+    format!(".coreroom/roles/{role}/knowledge/{name}")
 }
 
 fn stale_segments_for_doc(doc: &RoleLiveness, cutoff: DateTime<Utc>) -> Vec<StaleSegment> {
@@ -225,7 +225,7 @@ fn recommendation_for(role: &str, segment: &SegmentLiveness) -> String {
 }
 
 fn attached_at_from_manifest(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role: &str,
     layer: &PriorsLayer,
 ) -> Option<String> {
@@ -233,7 +233,7 @@ fn attached_at_from_manifest(
         return None;
     }
     let name = layer.path.rsplit('/').next()?;
-    manifest::knowledge_inventory(coderoom_dir, role)
+    manifest::knowledge_inventory(coreroom_dir, role)
         .ok()?
         .into_iter()
         .find(|item| item.entry.name == name)

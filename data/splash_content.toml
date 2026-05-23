@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.7.0"
+items = [
+  "CoreRoom rename is complete across repo, npm, Cargo, and releases",
+  "GitHub-native WorkOrders derive status from issues, PRs, CI, and evidence",
+  "source graph and status rollup keep host-led project control grounded",
+]
+
+[[whats_new]]
 version = "0.5.0"
 items = [
   "team preset creates host/engineer/reviewer/SRE/security/QA roles",

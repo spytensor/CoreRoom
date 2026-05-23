@@ -190,7 +190,7 @@ pub enum Command {
     /// `@all <text>` — broadcast to every running role.
     Broadcast(String),
     /// `/patch <role> <text>` — save a session-time correction for the
-    /// named role. Persisted under `.coderoom/patches/<role>/`. Loaded
+    /// named role. Persisted under `.coreroom/patches/<role>/`. Loaded
     /// on the role's next `/refresh` (or next `cr start`).
     Patch {
         /// Role whose priors will be patched.
@@ -206,15 +206,15 @@ pub enum Command {
     /// composed priors (shared.md + role.md + active patches). The
     /// old subprocess is dropped; a fresh one starts.
     Refresh(String),
-    /// `/resume` lists saved CodeRoom room sessions. `/resume <id|index|latest>`
+    /// `/resume` lists saved CoreRoom room sessions. `/resume <id|index|latest>`
     /// switches the room to that saved set of per-role engine sessions.
     Resume(Option<String>),
     /// `/transcript <role>` — show the last few RoleSpoke entries for a
-    /// role from `.coderoom/messages.jsonl`.
+    /// role from `.coreroom/messages.jsonl`.
     Transcript(String),
     /// `/journal <role>` — ask the role to write a dated journal entry
     /// summarizing what it learned in this session. Persisted at
-    /// `.coderoom/journal/YYYY-MM-DD/<role>.md`; auto-loaded into the
+    /// `.coreroom/journal/YYYY-MM-DD/<role>.md`; auto-loaded into the
     /// role's priors on next spawn.
     Journal(String),
     /// `/welcome` — re-show the first-run welcome card on demand, even

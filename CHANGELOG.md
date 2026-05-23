@@ -2,20 +2,24 @@
 
 All notable changes to CoreRoom are documented here.
 
-Historical entries may refer to CodeRoom where they describe releases before
-the v0.7 staged rename.
+Historical entries use the current CoreRoom naming for consistency after the
+v0.7 release rename.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.7.0] - 2026-05-23
+
 ### Changed
 
-- Reframed public positioning toward an Engineering Control Room for
-  AI-assisted software delivery. v0.6 keeps the existing `codeRoom` repo,
-  `cr` binary, and `@spytensor/coderoom` package while documenting the product
-  direction and deferring any rename implementation to v0.7.
+- Completed the CoreRoom release rename across the GitHub repository, Cargo
+  package/lib name, npm package, release artifacts, docs, state directory,
+  environment variables, and visible product positioning while keeping `cr` as
+  the stable short command.
 - Accepted the host-led engineering control protocol: `@host` is the highest
   in-room authority for intake, delegation, gate progress, evidence, and
   tracker closure while the user remains the final owner.
@@ -51,9 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release readiness decisions, source citations, risks, and tracker blockers.
 - Accepted the v0.7 CoreRoom rename policy: active product surfaces use
   **CoreRoom**, the descriptor is **Engineering Control Room for AI Agents**,
-  `cr` remains stable, `coreroom` becomes the long-form npm alias, `.coderoom/`
-  remains supported during the migration window, and `COREROOM_*` environment
-  variables are preferred with legacy `CODEROOM_*` aliases.
+  `cr` remains stable, `coreroom` is the long-form npm alias, `.coreroom/` is
+  the project state directory, and `COREROOM_*` is the environment-variable
+  prefix.
 
 ## [0.5.0] - 2026-05-23
 
@@ -61,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Virtual-team scaffold (#184, #188).** `cr init --preset team` now creates
   a working host / engineer / reviewer / SRE / security / QA room, including
-  role ownership and scoped authority declarations in `.coderoom/config.toml`.
+  role ownership and scoped authority declarations in `.coreroom/config.toml`.
   `cr init --with-claude-hooks --preset team` also installs the Claude hook
   scaffold needed for cross-project permission handling.
 - **Role knowledge mounts (#185).** Roles can attach, list, compose, and detach
@@ -76,11 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can approve or reject plans whose `scopes` include their area; rejection
   blocks the workflow until the user explicitly overrides.
 - **Priors locking and verification (#189).** `cr lock` writes
-  `.coderoom/priors.lock`; `cr verify` checks deterministic role priors,
+  `.coreroom/priors.lock`; `cr verify` checks deterministic role priors,
   records priors hashes into CREP events, and surfaces drift before role
   execution.
 - **Priors liveness telemetry (#190).** Role prior composition records local
-  hit metadata under `.coderoom/liveness/`; `cr doctor` reports stale priors,
+  hit metadata under `.coreroom/liveness/`; `cr doctor` reports stale priors,
   and `cr role knowledge --with-liveness` shows usage signals.
 - **Operational hardening before v0.5.** Added permission-policy status
   surfaces, bounded auto-route dispatch depth, dogfood orchestration replay
@@ -100,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Legacy budget config compatibility now covers project configs.**
-  Project `.coderoom/config.toml` files with the removed top-level
+  Project `.coreroom/config.toml` files with the removed top-level
   `budget_per_role_usd` key are accepted for compatibility and ignored
   by the current runtime, so existing workspaces created before v0.4.2
   do not prevent `cr` from starting.
@@ -114,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Host-led SDLC gate ledgers (#147-#152).** New `cr gate ...`
-  commands and durable `.coderoom/gates/` ledgers let the host record
+  commands and durable `.coreroom/gates/` ledgers let the host record
   research, plan, Tier 1 review, sign-off, and verification evidence
   before closing work. Gate templates are installed into new projects,
   and close attempts now report actionable missing evidence or record
@@ -138,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Legacy user budget config no longer blocks startup.** User config
   files with the removed `[defaults].budget_per_role_usd` key are
   accepted for compatibility and ignored by the current runtime, so old
-  `~/Library/Application Support/coderoom/config.toml` files do not
+  `~/Library/Application Support/coreroom/config.toml` files do not
   prevent `cr` from starting.
 
 ## [0.4.2] - 2026-05-14
@@ -183,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by hand. Plain Enter still submits, with embedded newlines preserved
   end-to-end — matches Claude Code / Codex / Gemini conventions.
 - **Interactive `/resume` picker (#138).** Bare `/resume` opens an arrow-
-  key selector over saved CodeRoom session rooms instead of dumping the
+  key selector over saved CoreRoom session rooms instead of dumping the
   list and forcing the user to retype `/resume <number|id|prefix|latest>`.
   Cursor lands on the current room; Enter resolves; Esc cancels with a
   one-line `resume cancelled` hint. `/resume <selector>` is unchanged.
@@ -192,11 +196,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Per-role permission mode shown on the boot dashboard (#136).** Each
   role row now ends with `· <mode>`, coloured by who actually gates tool
-  calls: `MUTE` when CodeRoom intercepts (engine = cc and mode ≠ bypass),
+  calls: `MUTE` when CoreRoom intercepts (engine = cc and mode ≠ bypass),
   `WARN` otherwise. The default `@security → codex` row reads `codex ·
   default · bypass` in warn colour so the user can see at a glance that
   diff review is on them, not on a hook — addresses the previous failure
-  mode where the dashboard implied uniform CodeRoom-side approval.
+  mode where the dashboard implied uniform CoreRoom-side approval.
 - **Host synthesis duty reframed (#136).** The default `host.md` priors
   rule was "synthesize peer replies into one answer" — too universal, so
   `@host` re-spoke even when the specialist had already given a complete
@@ -223,7 +227,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `StopReason::Budget`, and the `--max-budget-usd` cc-adapter arg are
   all gone. Spend bounds are now the user's `Ctrl-C`, the per-turn cost
   surfaced in the WorkCard, and any platform-side quota. **Migration:**
-  remove `budget_per_role_usd` from any `.coderoom/config.toml` and
+  remove `budget_per_role_usd` from any `.coreroom/config.toml` and
   user-level config; the field is no longer accepted.
 - **Status / Roadmap section dropped from README (#137).** Pre-1.0 the
   "(shipped)" rows duplicated this CHANGELOG and the "v0.x" rows
@@ -237,11 +241,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Actions](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
   as programmatic usage that draws from a separate, smaller monthly
   credit pool (Pro: $20, Max 5x: $100, Max 20x: $200, non-rollover).
-  Because every CodeRoom role subprocess uses `claude --print`, **all
-  CodeRoom multi-role usage on a Claude subscription counts against this
+  Because every CoreRoom role subprocess uses `claude --print`, **all
+  CoreRoom multi-role usage on a Claude subscription counts against this
   pool**. When the credit runs out, requests either stop (default) or
   spill to API pay-as-you-go (if "extra usage" is enabled on the
-  account). CodeRoom is unchanged — it assumes the user supplies an
+  account). CoreRoom is unchanged — it assumes the user supplies an
   authenticated, working CLI — but heavy multi-role users on Pro should
   consider Max or `ANTHROPIC_API_KEY` before 2026-06-15.
 
@@ -297,7 +301,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Per-role session resume by default (amendment A-006).** `cr start`
   now resumes each role's prior engine session from
-  `.coderoom/sessions/ids/<role>.id` instead of spawning fresh.
+  `.coreroom/sessions/ids/<role>.id` instead of spawning fresh.
   Mirrors the behaviour of every modern AI CLI (`claude --resume` /
   `--continue`, etc.). The REPL prints one hint line listing which
   roles will resume; `cr start --fresh` clears the persisted ids
@@ -306,7 +310,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   semantically means "reload priors + start over" and now actually
   does. (#118, #119)
 - **`cr start --fresh` flag.** Explicit escape hatch for "I want
-  to forget everything"; wipes `.coderoom/sessions/ids/` before
+  to forget everything"; wipes `.coreroom/sessions/ids/` before
   spawning roles. The init wizard's
   `sessions/role-suggestions-dismissed` marker sits in a sibling
   directory and survives `--fresh`, so users who already dismissed
@@ -318,7 +322,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   amendment A-006. Previously a constitution-level implicit
   guarantee that each start was fresh; now flipped. Migration:
   none required — first run after upgrade has no
-  `.coderoom/sessions/` entries so the first session is fresh,
+  `.coreroom/sessions/` entries so the first session is fresh,
   resume kicks in from the second session onward.
 
 ### Notes
@@ -465,7 +469,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output. The WorkCard (rendered once on the first tool, and again as a
   done card with the full step list on turn end) plus the live status
   spinner now carry that information on their own. Set
-  `CODEROOM_VERBOSE_TOOLS=1` to opt back into the full per-tool stream
+  `COREROOM_VERBOSE_TOOLS=1` to opt back into the full per-tool stream
   for auditing; `cr show` always replays the complete event log
   regardless of the setting. (#95)
 
@@ -666,7 +670,7 @@ logs replay unchanged.
 
 ### Fixed
 
-- Codex session-scoped approval choices now update CodeRoom's permission
+- Codex session-scoped approval choices now update CoreRoom's permission
   policy and are reused for later Codex MCP approval requests.
 - Active-turn permission prompts now cancel their blocking key reader when the
   role turn times out or is interrupted, so raw mode is not left behind by an
@@ -689,7 +693,7 @@ logs replay unchanged.
 - Interactive REPL input now uses a terminal raw-mode line editor on TTYs, so
   deleting CJK / wide characters no longer leaves stale glyphs behind.
 - Ctrl-C at the REPL prompt is handled immediately by the input layer and no
-  longer requires pressing Enter before CodeRoom interrupts and shuts roles
+  longer requires pressing Enter before CoreRoom interrupts and shuts roles
   down.
 
 ## [0.1.14] - 2026-05-10
@@ -714,7 +718,7 @@ logs replay unchanged.
 - The boot dashboard no longer displays the literal `model` placeholder for
   Codex or Gemini roles without a configured model.
 - Startup no longer prints terminal truecolor diagnostics by default; use
-  `CODEROOM_TERMINAL_PROBE=1 cr` when collecting color-rendering reports.
+  `COREROOM_TERMINAL_PROBE=1 cr` when collecting color-rendering reports.
 
 ## [0.1.12] - 2026-05-10
 
@@ -736,14 +740,14 @@ logs replay unchanged.
 
 ### Changed
 
-- Default host, specialist, and shared priors now describe the CodeRoom
+- Default host, specialist, and shared priors now describe the CoreRoom
   protocol directly, including `From @role`, `/patch`, `/journal`, host, and
   peer context.
 - Role priors now include a team roster when composed, so each spawned role
   knows the configured host and peers.
 - Gemini roles require a CLI that advertises `--system-instruction-file`; the
   old inline-priors fallback is only available behind
-  `CODEROOM_GEMINI_UNTRUSTED_PRIORS=1`.
+  `COREROOM_GEMINI_UNTRUSTED_PRIORS=1`.
 - Engine capability gaps are documented and rendered honestly: unsupported
   cost and permission fields use `—` instead of fake zeroes or implied parity.
 - Integration workflow now runs on a weekly schedule in addition to manual
@@ -762,7 +766,7 @@ logs replay unchanged.
 - Codex pending RPC requests are cleaned up on timeout / disconnect, tool
   notifications are translated into CREP tool events, and the adapter stays on
   `approval-policy=never` until a real approval bridge exists.
-- `.coderoom/messages.jsonl` writes are single-record appends under an
+- `.coreroom/messages.jsonl` writes are single-record appends under an
   advisory process lock; replay reports malformed lines instead of silently
   dropping corruption, and second-session lock failures now explain what to
   close.
@@ -835,7 +839,7 @@ logs replay unchanged.
 ### Notes
 
 - If you're stuck on a prior version after a botched `cr update`,
-  run `npm cache clean --force && npm install -g @spytensor/coderoom@latest`
+  run `npm cache clean --force && npm install -g @spytensor/coreroom@latest`
   once. Future upgrades via `cr upgrade` will detect the cache-stale
   case automatically.
 
@@ -891,7 +895,7 @@ logs replay unchanged.
 
 - `cr` / `cr start` now detect existing projects that still have only
   the default `@host` role and offer an opt-in role suggestion flow.
-  Users can checkbox the specialists they want, and CodeRoom appends
+  Users can checkbox the specialists they want, and CoreRoom appends
   config + priors in one loadable write.
 
 ### Changed
@@ -912,22 +916,22 @@ logs replay unchanged.
 - Live REPL turns now fold `ToolCallProposed` / `ToolCallExecuted`
   chatter into one dim activity summary, so internal Read / Bash /
   search traces no longer flood the main conversation.
-- Full tool traces still persist in `.coderoom/messages.jsonl` and
+- Full tool traces still persist in `.coreroom/messages.jsonl` and
   remain visible through `cr show` for audits and debugging.
 
 ## [0.1.5] - 2026-05-09
 
 ### Changed
 
-- Bare `cr` now enters the CodeRoom REPL directly; `cr start` remains
+- Bare `cr` now enters the CoreRoom REPL directly; `cr start` remains
   as the explicit spelling.
-- Missing `.coderoom/` on an interactive terminal now opens the guided
+- Missing `.coreroom/` on an interactive terminal now opens the guided
   setup flow instead of silently accepting defaults.
 - `cr start` now renders a persistent home dashboard on every launch:
   effective config layers, host role, role count, priors token total,
   and each role's engine / model / context / token profile.
-- npm installs now expose both `cr` and `croom` command names, and
-  release archives include a `croom` binary alias for environments
+- npm installs now expose both `cr` and `coreroom` command names, and
+  release archives include a `coreroom` binary alias for environments
   where `cr` conflicts with an existing command.
 
 ## [0.1.4] - 2026-05-09
@@ -936,10 +940,10 @@ logs replay unchanged.
 
 - `cr init` now uses a polished default terminal flow on interactive
   terminals: role picking, per-role engine assignment, and a final
-  file-tree confirmation before writing `.coderoom/`.
+  file-tree confirmation before writing `.coreroom/`.
 - `cr init -y` keeps the clean summary but skips prompts, instead of
   taking the terse `cr start` auto-init path.
-- `cr start` first-run and steady-state screens now present CodeRoom as
+- `cr start` first-run and steady-state screens now present CoreRoom as
   a product surface (`cr ›` prompt, compact project / role / token
   summary) rather than plain logs.
 - README install / quickstart / roadmap copy now matches the released
@@ -963,7 +967,7 @@ and `cr init` after #33 already covers ~95% of its purpose.
 - **First-run welcome (#31, Variant E):** one-time card explaining
   the project, listing roles with token estimates, three-things-to-
   know, real docs URL, contract line "won't show this again. type
-  /welcome to revisit." `.coderoom/.welcomed` marker disambiguates
+  /welcome to revisit." `.coreroom/.welcomed` marker disambiguates
   first-run vs. return.
 - **Steady-state two-line summary (#31, Variant B):** every
   subsequent launch — version + tagline, then `<project> · @roles
@@ -1012,12 +1016,12 @@ Distribution release. No behavioral changes.
 
 ### Added
 
-- **`@spytensor/coderoom` on npm.** Same install story as the
+- **`@spytensor/coreroom` on npm.** Same install story as the
   underlying engines (`@anthropic-ai/claude-code`, `@openai/codex`,
   `@google/gemini-cli`):
 
   ```bash
-  npm install -g @spytensor/coderoom
+  npm install -g @spytensor/coreroom
   ```
 
   The package is a thin wrapper. Its postinstall script downloads the
@@ -1038,7 +1042,7 @@ UX-only release. No behavioral changes to the engine adapters or CREP.
 ### Added
 
 - **`cr start` auto-init.** First-time users no longer need to run
-  `cr init` separately; if `.coderoom/` is missing, `cr start`
+  `cr init` separately; if `.coreroom/` is missing, `cr start`
   bootstraps a default `@host` role and proceeds into the REPL with
   the placeholder priors. `cr init` is still available for users who
   want to set things up explicitly.
@@ -1113,7 +1117,7 @@ API stability, not feature completeness.
 
 #### CLI
 
-- `cr init` non-interactive bootstrap of `.coderoom/` with one default
+- `cr init` non-interactive bootstrap of `.coreroom/` with one default
   `host` role and a `.gitignore` that hides runtime artifacts.
 - `cr role add <name> [--engine] [--model]` / `cr role list` /
   `cr role rm <name>` (refuses for the configured host).
@@ -1124,7 +1128,7 @@ API stability, not feature completeness.
 
 #### Infra
 
-- CodeRoom Event Protocol (CREP) — six-variant tagged enum that every
+- CoreRoom Event Protocol (CREP) — six-variant tagged enum that every
   adapter emits and the rest of the wrapper consumes.
 - `MessageBus` (append-only JSONL log + `tokio::broadcast` fan-out)
   is the single source of truth for events. Disk write happens before
@@ -1157,35 +1161,36 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/spytensor/codeRoom/compare/v0.4.4...v0.5.0
-[0.4.4]: https://github.com/spytensor/codeRoom/compare/v0.4.3...v0.4.4
-[0.4.3]: https://github.com/spytensor/codeRoom/compare/v0.4.2...v0.4.3
-[0.4.2]: https://github.com/spytensor/codeRoom/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/spytensor/codeRoom/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/spytensor/codeRoom/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/spytensor/codeRoom/compare/v0.2.4...v0.3.0
-[0.2.4]: https://github.com/spytensor/codeRoom/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/spytensor/codeRoom/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/spytensor/codeRoom/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/spytensor/codeRoom/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/spytensor/codeRoom/compare/v0.1.18...v0.2.0
-[0.1.18]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.18
-[0.1.17]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.17
-[0.1.16]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.16
-[0.1.15]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.15
-[0.1.14]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.14
-[0.1.13]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.13
-[0.1.12]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.12
-[0.1.11]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.11
-[0.1.10]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.10
-[0.1.9]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.9
-[0.1.8]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.8
-[0.1.7]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.7
-[0.1.6]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.6
-[0.1.5]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.5
-[0.1.4]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.4
-[0.1.3]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.3
-[0.1.2]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.2
-[0.1.1]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.1
-[0.1.0]: https://github.com/spytensor/codeRoom/releases/tag/v0.1.0
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/spytensor/CoreRoom/compare/v0.5.0...v0.7.0
+[0.5.0]: https://github.com/spytensor/CoreRoom/compare/v0.4.4...v0.5.0
+[0.4.4]: https://github.com/spytensor/CoreRoom/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/spytensor/CoreRoom/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/spytensor/CoreRoom/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/spytensor/CoreRoom/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/spytensor/CoreRoom/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/spytensor/CoreRoom/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/spytensor/CoreRoom/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/spytensor/CoreRoom/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/spytensor/CoreRoom/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/spytensor/CoreRoom/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/spytensor/CoreRoom/compare/v0.1.18...v0.2.0
+[0.1.18]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.18
+[0.1.17]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.17
+[0.1.16]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.16
+[0.1.15]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.15
+[0.1.14]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.14
+[0.1.13]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.13
+[0.1.12]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.12
+[0.1.11]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.11
+[0.1.10]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.10
+[0.1.9]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.9
+[0.1.8]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.8
+[0.1.7]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.7
+[0.1.6]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.6
+[0.1.5]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.5
+[0.1.4]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.4
+[0.1.3]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.3
+[0.1.2]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.2
+[0.1.1]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.1
+[0.1.0]: https://github.com/spytensor/CoreRoom/releases/tag/v0.1.0

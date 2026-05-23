@@ -1,6 +1,6 @@
 //! Image-path parsing and validation for user prompts.
 //!
-//! CodeRoom's user-facing convention: any `@<path>` token where the
+//! CoreRoom's user-facing convention: any `@<path>` token where the
 //! path starts with `./`, `/`, or `~/` is an image reference. Other
 //! `@<word>` tokens remain role mentions (the role regex requires an
 //! alphabetic first char after `@`, so the two syntaxes are disjoint

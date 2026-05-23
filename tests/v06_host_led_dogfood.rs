@@ -3,12 +3,12 @@
 use std::fs;
 use std::path::Path;
 
-use coderoom::config::CODEROOM_DIR;
-use coderoom::context_pack::{save_context_pack, ContextPack, CONTEXT_PACK_SCHEMA_VERSION};
-use coderoom::evidence_packet::{save_evidence_packet, EvidencePacket, EvidenceStatus};
-use coderoom::source_registry::{save_source_registry, SourceRegistry};
-use coderoom::tracker::{detect_tracker_mismatch, TrackerWorkState};
-use coderoom::work_order::{save_work_order, WorkOrder, WorkOrderStatus};
+use coreroom::config::COREROOM_DIR;
+use coreroom::context_pack::{save_context_pack, ContextPack, CONTEXT_PACK_SCHEMA_VERSION};
+use coreroom::evidence_packet::{save_evidence_packet, EvidencePacket, EvidenceStatus};
+use coreroom::source_registry::{save_source_registry, SourceRegistry};
+use coreroom::tracker::{detect_tracker_mismatch, TrackerWorkState};
+use coreroom::work_order::{save_work_order, WorkOrder, WorkOrderStatus};
 
 #[test]
 fn v06_host_led_dogfood_flow_is_structurally_complete() {
@@ -74,13 +74,13 @@ fn v06_host_led_dogfood_flow_is_structurally_complete() {
         save_context_pack(tmp.path(), &registry, &context_pack).expect("save context pack");
     let evidence_path = save_evidence_packet(tmp.path(), &evidence).expect("save evidence");
 
-    assert!(work_path.ends_with(".coderoom/work-orders/WO-0212.toml"));
+    assert!(work_path.ends_with(".coreroom/work-orders/WO-0212.toml"));
     assert_eq!(
         registry_path,
-        tmp.path().join(CODEROOM_DIR).join("source-registry.toml")
+        tmp.path().join(COREROOM_DIR).join("source-registry.toml")
     );
-    assert!(context_path.ends_with(".coderoom/context-packs/CTX-WO-0212.toml"));
-    assert!(evidence_path.ends_with(".coderoom/evidence/WO-0212.toml"));
+    assert!(context_path.ends_with(".coreroom/context-packs/CTX-WO-0212.toml"));
+    assert!(evidence_path.ends_with(".coreroom/evidence/WO-0212.toml"));
 
     let tracker_report = detect_tracker_mismatch(
         v06_tracker_closed_body(),

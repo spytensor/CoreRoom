@@ -1,7 +1,7 @@
 schemaVersion = 1
 
 [[sources]]
-id = "coderoom-architecture"
+id = "coreroom-architecture"
 kind = "project-file"
 path = "docs/architecture.md"
 pin = "sha256:arch-v06-dogfood"
@@ -25,7 +25,7 @@ refreshPolicy = "manual"
 [[sources]]
 id = "v06-tracker"
 kind = "url-snapshot"
-url = "https://github.com/spytensor/codeRoom/issues/202"
+url = "https://github.com/spytensor/CoreRoom/issues/202"
 pin = "snapshot:v06-tracker-202"
 trustLevel = "external-doc"
 owner = "host"

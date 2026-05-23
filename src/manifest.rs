@@ -3,13 +3,13 @@
 //! The preferred role layout is:
 //!
 //! ```text
-//! .coderoom/roles/<role>/
+//! .coreroom/roles/<role>/
 //! ├── priors.md
 //! ├── knowledge/
 //! └── .knowledge-manifest.toml
 //! ```
 //!
-//! Legacy `.coderoom/roles/<role>.md` files remain readable. Mutating
+//! Legacy `.coreroom/roles/<role>.md` files remain readable. Mutating
 //! knowledge commands migrate the legacy file into the directory layout.
 
 use std::ffi::OsStr;
@@ -93,28 +93,28 @@ pub struct KnowledgeInventoryEntry {
     pub modified_at: Option<String>,
 }
 
-/// Return `.coderoom/roles/<role>`.
+/// Return `.coreroom/roles/<role>`.
 #[must_use]
-pub fn role_dir(coderoom_dir: &Path, role: &str) -> PathBuf {
-    coderoom_dir.join(ROLES_DIR).join(role)
+pub fn role_dir(coreroom_dir: &Path, role: &str) -> PathBuf {
+    coreroom_dir.join(ROLES_DIR).join(role)
 }
 
-/// Return `.coderoom/roles/<role>/priors.md`.
+/// Return `.coreroom/roles/<role>/priors.md`.
 #[must_use]
-pub fn preferred_role_priors_path(coderoom_dir: &Path, role: &str) -> PathBuf {
-    role_dir(coderoom_dir, role).join(ROLE_PRIORS_FILE)
+pub fn preferred_role_priors_path(coreroom_dir: &Path, role: &str) -> PathBuf {
+    role_dir(coreroom_dir, role).join(ROLE_PRIORS_FILE)
 }
 
-/// Return legacy `.coderoom/roles/<role>.md`.
+/// Return legacy `.coreroom/roles/<role>.md`.
 #[must_use]
-pub fn legacy_role_priors_path(coderoom_dir: &Path, role: &str) -> PathBuf {
-    coderoom_dir.join(ROLES_DIR).join(format!("{role}.md"))
+pub fn legacy_role_priors_path(coreroom_dir: &Path, role: &str) -> PathBuf {
+    coreroom_dir.join(ROLES_DIR).join(format!("{role}.md"))
 }
 
-/// Return `.coderoom/roles/<role>/knowledge`.
+/// Return `.coreroom/roles/<role>/knowledge`.
 #[must_use]
-pub fn knowledge_dir(coderoom_dir: &Path, role: &str) -> PathBuf {
-    role_dir(coderoom_dir, role).join(KNOWLEDGE_DIR)
+pub fn knowledge_dir(coreroom_dir: &Path, role: &str) -> PathBuf {
+    role_dir(coreroom_dir, role).join(KNOWLEDGE_DIR)
 }
 
 /// Return the manifest path for a role.
@@ -126,15 +126,15 @@ pub fn manifest_path_for_role_dir(role_dir: &Path) -> PathBuf {
 /// Return the existing role priors path, preferring the new directory
 /// layout and falling back to the legacy flat `.md` file.
 #[must_use]
-pub fn role_priors_path_existing(coderoom_dir: &Path, role: &str) -> Option<PathBuf> {
-    let preferred = preferred_role_priors_path(coderoom_dir, role);
+pub fn role_priors_path_existing(coreroom_dir: &Path, role: &str) -> Option<PathBuf> {
+    let preferred = preferred_role_priors_path(coreroom_dir, role);
     if preferred.is_file() {
         return Some(preferred);
     }
-    let legacy = legacy_role_priors_path(coderoom_dir, role);
+    let legacy = legacy_role_priors_path(coreroom_dir, role);
     if legacy.is_file() {
         eprintln!(
-            "warning: .coderoom/roles/{role}.md is deprecated; use .coderoom/roles/{role}/priors.md"
+            "warning: .coreroom/roles/{role}.md is deprecated; use .coreroom/roles/{role}/priors.md"
         );
         return Some(legacy);
     }
@@ -144,14 +144,14 @@ pub fn role_priors_path_existing(coderoom_dir: &Path, role: &str) -> Option<Path
 /// Return the effective priors path for diagnostics. If no priors file
 /// exists, returns the preferred directory-layout path.
 #[must_use]
-pub fn role_priors_path_for_config(coderoom_dir: &Path, role: &str) -> PathBuf {
-    role_priors_path_existing(coderoom_dir, role)
-        .unwrap_or_else(|| preferred_role_priors_path(coderoom_dir, role))
+pub fn role_priors_path_for_config(coreroom_dir: &Path, role: &str) -> PathBuf {
+    role_priors_path_existing(coreroom_dir, role)
+        .unwrap_or_else(|| preferred_role_priors_path(coreroom_dir, role))
 }
 
 /// Create an empty role directory layout.
-pub fn create_role_layout(coderoom_dir: &Path, role: &str, priors_body: &str) -> Result<PathBuf> {
-    let dir = role_dir(coderoom_dir, role);
+pub fn create_role_layout(coreroom_dir: &Path, role: &str, priors_body: &str) -> Result<PathBuf> {
+    let dir = role_dir(coreroom_dir, role);
     let priors_path = dir.join(ROLE_PRIORS_FILE);
     std::fs::create_dir_all(dir.join(KNOWLEDGE_DIR))
         .with_context(|| format!("creating role layout {}", dir.display()))?;
@@ -164,10 +164,10 @@ pub fn create_role_layout(coderoom_dir: &Path, role: &str, priors_body: &str) ->
 
 /// Ensure a role is in the directory layout. Legacy priors are moved
 /// into `priors.md` and the old flat file is removed.
-pub fn ensure_role_dir_layout(coderoom_dir: &Path, role: &str) -> Result<AttachLayout> {
-    let dir = role_dir(coderoom_dir, role);
+pub fn ensure_role_dir_layout(coreroom_dir: &Path, role: &str) -> Result<AttachLayout> {
+    let dir = role_dir(coreroom_dir, role);
     let priors_path = dir.join(ROLE_PRIORS_FILE);
-    let legacy_path = legacy_role_priors_path(coderoom_dir, role);
+    let legacy_path = legacy_role_priors_path(coreroom_dir, role);
     let mut migrated_legacy = None;
 
     if priors_path.is_file() {
@@ -208,9 +208,9 @@ pub fn ensure_role_dir_layout(coderoom_dir: &Path, role: &str) -> Result<AttachL
 /// Directory-layout paths prepared for an attach operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachLayout {
-    /// `.coderoom/roles/<role>`.
+    /// `.coreroom/roles/<role>`.
     pub role_dir: PathBuf,
-    /// `.coderoom/roles/<role>/priors.md`.
+    /// `.coreroom/roles/<role>/priors.md`.
     pub priors_path: PathBuf,
     /// Legacy priors path that was migrated, when applicable.
     pub migrated_legacy: Option<PathBuf>,
@@ -237,7 +237,7 @@ pub fn write_manifest(role_dir: &Path, manifest: &KnowledgeManifest) -> Result<(
 
 /// Attach a local markdown or text file to a role's knowledge directory.
 pub fn attach_knowledge(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role: &str,
     source: &Path,
     alias: Option<&str>,
@@ -249,7 +249,7 @@ pub fn attach_knowledge(
     let name = normalize_knowledge_name(source, alias)?;
     validate_knowledge_name(&name)?;
 
-    let layout = ensure_role_dir_layout(coderoom_dir, role)?;
+    let layout = ensure_role_dir_layout(coreroom_dir, role)?;
     let knowledge = layout.role_dir.join(KNOWLEDGE_DIR);
     std::fs::create_dir_all(&knowledge)
         .with_context(|| format!("creating knowledge dir {}", knowledge.display()))?;
@@ -283,9 +283,9 @@ pub fn attach_knowledge(
 }
 
 /// Detach a knowledge file by manifest name.
-pub fn detach_knowledge(coderoom_dir: &Path, role: &str, name: &str) -> Result<DetachOutcome> {
+pub fn detach_knowledge(coreroom_dir: &Path, role: &str, name: &str) -> Result<DetachOutcome> {
     validate_knowledge_name(name)?;
-    let dir = role_dir(coderoom_dir, role);
+    let dir = role_dir(coreroom_dir, role);
     if !dir.is_dir() {
         bail!("role `{role}` is not using the directory layout; attach knowledge first");
     }
@@ -312,10 +312,10 @@ pub fn detach_knowledge(coderoom_dir: &Path, role: &str, name: &str) -> Result<D
 /// List role knowledge entries, using manifest order when present and
 /// scanning `knowledge/` alphabetically when no manifest exists.
 pub fn knowledge_inventory(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role: &str,
 ) -> Result<Vec<KnowledgeInventoryEntry>> {
-    let dir = role_dir(coderoom_dir, role);
+    let dir = role_dir(coreroom_dir, role);
     if !dir.is_dir() {
         return Ok(Vec::new());
     }

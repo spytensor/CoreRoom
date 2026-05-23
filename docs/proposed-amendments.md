@@ -36,24 +36,21 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
-## A-018: CoreRoom product rename and compatibility policy
+## A-018: CoreRoom product rename and release policy
 
-- **Status:** accepted for v0.7; staged implementation tracked by #218
+- **Status:** implemented in v0.7.0
 - **Filed:** 2026-05-23
 - **Touches:** Product naming, package/release metadata, command policy,
-  project state directory migration, environment-variable aliases, and release
-  notes.
+  project state directory, environment-variable prefix, and release notes.
 
 ### Problem
 
-A-016 positioned the project as an Engineering Control Room, but kept the
-short brand as CodeRoom for v0.6. That was useful while the host-led control
-kernel was still being proven. By v0.7, the product surface has moved beyond a
-coding-room metaphor: `@host`, GitHub Issues, WorkOrders, source context,
-evidence packets, PRs, CI, and tracker closure are the core product.
-
-Keeping CodeRoom as the active brand now under-describes the project and makes
-search/discovery worse for people looking for AI agent engineering control.
+A-016 positioned the project as an Engineering Control Room while the host-led
+control kernel was still being proven. By v0.7, the product surface is defined
+by `@host`, GitHub Issues, WorkOrders, source context, evidence packets, PRs,
+CI, and tracker closure. The active release surface needs one consistent
+CoreRoom naming scheme across repository metadata, packages, runtime paths,
+release artifacts, docs, and environment variables.
 
 ### Accepted change
 
@@ -67,27 +64,28 @@ The short positioning statement is:
 > engineering change.
 
 The `cr` command remains the stable primary command. The optional long command
-alias is `coreroom`; `croom` remains a legacy alias during the rename window.
+alias is `coreroom`.
 
 `CREP` remains stable and expands to **CoreRoom Event Protocol**.
 
 ### Migration impact
 
-The rename is staged. v0.7 updates active product-facing docs, templates,
-runtime/help/splash text, npm metadata, and compatibility primitives.
+v0.7 updates active product-facing docs, templates, runtime/help/splash text,
+Cargo metadata, npm metadata, release artifacts, project state paths, and
+environment-variable names.
 
-The Rust crate/library name remains `coderoom` in v0.7. Project state still
-supports legacy `.coderoom/`; future `.coreroom/` migration must be explicit
-and must not silently move user files. `COREROOM_*` environment variables are
-preferred; legacy `CODEROOM_*` aliases remain accepted for one compatibility
-window.
+The Rust crate/library name is `coreroom`. The npm package is
+`@spytensor/coreroom`. New project state uses `.coreroom/`. Environment
+variables use the `COREROOM_*` prefix. Any later migration for older local
+workspaces must be explicit, user-approved, and tracked as a separate issue.
 
 The detailed audit, owner-only GitHub steps, release notes, and rollback plan
 live in `docs/coreroom-rename-plan.md`.
 
 ### Decision
 
-Accepted by the user for v0.7 on 2026-05-23. Implemented by #218.
+Accepted by the user for v0.7 on 2026-05-23. Implemented by #218 and completed
+for the v0.7.0 release.
 
 ## A-016: Engineering Control Room product positioning
 
@@ -99,7 +97,7 @@ Accepted by the user for v0.7 on 2026-05-23. Implemented by #218.
 
 ### Problem
 
-The name and early README framing describe CodeRoom as a room where multiple
+The name and early README framing describe CoreRoom as a room where multiple
 AI coding roles collaborate. That was accurate through v0.5, but it now
 under-describes the product. Role collaboration is the visible surface; the
 deeper product is software engineering control under AI acceleration:
@@ -117,7 +115,7 @@ instead of engineering governance.
 
 ### Alternatives considered
 
-1. **Keep `codeRoom` as-is.** Low migration cost, but increasingly misleading
+1. **Keep `CoreRoom` as-is.** Low migration cost, but increasingly misleading
    as WorkOrders, source context, evidence packets, and tracker closure become
    product primitives.
 2. **Rename immediately to `Engineering Control Room`.** Accurate category,
@@ -134,7 +132,7 @@ instead of engineering governance.
 
 ### Accepted change
 
-v0.6 positions CodeRoom as an **Engineering Control Room for AI-assisted
+v0.6 positions CoreRoom as an **Engineering Control Room for AI-assisted
 software delivery**.
 
 The public description should include searchable terms that match the real
@@ -150,7 +148,7 @@ direction:
 
 The short v0.6 positioning statement is:
 
-> CodeRoom is an Engineering Control Room for AI-assisted software delivery:
+> CoreRoom is an Engineering Control Room for AI-assisted software delivery:
 > a host-led system that coordinates AI coding roles through GitHub issues,
 > SDLC gates, role priors, and evidence-based pull request workflow.
 
@@ -159,11 +157,11 @@ The working naming policy is:
 | Surface | v0.6 decision | Migration note |
 | --- | --- | --- |
 | Product category | Engineering Control Room | Use in README, repo description, issues, and docs. |
-| Short brand | Keep CodeRoom for v0.6 | `CoreRoom` remains the leading fallback if a later rename is accepted. |
-| Repository name | Keep `codeRoom` for v0.6 | User may rename later; implementation tracked by #218. |
+| Short brand | Keep CoreRoom for v0.6 | `CoreRoom` remains the leading fallback if a later rename is accepted. |
+| Repository name | Keep `CoreRoom` for v0.6 | User may rename later; implementation tracked by #218. |
 | CLI binary | Keep `cr` | Short, already shipped, and still suitable after a future rename. |
-| npm package | Keep `@spytensor/coderoom` | Avoid package churn until the product model stabilizes. |
-| Compatibility alias | Keep `croom` | No new alias in this amendment. |
+| npm package | Keep `@spytensor/coreroom` | Avoid package churn until the product model stabilizes. |
+| Compatibility alias | Keep `coreroom` | No new alias in this amendment. |
 
 ### Migration impact
 
@@ -171,8 +169,8 @@ No runtime migration in v0.6. Existing users keep the same install command,
 binary, config directory, and role layout.
 
 Future rename implementation, if accepted, must be staged in a separate v0.7
-issue and must preserve a compatibility story for `cr`, `.coderoom/`, and
-`@spytensor/coderoom`.
+issue and must preserve a compatibility story for `cr`, `.coreroom/`, and
+`@spytensor/coreroom`.
 
 ### Decision
 
@@ -189,7 +187,7 @@ to #218.
 
 ### Problem
 
-v0.5 made CodeRoom host-first for SDLC gates, but the constitution still
+v0.5 made CoreRoom host-first for SDLC gates, but the constitution still
 describes `@host` mostly as the role that catches un-addressed text. That is
 too weak for the Engineering Control Room direction accepted in A-016.
 
@@ -224,7 +222,7 @@ Without a stronger host protocol, v0.6 risks two failure modes:
 
 ### Accepted change
 
-Inside CodeRoom, `@host` is the **highest authority role** because it is the
+Inside CoreRoom, `@host` is the **highest authority role** because it is the
 only role directly accountable to the user. The user remains the final owner.
 
 `@host` owns these control responsibilities:
@@ -555,7 +553,7 @@ tracked as a separate v0.2.x deliverable. The dispatcher works without
 them; once the IDs land, `cr show` will be able to reconstruct chains by
 walking `parent_turn_id` ancestry.
 
-Spend: a chain can burn more tokens than before. CodeRoom bounds routing by
+Spend: a chain can burn more tokens than before. CoreRoom bounds routing by
 hop depth, fan-out, queue length, the user's `Ctrl-C`, platform-side quotas,
 and the per-turn cost surfaced in the WorkCard. Users running chatty roles
 should keep that in mind.
@@ -573,7 +571,7 @@ should keep that in mind.
 ### Problem
 
 Every modern AI CLI ships a resume primitive: `claude --resume <id>` /
-`--continue`, `codex --resume`, `gemini` equivalents. CodeRoom does
+`--continue`, `codex --resume`, `gemini` equivalents. CoreRoom does
 not. Each `cr start` spawns every role as a brand-new engine session
 loaded with priors but no conversation history; the user loses the
 context they built up the previous time they used the room. The
@@ -587,12 +585,12 @@ In practice this means:
 - The grounding-gate, journal, and patch infrastructure all work
   around the missing context instead of complementing it
 - New users are surprised: every other CLI they have on their
-  machine resumes; codeRoom alone forgets
+  machine resumes; CoreRoom alone forgets
 
 ### Alternatives considered
 
 1. **Status quo (`fresh per start`).** Simple, predictable, every
-   user can re-issue from scratch. But it makes codeRoom strictly
+   user can re-issue from scratch. But it makes CoreRoom strictly
    worse than typing into the underlying CLI directly.
 2. **`cr resume` as an explicit alias for `cr start --resume`.**
    Discoverable but means the default flow still forgets — users
@@ -608,10 +606,10 @@ with explicit per-role session persistence:
 
 - The REPL's event forwarder writes each role's session id (emitted
   on `RoleStarted` or `RoleSessionUpdated`) to
-  `.coderoom/sessions/ids/<role>.id` (sibling of the init wizard's
+  `.coreroom/sessions/ids/<role>.id` (sibling of the init wizard's
   `sessions/role-suggestions-dismissed` marker; the `ids/` subdir
   keeps the two from colliding). Overwrites on every new id.
-- `cr` / `cr start` reads `.coderoom/sessions/ids/<role>.id` for
+- `cr` / `cr start` reads `.coreroom/sessions/ids/<role>.id` for
   each role before spawn; when present, it is plumbed into the
   `RoleConfig::resume_session_id` field and the adapter wires the
   engine's native resume mechanism (`--resume <id>` on cc,
@@ -623,15 +621,15 @@ with explicit per-role session persistence:
   the user never gets stuck in a "can't start" loop because of
   resume state.
 - `cr start --fresh` (wired in PR-7) clears
-  `.coderoom/sessions/ids/` before spawning so every role starts a
+  `.coreroom/sessions/ids/` before spawning so every role starts a
   brand-new conversation. The flag is the explicit escape hatch
   for "I want to forget".
 - `/refresh @role` (PR-7 also extends this) clears that role's
   session id alongside its reload — the refresh semantic is
   "reload priors + start over", so its conversation history
   should reset to match.
-- CodeRoom also keeps room-level snapshots under
-  `.coderoom/sessions/rooms/`. Each snapshot is a set of per-role
+- CoreRoom also keeps room-level snapshots under
+  `.coreroom/sessions/rooms/`. Each snapshot is a set of per-role
   engine session ids. `/resume` lists them, and
   `/resume <number|id|prefix|latest>` switches the running room to
   that saved set.
@@ -646,10 +644,10 @@ Currently wired:
 - **cc**: `--resume <session-id>`. Sessions live under
   `~/.claude/projects/<hash>/sessions/`.
 - **codex**: wired through `codex mcp-server`'s `codex-reply` tool.
-  The first turn starts a thread with `codex`; CodeRoom persists the
+  The first turn starts a thread with `codex`; CoreRoom persists the
   returned `threadId` via `RoleSessionUpdated`, then later turns and
   future `cr start` invocations continue with `codex-reply`.
-- **gemini**: wired through `gemini --resume <session-id>`. CodeRoom
+- **gemini**: wired through `gemini --resume <session-id>`. CoreRoom
   captures the real session id from Gemini's `stream-json` init event
   via `RoleSessionUpdated`; upgraded projects discard older synthetic
   `gemini-<role>` placeholders and start fresh once before persisting
@@ -660,11 +658,11 @@ Currently wired:
 User-facing: the next `cr start` after this amendment lands will
 behave like users already expect every modern CLI to behave. There
 is no migration step — first-run after upgrade has no
-`.coderoom/sessions/` entries, so the first session is fresh; from
+`.coreroom/sessions/` entries, so the first session is fresh; from
 the second session onward, resume kicks in.
 
-Storage: `.coderoom/sessions/` is already in the default
-`.coderoom/.gitignore` shipped by `cr init` (it was earmarked for
+Storage: `.coreroom/sessions/` is already in the default
+`.coreroom/.gitignore` shipped by `cr init` (it was earmarked for
 this earlier). Session ids are pointers into the engine's *local*
 storage at e.g. `~/.claude/projects/<hash>/sessions/` and don't
 survive across machines, so committing them would be misleading.
@@ -709,7 +707,7 @@ between "what role A said" and "what role B should do".
 1. Trust the model to ignore embedded imperatives. Empirically false on
    long sessions and unfamiliar payloads.
 2. Sanitize cross-role payloads by stripping imperative-looking sentences.
-   False positives on legitimate quoted prose; also a CodeRoom-side runtime
+   False positives on legitimate quoted prose; also a CoreRoom-side runtime
    for natural language.
 3. Wrap all cross-role payload in a structural envelope and add a kernel
    priors line teaching every role to treat envelope contents as data.
@@ -759,8 +757,8 @@ envelope unless a future CREP amendment records dispatch prompts.
 
 ### Decision
 
-Accepted for v0.5 and implemented by #190. CodeRoom records local
-per-role liveness sidecars under `.coderoom/liveness/<role>.json`, ignores
+Accepted for v0.5 and implemented by #190. CoreRoom records local
+per-role liveness sidecars under `.coreroom/liveness/<role>.json`, ignores
 them by default, updates them from role-turn prompt composition using the
 deterministic "loaded" fallback, and reports stale entries through
 `cr doctor`.
@@ -789,12 +787,12 @@ priors produced this reply".
    long-running rooms and any project that uses `/patch promote`.
 2. Re-hash priors per outbound event in code only; do not surface to the
    bus. Loses cross-role auditability.
-3. `.coderoom/priors.lock` (git-tracked, Cargo.lock analog) plus
+3. `.coreroom/priors.lock` (git-tracked, Cargo.lock analog) plus
    `priors_hash` on every CREP event that produced output. Accepted.
 
 ### Proposed change
 
-- Introduce `.coderoom/priors.lock` (git-tracked) recording the SHA of every
+- Introduce `.coreroom/priors.lock` (git-tracked) recording the SHA of every
   role's priors file, shared.md, kernel priors version, and (when A-013
   lands) skill tree digest. Generated and updated by `cr` on priors
   changes.
@@ -814,7 +812,7 @@ without skills.
 
 ### Migration impact
 
-New file at `.coderoom/priors.lock`. `cr init` scaffolds it; existing
+New file at `.coreroom/priors.lock`. `cr init` scaffolds it; existing
 projects get it on first run via a one-shot generator.
 
 CREP wire format: `priors_hash` is already on `RoleStarted`. Extending it to
@@ -849,11 +847,11 @@ permission contract and is not addressed by the existing prompt design.
 2. Cooldown timer / blocking pause before risky approvals. Rejected.
    Two reasons: it conflicts with `v0.4-calm-cli-ui.md` § Live visibility
    budget which requires permission-waiting to "Show immediately"; and it
-   creates a CodeRoom-side gate on permission decisions, which the
+   creates a CoreRoom-side gate on permission decisions, which the
    `architecture.md` Non-goals explicitly forbid ("No permission sandbox of
    our own").
 3. Inline annotation only. The existing immediate prompt is unchanged;
-   CodeRoom adds a single short line above the prompt body when the user
+   CoreRoom adds a single short line above the prompt body when the user
    is about to approve a `write` or `exec` class call after a streak of
    `read`-class auto-allows. The user can act immediately; the annotation
    is information, not a gate. Accepted.
@@ -871,10 +869,10 @@ permission contract and is not addressed by the existing prompt design.
   No timer. No cooldown. The Enter key still submits immediately.
 - The annotation does not fire for `read`-class prompts; it specifically
   targets the class boundary where attention slippage matters.
-- Configurable via `.coderoom/config.toml` (`[permission.annotate]`).
+- Configurable via `.coreroom/config.toml` (`[permission.annotate]`).
   Disable-able for headless or CI usage.
 
-CodeRoom does not arbitrate the permission decision. The classification
+CoreRoom does not arbitrate the permission decision. The classification
 exists only to compose the annotation; the engine's approval contract is
 unchanged.
 
@@ -941,12 +939,12 @@ No semantic / embedding inference. Liveness is observation, not judgment.
 `cr prompt show <role>` displays liveness annotations inline. `cr doctor`
 emits prune candidates (last cited > 180 days, hit count = 0); pruning
 is always the user's action. The sidecar lives at
-`.coderoom/liveness/<role>.json`, gitignored by default — it is local
+`.coreroom/liveness/<role>.json`, gitignored by default — it is local
 analytics, not project state.
 
 ### Migration impact
 
-Telemetry sidecar at `.coderoom/liveness/<role>.json` (gitignored, local
+Telemetry sidecar at `.coreroom/liveness/<role>.json` (gitignored, local
 only). No CREP changes; this is build-time analysis over journal /
 transcript stores.
 
@@ -963,7 +961,7 @@ transcript stores.
 ### Problem
 
 The same priors run against the same engine binary at a different version
-can produce materially different behavior. CodeRoom records `engine` and
+can produce materially different behavior. CoreRoom records `engine` and
 `model` per role but does not record CLI version, system prompt hash, or
 tool schema hash. A claude minor version upgrade silently shifts role
 behavior; the bus has no way to attribute that drift to the upgrade.
@@ -973,7 +971,7 @@ multi-engine wrappers because git does not see it.
 
 ### Alternatives considered
 
-1. Pin engine binaries by version. Outside CodeRoom's scope (engines are
+1. Pin engine binaries by version. Outside CoreRoom's scope (engines are
    user-installed, per the README "engine CLIs you bring" contract).
 2. Snapshot every role's full output history and diff continuously.
    Prohibitively expensive.
@@ -985,8 +983,8 @@ multi-engine wrappers because git does not see it.
 
 - `RoleStarted` carries `engine_fingerprint = sha256(cli_version + model_id
   + system_prompt_hash + tool_schema_hash)`.
-- Per role, CodeRoom maintains 10 canned input → output digests in
-  `.coderoom/replays/<role>/`. Captured on first stable run; user-curated.
+- Per role, CoreRoom maintains 10 canned input → output digests in
+  `.coreroom/replays/<role>/`. Captured on first stable run; user-curated.
 - On `engine_fingerprint` change at spawn, the replay set runs
   asynchronously. Diff above a configurable Hamming threshold marks the
   role `unverified`; subsequent journal writes require explicit user
@@ -996,7 +994,7 @@ multi-engine wrappers because git does not see it.
 ### Migration impact
 
 New event field on `RoleStarted` (`engine_fingerprint`). New on-disk store
-at `.coderoom/replays/`. Both additive. Roles without a captured replay
+at `.coreroom/replays/`. Both additive. Roles without a captured replay
 set never enter the unverified state — drift detection is opt-in via
 `cr replay capture`.
 
@@ -1048,7 +1046,7 @@ Add two CREP event types:
 
 On `cr start`, the bus is scanned for intents without matching commits.
 Such turns enter an "orphan turn" quarantine surfaced via `cr show
---orphans`. The user decides reissue vs discard; CodeRoom never silently
+--orphans`. The user decides reissue vs discard; CoreRoom never silently
 reissues.
 
 Bus integrity check (`cr verify`) cross-references intents and commits and
@@ -1070,11 +1068,11 @@ Performance: two extra JSONL lines per turn. Bus size grows by roughly
 
 - **Status:** proposed
 - **Filed:** 2026-05-14
-- **Touches:** Locked decision 1 (wrapper not runtime), Locked decision 10 (roles are re-instantiable; materialized view is part of spawn), `architecture.md` § Knowledge model (adds `.coderoom/skills/` tree), `docs/skill-role-integration.md`
+- **Touches:** Locked decision 1 (wrapper not runtime), Locked decision 10 (roles are re-instantiable; materialized view is part of spawn), `architecture.md` § Knowledge model (adds `.coreroom/skills/` tree), `docs/skill-role-integration.md`
 
 ### Problem
 
-CodeRoom spawns engine subprocesses with no isolation of the engine's
+CoreRoom spawns engine subprocesses with no isolation of the engine's
 skill discovery path. Every role inherits the user's global skill pool
 (`~/.claude/skills/`) plus `.claude/skills/`. Role partitioning at the
 priors layer does not extend to capabilities. `@frontend` having silent
@@ -1086,7 +1084,7 @@ the priors partitioning was built to defeat.
 Three architectures were evaluated in `docs/skill-role-integration.md` §
 Rejected architectures:
 
-- CodeRoom as skill broker (CodeRoom parses and executes skill bodies).
+- CoreRoom as skill broker (CoreRoom parses and executes skill bodies).
   Rejected — violates locked decision § 1.
 - Per-role full sandbox without kernel layer. Rejected — loses kernel
   capability enforcement and forces N-way duplication.
@@ -1102,14 +1100,14 @@ better surfaces.
 
 Adopt `docs/skill-role-integration.md` as the locked contract:
 
-- Three skill layers, all under `.coderoom/skills/` to preserve the locked
-  `.coderoom/roles/<role>.md` file layout: `.coderoom/skills/kernel/`,
-  `.coderoom/skills/shared/`, `.coderoom/skills/roles/<role>/`. No change
+- Three skill layers, all under `.coreroom/skills/` to preserve the locked
+  `.coreroom/roles/<role>.md` file layout: `.coreroom/skills/kernel/`,
+  `.coreroom/skills/shared/`, `.coreroom/skills/roles/<role>/`. No change
   to existing role priors file location.
 - Allowlist in role frontmatter (`kernel` opt-out, `shared` opt-in,
   role-private always on, explicit `deny`). The allowlist contract is
   locked.
-- Per-role materialized view at `$XDG_RUNTIME_DIR/coderoom/<session>/<role>/skills/`
+- Per-role materialized view at `$XDG_RUNTIME_DIR/coreroom/<session>/<role>/skills/`
   pointed at by engine-native mechanisms. The materialization mechanism
   itself (env var, flag, HOME redirect) is engine-specific and treated as
   non-locking implementation detail; see `skill-role-integration.md` §
@@ -1122,7 +1120,7 @@ Adopt `docs/skill-role-integration.md` as the locked contract:
 
 ### Migration impact
 
-Existing projects without `.coderoom/skills/` continue to work unchanged;
+Existing projects without `.coreroom/skills/` continue to work unchanged;
 skills resolve from the engine's native discovery path. New scaffold
 `cr skill init` adds the layered tree opt-in per project.
 
@@ -1309,7 +1307,7 @@ narrow middle ground.
 
 ### Accepted change
 
-CodeRoom supports **authority-scoped role veto**:
+CoreRoom supports **authority-scoped role veto**:
 
 - A role may be declared with explicit authority scopes in validated config.
   Initial canonical scopes are expected to include `deployment`, `infra`,
@@ -1345,7 +1343,7 @@ thread, tied to the role and the plan SHA being overruled. The intended ledger
 shape is:
 
 ```text
-.coderoom/gates/<thread>/overrides/<role>.toml
+.coreroom/gates/<thread>/overrides/<role>.toml
 ```
 
 with at least `role`, `reason`, `actor = "user"`, `timestamp`, `plan_sha`, and

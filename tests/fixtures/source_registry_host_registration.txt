@@ -6,7 +6,7 @@ Classification: persistent-workorder
 Reason:
 - The work needs project-level dependency context that should be registered once and reused in scoped ContextPacks.
 Next step:
-- Propose Source Registry entries and ask for confirmation before writing `.coderoom/source-registry.toml`.
+- Propose Source Registry entries and ask for confirmation before writing `.coreroom/source-registry.toml`.
 Confirmation required: yes
 
 Source Registry entry proposal:

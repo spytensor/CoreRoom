@@ -1,4 +1,4 @@
-# CodeRoom project config. See https://github.com/spytensor/codeRoom for docs.
+# CoreRoom project config. See https://github.com/spytensor/CoreRoom for docs.
 
 # Engine used by any role that doesn't override.
 # Options: "cc" (Claude Code), "codex", "gemini".
@@ -14,7 +14,7 @@ permission_mode = "ask"
 host_role = "host"
 
 # Each [roles.<name>] declares a role. The role's priors live at
-# .coderoom/roles/<name>/priors.md. Add more by creating that file AND
+# .coreroom/roles/<name>/priors.md. Add more by creating that file AND
 # adding a table here. Empty tables inherit the defaults above.
 # Optional identity fields:
 # owner = "alice@example.com"

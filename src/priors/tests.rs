@@ -1,24 +1,24 @@
 use super::*;
-use crate::config::CODEROOM_DIR;
+use crate::config::COREROOM_DIR;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-/// Create a `.coderoom/` skeleton with a single role's base priors.
+/// Create a `.coreroom/` skeleton with a single role's base priors.
 fn fixture(role: &str, role_body: &str) -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_role(&coderoom, role, role_body);
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_role(&coreroom, role, role_body);
     tmp
 }
 
-fn coderoom_of(tmp: &TempDir) -> PathBuf {
-    tmp.path().join(CODEROOM_DIR)
+fn coreroom_of(tmp: &TempDir) -> PathBuf {
+    tmp.path().join(COREROOM_DIR)
 }
 
-fn write_role(coderoom: &Path, role: &str, role_body: &str) {
-    let role_dir = coderoom.join(ROLES_DIR).join(role);
+fn write_role(coreroom: &Path, role: &str, role_body: &str) {
+    let role_dir = coreroom.join(ROLES_DIR).join(role);
     fs::create_dir_all(role_dir.join(crate::manifest::KNOWLEDGE_DIR)).unwrap();
     fs::write(role_dir.join(crate::manifest::ROLE_PRIORS_FILE), role_body).unwrap();
 }
@@ -39,11 +39,11 @@ fn assert_order(haystack: &str, earlier: &str, later: &str) {
 #[test]
 fn role_only_no_optional_pieces() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
-    assert!(composed.starts_with("# CodeRoom kernel protocol"));
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
+    assert!(composed.starts_with("# CoreRoom kernel protocol"));
     assert!(composed.contains("Authority: protocol"));
-    assert!(composed.contains("Source: .coderoom/roles/backend/priors.md"));
-    assert_order(&composed, "# CodeRoom kernel protocol", "## Role priors");
+    assert!(composed.contains("Source: .coreroom/roles/backend/priors.md"));
+    assert_order(&composed, "# CoreRoom kernel protocol", "## Role priors");
     assert_order(&composed, "## Role priors", "BACKEND_PRIORS");
     assert!(composed.contains("```cr-task"));
 }
@@ -51,20 +51,20 @@ fn role_only_no_optional_pieces() {
 #[test]
 fn legacy_role_priors_still_load_with_warning_source() {
     let tmp = TempDir::new().unwrap();
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    fs::create_dir_all(coderoom.join(ROLES_DIR)).unwrap();
-    fs::write(coderoom.join(ROLES_DIR).join("backend.md"), "LEGACY_PRIORS").unwrap();
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::create_dir_all(coreroom.join(ROLES_DIR)).unwrap();
+    fs::write(coreroom.join(ROLES_DIR).join("backend.md"), "LEGACY_PRIORS").unwrap();
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     assert!(composed.contains("LEGACY_PRIORS"));
-    assert!(composed.contains("Source: .coderoom/roles/backend.md (legacy)"));
+    assert!(composed.contains("Source: .coreroom/roles/backend.md (legacy)"));
 }
 
 #[test]
 fn compose_includes_manifest_knowledge_in_manifest_order() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let role_dir = coderoom.join(ROLES_DIR).join("backend");
+    let coreroom = coreroom_of(&tmp);
+    let role_dir = coreroom.join(ROLES_DIR).join("backend");
     let knowledge_dir = role_dir.join(crate::manifest::KNOWLEDGE_DIR);
     let b_path = knowledge_dir.join("b-runbook.md");
     let a_path = knowledge_dir.join("a-stack.md");
@@ -89,7 +89,7 @@ fn compose_includes_manifest_knowledge_in_manifest_order() {
     )
     .unwrap();
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     assert!(composed.contains("## Role knowledge"));
     assert!(composed.contains("SHA256:"));
     assert!(composed.contains("B_RUNBOOK"));
@@ -100,23 +100,23 @@ fn compose_includes_manifest_knowledge_in_manifest_order() {
 #[test]
 fn compose_scans_unmanifested_knowledge_alphabetically() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let knowledge_dir = coderoom
+    let coreroom = coreroom_of(&tmp);
+    let knowledge_dir = coreroom
         .join(ROLES_DIR)
         .join("backend")
         .join(crate::manifest::KNOWLEDGE_DIR);
     fs::write(knowledge_dir.join("z.txt"), "Z_DOC").unwrap();
     fs::write(knowledge_dir.join("a.md"), "A_DOC").unwrap();
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     assert_order(&composed, "### a.md", "### z.txt");
 }
 
 #[test]
 fn compose_errors_on_knowledge_manifest_sha_drift() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let role_dir = coderoom.join(ROLES_DIR).join("backend");
+    let coreroom = coreroom_of(&tmp);
+    let role_dir = coreroom.join(ROLES_DIR).join("backend");
     let knowledge_dir = role_dir.join(crate::manifest::KNOWLEDGE_DIR);
     fs::write(knowledge_dir.join("runbook.md"), "CURRENT").unwrap();
     crate::manifest::write_manifest(
@@ -131,7 +131,7 @@ fn compose_errors_on_knowledge_manifest_sha_drift() {
     )
     .unwrap();
 
-    let err = compose_for(&coderoom, "backend").expect_err("sha mismatch should fail");
+    let err = compose_for(&coreroom, "backend").expect_err("sha mismatch should fail");
     assert!(format!("{err:#}").contains("manifest drift"));
 }
 
@@ -141,13 +141,13 @@ fn compose_hard_errors_above_size_limit_unless_overridden() {
         "backend",
         &"x".repeat(crate::manifest::MAX_COMPOSED_PRIORS_BYTES + 1),
     );
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
 
-    let err = compose_for(&coderoom, "backend").expect_err("large priors should fail");
+    let err = compose_for(&coreroom, "backend").expect_err("large priors should fail");
     assert!(format!("{err:#}").contains("--allow-large-priors"));
 
     let composed = compose_for_with_options(
-        &coderoom,
+        &coreroom,
         "backend",
         ComposeOptions {
             allow_large_priors: true,
@@ -174,7 +174,7 @@ fn kernel_protocol_teaches_peer_quote_envelope() {
     assert!(KERNEL_PROTOCOL.contains("`@peer turn=<turn_id>`"));
     assert!(KERNEL_PROTOCOL.contains("without peer verification"));
     assert!(KERNEL_PROTOCOL.contains("Tier 0/read-only work reports evidence inline"));
-    assert!(KERNEL_PROTOCOL.contains("must not write `.coderoom/` gate or review artifacts"));
+    assert!(KERNEL_PROTOCOL.contains("must not write `.coreroom/` gate or review artifacts"));
     assert!(!KERNEL_PROTOCOL.contains("route as `From @sender: <text>`"));
 }
 
@@ -208,13 +208,13 @@ fn kernel_protocol_teaches_phase_gate_contract() {
 #[test]
 fn shared_then_role_separated_by_fence() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    fs::write(coderoom_of(&tmp).join(SHARED_FILE), "SHARED_PRIORS").unwrap();
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    fs::write(coreroom_of(&tmp).join(SHARED_FILE), "SHARED_PRIORS").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(composed.contains("## Project shared priors"));
-    assert!(composed.contains("Source: .coderoom/shared.md"));
+    assert!(composed.contains("Source: .coreroom/shared.md"));
     assert_order(
         &composed,
-        "# CodeRoom kernel protocol",
+        "# CoreRoom kernel protocol",
         "## Project shared priors",
     );
     assert_order(&composed, "## Project shared priors", "SHARED_PRIORS");
@@ -225,14 +225,14 @@ fn shared_then_role_separated_by_fence() {
 #[test]
 fn compose_includes_team_roster_for_peer_roles() {
     let tmp = fixture("backend", "# Backend\n\nOwns APIs.");
-    let coderoom = coderoom_of(&tmp);
-    fs::write(coderoom.join(CONFIG_FILE), "host_role = \"host\"\n").unwrap();
-    write_role(&coderoom, "host", "# Host\n\nRoutes work.");
-    write_role(&coderoom, "security", "# Security\n\nReviews risk.");
+    let coreroom = coreroom_of(&tmp);
+    fs::write(coreroom.join(CONFIG_FILE), "host_role = \"host\"\n").unwrap();
+    write_role(&coreroom, "host", "# Host\n\nRoutes work.");
+    write_role(&coreroom, "security", "# Security\n\nReviews risk.");
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     assert!(composed.contains("## Team roster"));
-    assert!(composed.contains("Source: .coderoom/roles/*/priors.md"));
+    assert!(composed.contains("Source: .coreroom/roles/*/priors.md"));
     assert!(composed.contains("@host (host): Routes work."));
     assert!(composed.contains("@security: Reviews risk."));
     assert!(!composed.contains("@backend:"));
@@ -241,8 +241,8 @@ fn compose_includes_team_roster_for_peer_roles() {
 #[test]
 fn empty_shared_md_is_skipped() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    fs::write(coderoom_of(&tmp).join(SHARED_FILE), "   \n").unwrap();
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    fs::write(coreroom_of(&tmp).join(SHARED_FILE), "   \n").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(
         !composed.contains("SHARED_PRIORS"),
         "empty shared priors should not be included: {composed:?}"
@@ -252,7 +252,7 @@ fn empty_shared_md_is_skipped() {
 #[test]
 fn patches_appear_in_numeric_order() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let patches_dir = coderoom_of(&tmp).join(PATCHES_DIR).join("backend");
+    let patches_dir = coreroom_of(&tmp).join(PATCHES_DIR).join("backend");
     fs::create_dir_all(&patches_dir).unwrap();
     // Intentionally non-alphabetical creation order: 010 < 002 alphabetically
     // but should sort 002 < 010 numerically.
@@ -260,8 +260,8 @@ fn patches_appear_in_numeric_order() {
     fs::write(patches_dir.join("002-mid.md"), "PATCH_TWO").unwrap();
     fs::write(patches_dir.join("001-first.md"), "PATCH_ONE").unwrap();
 
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
-    assert!(composed.contains("Source: .coderoom/patches/backend/"));
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
+    assert!(composed.contains("Source: .coreroom/patches/backend/"));
     let one = composed.find("PATCH_ONE").expect("contains PATCH_ONE");
     let two = composed.find("PATCH_TWO").expect("contains PATCH_TWO");
     let ten = composed.find("PATCH_TEN").expect("contains PATCH_TEN");
@@ -272,13 +272,13 @@ fn patches_appear_in_numeric_order() {
 #[test]
 fn underscored_files_are_skipped() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let patches_dir = coderoom_of(&tmp).join(PATCHES_DIR).join("backend");
+    let patches_dir = coreroom_of(&tmp).join(PATCHES_DIR).join("backend");
     fs::create_dir_all(&patches_dir).unwrap();
     fs::write(patches_dir.join("001-keep.md"), "KEEP").unwrap();
     fs::write(patches_dir.join("_archive_note.md"), "DROP_ARCHIVE").unwrap();
     fs::write(patches_dir.join("not-a-patch.txt"), "DROP_TXT").unwrap();
 
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(composed.contains("KEEP"));
     assert!(!composed.contains("DROP_ARCHIVE"));
     assert!(!composed.contains("DROP_TXT"));
@@ -287,7 +287,7 @@ fn underscored_files_are_skipped() {
 #[test]
 fn missing_role_priors_errors_with_path_in_message() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let err = compose_for(&coderoom_of(&tmp), "frontend").expect_err("missing role");
+    let err = compose_for(&coreroom_of(&tmp), "frontend").expect_err("missing role");
     let msg = format!("{err:#}");
     assert!(msg.contains("frontend"), "error mentions role name: {msg}");
 }
@@ -296,20 +296,20 @@ fn missing_role_priors_errors_with_path_in_message() {
 fn header_appears_only_when_patches_present() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
     // No patches dir at all.
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(!composed.contains("Active patches"));
 
     // Empty patches dir present but no patch files.
-    let patches_dir = coderoom_of(&tmp).join(PATCHES_DIR).join("backend");
+    let patches_dir = coreroom_of(&tmp).join(PATCHES_DIR).join("backend");
     fs::create_dir_all(&patches_dir).unwrap();
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(!composed.contains("Active patches"));
 }
 
 #[test]
 fn composition_ends_with_single_trailing_newline() {
     let tmp = fixture("backend", "BACKEND_PRIORS\n\n\n");
-    let composed = compose_for(&coderoom_of(&tmp), "backend").unwrap();
+    let composed = compose_for(&coreroom_of(&tmp), "backend").unwrap();
     assert!(composed.ends_with('\n'));
     assert!(!composed.ends_with("\n\n"));
 }
@@ -331,8 +331,8 @@ fn slugify_basic_cases() {
 #[test]
 fn write_patch_creates_numbered_file() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let outcome = write_patch(&coderoom, "backend", "use verify_token()").unwrap();
+    let coreroom = coreroom_of(&tmp);
+    let outcome = write_patch(&coreroom, "backend", "use verify_token()").unwrap();
 
     assert!(outcome.path.exists());
     assert!(outcome.archived.is_none());
@@ -352,14 +352,14 @@ fn write_patch_creates_numbered_file() {
 #[test]
 fn write_patch_increments_across_archived_entries() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let dir = coderoom.join(PATCHES_DIR).join("backend");
+    let coreroom = coreroom_of(&tmp);
+    let dir = coreroom.join(PATCHES_DIR).join("backend");
     let archive = dir.join(ARCHIVE_SUBDIR);
     fs::create_dir_all(&archive).unwrap();
     // Pretend 003 was already archived.
     fs::write(archive.join("003-old.md"), "OLD").unwrap();
 
-    let outcome = write_patch(&coderoom, "backend", "fresh patch").unwrap();
+    let outcome = write_patch(&coreroom, "backend", "fresh patch").unwrap();
     let name = outcome.path.file_name().unwrap().to_str().unwrap();
     assert!(
         name.starts_with("004-"),
@@ -370,11 +370,11 @@ fn write_patch_increments_across_archived_entries() {
 #[test]
 fn write_patch_enforces_fifo_cap() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
 
     // Write MAX patches; none should be archived yet.
     for i in 0..MAX_ACTIVE_PATCHES_PER_ROLE {
-        let out = write_patch(&coderoom, "backend", &format!("patch {i}")).unwrap();
+        let out = write_patch(&coreroom, "backend", &format!("patch {i}")).unwrap();
         assert!(
             out.archived.is_none(),
             "iteration {i} unexpectedly archived"
@@ -382,7 +382,7 @@ fn write_patch_enforces_fifo_cap() {
     }
 
     // The (MAX+1)-th write should evict the oldest active entry.
-    let out = write_patch(&coderoom, "backend", "overflow").unwrap();
+    let out = write_patch(&coreroom, "backend", "overflow").unwrap();
     let archived = out.archived.expect("expected archival on overflow");
     let name = archived.file_name().unwrap().to_str().unwrap();
     assert!(
@@ -390,14 +390,14 @@ fn write_patch_enforces_fifo_cap() {
         "FIFO should evict sequence 001 first: {name}"
     );
     assert!(archived.starts_with(
-        coderoom
+        coreroom
             .join(PATCHES_DIR)
             .join("backend")
             .join(ARCHIVE_SUBDIR)
     ));
 
     // Active dir should now hold exactly MAX entries again.
-    let dir = coderoom.join(PATCHES_DIR).join("backend");
+    let dir = coreroom.join(PATCHES_DIR).join("backend");
     let active_count = fs::read_dir(&dir)
         .unwrap()
         .filter_map(Result::ok)
@@ -409,8 +409,8 @@ fn write_patch_enforces_fifo_cap() {
 #[test]
 fn compact_role_appends_archived_patch_and_old_journal_summary() {
     let tmp = fixture("backend", "BACKEND_PRIORS\n");
-    let coderoom = coderoom_of(&tmp);
-    let archive = coderoom
+    let coreroom = coreroom_of(&tmp);
+    let archive = coreroom
         .join(PATCHES_DIR)
         .join("backend")
         .join(ARCHIVE_SUBDIR);
@@ -423,7 +423,7 @@ fn compact_role_appends_archived_patch_and_old_journal_summary() {
         .unwrap()
         .format("%Y-%m-%d")
         .to_string();
-    let old_dir = coderoom.join(JOURNAL_DIR).join(&old_day);
+    let old_dir = coreroom.join(JOURNAL_DIR).join(&old_day);
     fs::create_dir_all(&old_dir).unwrap();
     fs::write(
         old_dir.join("backend.md"),
@@ -431,7 +431,7 @@ fn compact_role_appends_archived_patch_and_old_journal_summary() {
     )
     .unwrap();
 
-    let path = compact_role(&coderoom, "backend").unwrap();
+    let path = compact_role(&coreroom, "backend").unwrap();
     let body = fs::read_to_string(path).unwrap();
     assert!(body.contains("## Compacted history"));
     assert!(body.contains("Archived patch"));
@@ -451,20 +451,20 @@ fn next_patch_seq_starts_at_1_for_empty() {
 #[test]
 fn recent_journals_includes_today_and_recent_days() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
     let today = chrono::Local::now().date_naive();
     let yesterday = today - chrono::Duration::days(1);
     let too_old = today - chrono::Duration::days(30);
 
     for date in [today, yesterday, too_old] {
-        let dir = coderoom
+        let dir = coreroom
             .join(JOURNAL_DIR)
             .join(date.format("%Y-%m-%d").to_string());
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("backend.md"), format!("entry for {date}")).unwrap();
     }
 
-    let entries = recent_journals(&coderoom, "backend", 7).unwrap();
+    let entries = recent_journals(&coreroom, "backend", 7).unwrap();
     assert_eq!(entries.len(), 2, "today + yesterday only");
     // chronological order: yesterday first, then today.
     assert_eq!(entries[0].0, yesterday.format("%Y-%m-%d").to_string());
@@ -474,16 +474,16 @@ fn recent_journals_includes_today_and_recent_days() {
 #[test]
 fn recent_journals_filters_by_role() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
     let today = chrono::Local::now().date_naive();
-    let dir = coderoom
+    let dir = coreroom
         .join(JOURNAL_DIR)
         .join(today.format("%Y-%m-%d").to_string());
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("backend.md"), "BE").unwrap();
     fs::write(dir.join("frontend.md"), "FE").unwrap();
 
-    let backend = recent_journals(&coderoom, "backend", 7).unwrap();
+    let backend = recent_journals(&coreroom, "backend", 7).unwrap();
     assert_eq!(backend.len(), 1);
     assert!(backend[0].1.ends_with("backend.md"));
 }
@@ -491,8 +491,8 @@ fn recent_journals_filters_by_role() {
 #[test]
 fn recent_journals_handles_missing_dir() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
-    let entries = recent_journals(&coderoom, "backend", 7).unwrap();
+    let coreroom = coreroom_of(&tmp);
+    let entries = recent_journals(&coreroom, "backend", 7).unwrap();
     assert!(entries.is_empty());
 }
 
@@ -508,17 +508,17 @@ fn format_token_count_uses_one_decimal_kilo_suffix() {
 #[test]
 fn estimate_role_tokens_reads_role_plus_shared() {
     let tmp = fixture("backend", &"x".repeat(4_000));
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
     // No shared.md yet → kernel + ~4000 bytes / 4.
     assert_eq!(
-        estimate_role_tokens(&coderoom, "backend"),
+        estimate_role_tokens(&coreroom, "backend"),
         (KERNEL_PROTOCOL.len() as u64 + 4_000) / 4
     );
 
-    fs::write(coderoom.join(SHARED_FILE), "y".repeat(8_000)).unwrap();
+    fs::write(coreroom.join(SHARED_FILE), "y".repeat(8_000)).unwrap();
     // kernel + (4000 + 8000) / 4.
     assert_eq!(
-        estimate_role_tokens(&coderoom, "backend"),
+        estimate_role_tokens(&coreroom, "backend"),
         (KERNEL_PROTOCOL.len() as u64 + 12_000) / 4
     );
 }
@@ -526,11 +526,11 @@ fn estimate_role_tokens_reads_role_plus_shared() {
 #[test]
 fn estimate_role_tokens_returns_zero_for_unknown_role() {
     let tmp = fixture("backend", "x");
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
     // Unknown role still pays the fixed kernel estimate; splash callers only
     // pass declared roles.
     assert_eq!(
-        estimate_role_tokens(&coderoom, "ghost"),
+        estimate_role_tokens(&coreroom, "ghost"),
         KERNEL_PROTOCOL.len() as u64 / 4
     );
 }
@@ -538,17 +538,17 @@ fn estimate_role_tokens_returns_zero_for_unknown_role() {
 #[test]
 fn compose_includes_recent_journal_section() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
-    let coderoom = coderoom_of(&tmp);
+    let coreroom = coreroom_of(&tmp);
     let today = chrono::Local::now().date_naive();
-    let dir = coderoom
+    let dir = coreroom
         .join(JOURNAL_DIR)
         .join(today.format("%Y-%m-%d").to_string());
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("backend.md"), "JOURNAL_TODAY").unwrap();
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     assert!(composed.contains("Recent journal"));
-    assert!(composed.contains("Source: .coderoom/journal/YYYY-MM-DD/backend.md"));
+    assert!(composed.contains("Source: .coreroom/journal/YYYY-MM-DD/backend.md"));
     assert!(composed.contains("JOURNAL_TODAY"));
 }
 
@@ -557,8 +557,8 @@ fn compose_for_expands_pointer_tokens_with_repo_content() {
     use std::process::Command;
     let tmp = TempDir::new().unwrap();
     // Build a real git repo at tmp/ with a tracked source file, then
-    // put `.coderoom/` inside it so `compose_for`'s parent-of-
-    // coderoom-dir trick lands at the repo root.
+    // put `.coreroom/` inside it so `compose_for`'s parent-of-
+    // coreroom-dir trick lands at the repo root.
     Command::new("git")
         .arg("-C")
         .arg(tmp.path())
@@ -594,10 +594,10 @@ fn compose_for_expands_pointer_tokens_with_repo_content() {
     // file. Use HEAD-tracking (no SHA) — the `#L1` line anchor
     // satisfies the "at least one anchor signal" grammar requirement
     // without us having to hard-code the commit id in the fixture.
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_role(&coderoom, "backend", "Watch:\n[[watched.rs#L1]]\n");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_role(&coreroom, "backend", "Watch:\n[[watched.rs#L1]]\n");
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     // The pointer expanded to a code block carrying line 1's content.
     assert!(composed.contains("fn live()"));
     // The freshness annotation surfaces so the model knows what state
@@ -613,10 +613,10 @@ fn compose_for_surfaces_unresolvable_pointer_inline() {
     // succeed and inline a visible warning — silently dropping the
     // pointer would defeat the priors-author's intent of "this
     // matters" without telling the model anything was missing.
-    let coderoom = tmp.path().join(CODEROOM_DIR);
-    write_role(&coderoom, "backend", "Reference:\n[[gone.rs@deadbeef]]\n");
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    write_role(&coreroom, "backend", "Reference:\n[[gone.rs@deadbeef]]\n");
 
-    let composed = compose_for(&coderoom, "backend").unwrap();
+    let composed = compose_for(&coreroom, "backend").unwrap();
     // The pointer's status surfaces in the composed prompt so the
     // model sees "this reference didn't resolve" rather than silent
     // gap. The exact reason wording is implementation detail; we

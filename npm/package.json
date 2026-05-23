@@ -1,6 +1,6 @@
 {
   "name": "@spytensor/coreroom",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control.",
   "keywords": [
     "cli",
@@ -12,20 +12,19 @@
     "coreroom",
     "engineering-control-room"
   ],
-  "homepage": "https://github.com/spytensor/codeRoom",
+  "homepage": "https://github.com/spytensor/CoreRoom",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/spytensor/codeRoom.git"
+    "url": "git+https://github.com/spytensor/CoreRoom.git"
   },
   "bugs": {
-    "url": "https://github.com/spytensor/codeRoom/issues"
+    "url": "https://github.com/spytensor/CoreRoom/issues"
   },
   "license": "MIT",
   "author": "Charlie Zhu",
   "bin": {
     "cr": "./bin/cr",
-    "coreroom": "./bin/cr",
-    "croom": "./bin/cr"
+    "coreroom": "./bin/cr"
   },
   "scripts": {
     "postinstall": "node ./install.js"

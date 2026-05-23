@@ -1,8 +1,8 @@
-# CoreRoom rename and compatibility plan
+# CoreRoom v0.7 release rename plan
 
 Issue: #218  
 Tracker: #213  
-Decision date: 2026-05-23
+Release date: 2026-05-23
 
 ## Decision
 
@@ -15,117 +15,98 @@ The short positioning statement is:
 > CoreRoom is the host-led Engineering Control Room for AI-assisted software
 > engineering change.
 
-The `cr` command remains the stable happy-path command. It maps cleanly to
-CoreRoom and avoids unnecessary workflow churn. The optional long alias is
-`coreroom`; `croom` is a legacy compatibility alias during the rename window.
+The `cr` command remains the stable happy-path command. The optional long-form
+alias is `coreroom`.
 
-## Surface policy
+## Final v0.7 surface policy
 
-| Surface | v0.7 decision | Compatibility policy |
-| --- | --- | --- |
-| Product name | CoreRoom | Active docs, templates, runtime help, and splash text use CoreRoom. |
-| Product descriptor | Engineering Control Room for AI Agents | Use in README, npm metadata, Cargo description, tracker language, and repo metadata. |
-| Repository target | `spytensor/CoreRoom` preferred; `spytensor/coreroom` acceptable if owner prefers lowercase URLs | Owner-only GitHub rename happens after the staged PR lands. Existing `spytensor/codeRoom` URLs remain valid until owner action. |
-| Primary command | `cr` | Stable and non-breaking. |
-| Long command alias | `coreroom` | Added to npm metadata where packaging supports it. |
-| Legacy command alias | `croom` | Kept as legacy compatibility for one rename window. |
-| Rust package/lib | `coderoom` retained in v0.7 | Full crate rename to `coreroom` is deferred because it touches every integration import and release consumer. |
-| npm package | `@spytensor/coreroom` target | `@spytensor/coderoom` remains the legacy package spelling and should publish a compatibility/deprecation note if already public. |
-| Project state dir | Future default `.coreroom`; legacy `.coderoom` | v0.7 adds tested resolution policy. Write-path migration remains explicit and must not auto-move user files silently. |
-| Env vars | `COREROOM_*` preferred; `CODEROOM_*` legacy | New spelling wins when both are set. Legacy spelling remains accepted during the compatibility window. |
-| CREP | CoreRoom Event Protocol | Acronym remains stable. |
-| Control blocks | `cr-task` retained | `cr` still maps to CoreRoom; no protocol churn in v0.7. |
-| Historical docs/changelog | Preserve old references when they describe past releases | Active docs should use CoreRoom. Historical release entries may say CodeRoom with this rename note as context. |
+| Surface | v0.7 decision |
+| --- | --- |
+| Product name | CoreRoom |
+| Product descriptor | Engineering Control Room for AI Agents |
+| Repository | `spytensor/CoreRoom` |
+| Primary command | `cr` |
+| Long command alias | `coreroom` |
+| Rust package/lib | `coreroom` |
+| npm package | `@spytensor/coreroom` |
+| Project state dir | `.coreroom` |
+| Environment variables | `COREROOM_*` |
+| CREP | CoreRoom Event Protocol |
+| Control blocks | `cr-task` retained because `cr` remains the product command |
 
-## Audit
+## Release audit
 
-Command used:
+Before tagging v0.7.0, run the release rename audit from the PR evidence. The
+expected result is no matches for retired pre-v0.7 spellings.
+
+Then verify the active release surfaces:
 
 ```bash
-rg --count-matches "CodeRoom|codeRoom|coderoom|CODEROOM|\\.coderoom|@spytensor/coderoom|croom|github\\.com/spytensor/codeRoom|spytensor/codeRoom" -S .
+cargo check --all-targets
+cargo test --all-features --locked
+cargo clippy --all-targets --all-features -- -D warnings
+npm --prefix npm pack --dry-run --json
 ```
 
-The audit found references across active docs, runtime help, package metadata,
-tests/fixtures, source comments, historical docs, and generated hook internals.
-v0.7 handles them by category:
+## NPM release policy
 
-| Category | Decision |
-| --- | --- |
-| Active product docs | Migrate to CoreRoom where user-facing. |
-| Worker protocol | Migrate to CoreRoom and v0.7 tracker #213. |
-| PR template | Migrate tracker language to v0.7/#213. |
-| Cargo/npm metadata | Migrate descriptions and npm target package; keep Rust crate name in v0.7. |
-| Runtime help/splash/setup text | Migrate visible product text to CoreRoom. |
-| `.coderoom` paths | Keep runtime write path for v0.7; add tested `.coreroom` resolution policy. |
-| `CODEROOM_*` env vars | Add `COREROOM_*` alias policy and compatibility tests. |
-| Tests/fixtures | Update snapshots only where visible product text changed. Keep path fixtures for legacy compatibility. |
-| Hook sentinels and generated protocol files | Keep legacy identifiers until a dedicated hook migration issue. |
-| Historical changelog and old architecture docs | Keep historical references unless they are active entry points. |
+The npm package is `@spytensor/coreroom`.
 
-## State directory migration
+The package exposes:
 
-v0.7 does not silently move `.coderoom/` to `.coreroom/`.
+- `cr` as the primary command
+- `coreroom` as the long-form command alias
 
-The accepted resolution policy is:
+The installer downloads artifacts from
+`https://github.com/spytensor/CoreRoom/releases`.
 
-- If only `.coreroom/` exists, use it.
-- If only `.coderoom/` exists, treat it as legacy-compatible and warn that
-  migration requires explicit confirmation.
-- If neither exists, future new-project initialization should prefer
-  `.coreroom/` once the write-path migration is enabled.
-- If both exist, fail loudly and ask the user to resolve the conflict.
+The release workflow stages only the supported binary names for v0.7:
 
-This policy is implemented in `coderoom::rename::resolve_state_dir` and covered
-by `tests/rename_migration_test.rs`.
+- `cr`
+- `coreroom`
 
-The actual write-path migration is deferred intentionally. It should be a
-separate issue because it changes init behavior, hook templates, session paths,
-lock files, and restore/rollback expectations.
+## State and config policy
 
-## Environment-variable migration
+New project state uses `.coreroom/`.
 
-Preferred names use `COREROOM_*`.
+User config/cache paths use `coreroom` where platform conventions require a
+directory name.
 
-Legacy `CODEROOM_*` names remain accepted during the compatibility window. When
-both are set, the `COREROOM_*` spelling wins.
+Environment variables use the `COREROOM_*` prefix.
 
-`COREROOM_NO_UPDATE_CHECK` and legacy `CODEROOM_NO_UPDATE_CHECK` are accepted
-by the update notifier. Alias resolution is tested without mutating process
-environment.
+The v0.7 rename does not silently move existing local state. Any later migration
+for older local workspaces must be explicit, user-approved, and tracked as a
+separate issue because it can affect sessions, locks, hook files, and rollback
+expectations.
 
-## GitHub owner-only steps
+## GitHub owner steps
 
-After this PR lands, the owner should update repository metadata:
+The repository is now `spytensor/CoreRoom`.
 
-- Rename repo to `spytensor/CoreRoom` or `spytensor/coreroom`.
-- Set description to:
+Repository metadata should stay aligned with:
+
+- Description:
   `CoreRoom is the Engineering Control Room for AI Agents: a host-led, GitHub-gated system for AI-assisted software engineering change.`
-- Add/keep topics:
+- Topics:
   `coreroom`, `engineering-control-room`, `ai-agents`, `agentic-engineering`,
   `github-issues`, `work-orders`, `ai-engineering`, `codex`, `claude-code`.
-- Confirm GitHub redirects from `spytensor/codeRoom`.
-- Update release badges/URLs after the repo rename is complete.
 
 ## Release notes
 
-CoreRoom v0.7 starts the staged rename from CodeRoom to CoreRoom:
+CoreRoom v0.7.0 completes the rename across active product surfaces:
 
-- Product-facing docs and runtime help now use CoreRoom.
-- `cr` remains the primary command.
-- npm metadata targets `@spytensor/coreroom` with `coreroom` as a long-form
-  alias and `croom` as a legacy alias.
-- Rust package/lib name remains `coderoom` for this stage.
-- `.coderoom/` remains supported; `.coreroom/` migration is defined but not
-  silently executed.
-- `COREROOM_NO_UPDATE_CHECK` is preferred; `CODEROOM_NO_UPDATE_CHECK` remains
-  accepted.
+- Product-facing docs and runtime help use CoreRoom.
+- Repository URLs target `spytensor/CoreRoom`.
+- Cargo metadata uses package/lib name `coreroom`.
+- npm metadata uses `@spytensor/coreroom`.
+- Release artifacts expose `cr` and `coreroom`.
+- Project state uses `.coreroom/`.
+- Environment variables use `COREROOM_*`.
 
 ## Rollback
 
-Revert the rename PR. Because `cr` stays stable and `.coderoom/` is not moved,
-rollback does not require filesystem migration.
+Rollback is a normal Git revert of the rename PR before v0.7.0 is tagged.
 
-If `@spytensor/coreroom` is published before rollback, keep the package with a
-compatibility/deprecation note instead of deleting it abruptly. If the GitHub
-repo is renamed, GitHub redirects old URLs; docs can be reverted in a follow-up
-PR while the owner decides whether to rename the repo back.
+After the v0.7.0 tag is published, rollback requires a new corrective release
+because package names, release artifacts, and public documentation will already
+have been published under the CoreRoom surface.

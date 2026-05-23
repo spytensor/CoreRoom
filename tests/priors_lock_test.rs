@@ -4,7 +4,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
-use coderoom::config::CODEROOM_DIR;
+use coreroom::config::COREROOM_DIR;
 
 fn cr() -> Command {
     Command::cargo_bin("cr").expect("binary")
@@ -19,7 +19,7 @@ fn init_writes_lock_and_verify_passes() {
         .assert()
         .success();
 
-    let lock = coderoom::lock::read(&tmp.path().join(CODEROOM_DIR)).expect("lock parses");
+    let lock = coreroom::lock::read(&tmp.path().join(COREROOM_DIR)).expect("lock parses");
     assert!(lock.roles.contains_key("host"));
     assert!(lock.roles["host"]
         .layers
@@ -46,7 +46,7 @@ fn verify_reports_drift_and_lock_regenerates() {
 
     fs::write(
         tmp.path()
-            .join(CODEROOM_DIR)
+            .join(COREROOM_DIR)
             .join("roles")
             .join("host")
             .join("priors.md"),
@@ -90,7 +90,7 @@ fn lock_records_mounted_knowledge_layers() {
     .success();
     cr().args(["lock", "--project", project]).assert().success();
 
-    let lock = coderoom::lock::read(&tmp.path().join(CODEROOM_DIR)).expect("lock parses");
+    let lock = coreroom::lock::read(&tmp.path().join(COREROOM_DIR)).expect("lock parses");
     assert!(lock.roles["engineer"].layers.iter().any(|layer| {
         layer.kind == "knowledge" && layer.path.ends_with("/knowledge/runbook.md")
     }));

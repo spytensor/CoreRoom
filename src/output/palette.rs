@@ -77,7 +77,7 @@ pub const RULE: Color = Color::Rgb {
     g: 0x6a,
     b: 0x6a,
 };
-/// Boot splash frame stroke and the "codeRoom" wordmark — Tailwind teal-300.
+/// Boot splash frame stroke and the "CoreRoom" wordmark — Tailwind teal-300.
 pub const SPLASH_FRAME: Color = Color::Rgb {
     r: 0x5e,
     g: 0xea,

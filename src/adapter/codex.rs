@@ -114,7 +114,7 @@ impl EngineAdapter for CodexAdapter {
             return Err(AdapterError::Engine {
                 engine: Engine::Codex.as_str(),
                 message: format!(
-                    "Codex permission_mode=\"{}\" needs a live CodeRoom REPL with \
+                    "Codex permission_mode=\"{}\" needs a live CoreRoom REPL with \
                      a permission bridge; none was supplied. Use permission_mode=\"bypass\" \
                      for headless contexts (smoke tests, `cr show`).",
                     config.permission_mode.as_str()
@@ -314,7 +314,7 @@ async fn send_codex_cancellation(
     w.flush().await
 }
 
-/// JSON-RPC envelope CodeRoom sends to codex on `/halt`. Pulled out
+/// JSON-RPC envelope CoreRoom sends to codex on `/halt`. Pulled out
 /// of the writer path so unit tests can verify the wire shape without
 /// constructing an `Arc<Mutex<ChildStdin>>`.
 fn codex_cancellation_line(request_id: u64) -> String {
@@ -323,7 +323,7 @@ fn codex_cancellation_line(request_id: u64) -> String {
         "method": "notifications/cancelled",
         "params": {
             "requestId": request_id,
-            "reason": "CodeRoom user halted turn",
+            "reason": "CoreRoom user halted turn",
         },
     });
     format!("{envelope}\n")
@@ -369,8 +369,8 @@ struct PendingEntry {
     activity: Arc<Notify>,
     partial_text: Arc<Mutex<String>>,
     thread_id: Arc<Mutex<Option<String>>>,
-    coderoom_turn_id: TurnId,
-    coderoom_thread_id: TurnId,
+    coreroom_turn_id: TurnId,
+    coreroom_thread_id: TurnId,
 }
 
 #[derive(Clone)]
@@ -443,7 +443,7 @@ impl RpcClient {
         let activity = Arc::new(Notify::new());
         let partial_text = Arc::new(Mutex::new(String::new()));
         let thread_id = Arc::new(Mutex::new(None));
-        let (coderoom_turn_id, coderoom_thread_id) = turn_ids.unwrap_or_else(|| {
+        let (coreroom_turn_id, coreroom_thread_id) = turn_ids.unwrap_or_else(|| {
             (
                 crate::turn::LEGACY_TURN_ID.into(),
                 crate::turn::LEGACY_TURN_ID.into(),
@@ -456,8 +456,8 @@ impl RpcClient {
                 activity: Arc::clone(&activity),
                 partial_text: Arc::clone(&partial_text),
                 thread_id: Arc::clone(&thread_id),
-                coderoom_turn_id,
-                coderoom_thread_id,
+                coreroom_turn_id,
+                coreroom_thread_id,
             },
         );
         let _guard = PendingRequestGuard {
@@ -520,7 +520,7 @@ impl RpcClient {
                 serde_json::json!({
                     "protocolVersion": MCP_PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": {"name": "coderoom", "version": env!("CARGO_PKG_VERSION")},
+                    "clientInfo": {"name": "coreroom", "version": env!("CARGO_PKG_VERSION")},
                 }),
             )
             .await?;
@@ -676,8 +676,8 @@ async fn read_rpc_loop(
                             Arc::clone(&entry.activity),
                             Arc::clone(&entry.partial_text),
                             Arc::clone(&entry.thread_id),
-                            entry.coderoom_turn_id.clone(),
-                            entry.coderoom_thread_id.clone(),
+                            entry.coreroom_turn_id.clone(),
+                            entry.coreroom_thread_id.clone(),
                         )
                     })
                 } else {
@@ -731,7 +731,7 @@ async fn read_rpc_loop(
     debug!(role = %runtime.role, "codex rpc loop exiting");
 }
 
-/// Map CodeRoom's permission_mode to codex's `approval-policy`.
+/// Map CoreRoom's permission_mode to codex's `approval-policy`.
 /// `ask` becomes `untrusted` (codex asks for ~everything that isn't
 /// trivially safe), `auto` becomes `on-request` (codex asks only for
 /// genuinely risky calls), `bypass` becomes `never` (codex never asks).
@@ -743,8 +743,8 @@ fn codex_approval_policy(mode: PermissionMode) -> &'static str {
     }
 }
 
-/// Map CodeRoom's permission_mode to codex's command sandbox.
-/// `bypass` is CodeRoom's yolo mode, so it must disable both approvals
+/// Map CoreRoom's permission_mode to codex's command sandbox.
+/// `bypass` is CoreRoom's yolo mode, so it must disable both approvals
 /// and Codex's own sandbox. Keeping `workspace-write` here still invokes
 /// Codex's Linux sandbox and can fail in hosts where bubblewrap networking
 /// setup is unavailable.
@@ -807,7 +807,7 @@ async fn handle_server_request(
             "id": id.0,
             "error": {
                 "code": -32601,
-                "message": format!("method not supported by CodeRoom wrapper: {other}"),
+                "message": format!("method not supported by CoreRoom wrapper: {other}"),
             },
         }),
     };
@@ -848,7 +848,7 @@ async fn handle_approval_request(
             role,
             id,
             matches!(decision, crate::permissions::PermissionDecision::Allow),
-            "CodeRoom session policy",
+            "CoreRoom session policy",
             &tool,
             &summary,
             events,
@@ -920,7 +920,7 @@ async fn handle_approval_request(
                 role,
                 id,
                 false,
-                &format!("CodeRoom permission bridge failed: {error}"),
+                &format!("CoreRoom permission bridge failed: {error}"),
                 &tool,
                 &summary,
                 events,
@@ -1047,7 +1047,7 @@ fn codex_event_thread_id(value: &Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-/// Translate one JSON-RPC line from codex stdout into a CodeRoom CREP
+/// Translate one JSON-RPC line from codex stdout into a CoreRoom CREP
 /// event. Codex 0.130+ wraps every lifecycle/tool/text update inside a
 /// single `codex/event` notification with the actual variant name in
 /// `params.msg.type`. Earlier guesses at `notifications/exec_command_*`
@@ -1280,7 +1280,7 @@ async fn write_loop(
             UserMessage::Prompt(prompt) => prompt,
             UserMessage::CompactContext { respond_to } => {
                 let _ = respond_to.send(CompactResult::Unsupported {
-                    reason: "Codex live context compaction is not wired through CodeRoom yet"
+                    reason: "Codex live context compaction is not wired through CoreRoom yet"
                         .to_owned(),
                 });
                 continue;
@@ -1983,7 +1983,7 @@ mod tests {
                 assert_eq!(role, "qa");
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(tool_input["command"], json!(["bash", "-c", "ls"]));
-                assert_eq!(reason, "CodeRoom session policy");
+                assert_eq!(reason, "CoreRoom session policy");
             }
             other => panic!("unexpected event: {other:?}"),
         }

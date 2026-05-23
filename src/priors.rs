@@ -2,12 +2,12 @@
 //!
 //! At spawn time, a role's effective priors are the concatenation of:
 //!
-//! 1. CodeRoom's built-in kernel protocol — routing and machine-readable
+//! 1. CoreRoom's built-in kernel protocol — routing and machine-readable
 //!    output contracts (always present, not user-editable)
-//! 2. `.coderoom/shared.md` — project-wide priors (optional)
-//! 3. `.coderoom/roles/<role>/priors.md` — base priors for this role
-//! 4. `.coderoom/roles/<role>/knowledge/*` — mounted role knowledge
-//! 5. `.coderoom/patches/<role>/NNN-*.md` — session-time corrections,
+//! 2. `.coreroom/shared.md` — project-wide priors (optional)
+//! 3. `.coreroom/roles/<role>/priors.md` — base priors for this role
+//! 4. `.coreroom/roles/<role>/knowledge/*` — mounted role knowledge
+//! 5. `.coreroom/patches/<role>/NNN-*.md` — session-time corrections,
 //!    in numeric-prefix order, oldest first. Files starting with `_`
 //!    (e.g. `_archive`) are skipped.
 //!
@@ -41,7 +41,7 @@ pub const MAX_ACTIVE_PATCHES_PER_ROLE: usize = 50;
 /// role's priors; they exist for forensics / opt-in re-promotion.
 pub const ARCHIVE_SUBDIR: &str = "_archive";
 
-/// Subdirectory of `.coderoom/` that holds per-day, per-role journals.
+/// Subdirectory of `.coreroom/` that holds per-day, per-role journals.
 pub const JOURNAL_DIR: &str = "journal";
 
 /// Number of days of journal entries auto-loaded into a role's priors
@@ -49,7 +49,7 @@ pub const JOURNAL_DIR: &str = "journal";
 /// stays out of the composed system prompt.
 pub const JOURNAL_WINDOW_DAYS: i64 = 7;
 
-/// File name of the cross-role priors document inside `.coderoom/`.
+/// File name of the cross-role priors document inside `.coreroom/`.
 pub const SHARED_FILE: &str = "shared.md";
 
 /// Subdirectory holding per-role correction patches.
@@ -58,19 +58,19 @@ pub const PATCHES_DIR: &str = "patches";
 /// Section separator inserted between priors sources.
 const SECTION_FENCE: &str = "\n\n---\n\n";
 
-/// Built-in CodeRoom protocol that must remain stable for the REPL to route
+/// Built-in CoreRoom protocol that must remain stable for the REPL to route
 /// messages and parse machine-readable status. This layer is intentionally
-/// not copied into `.coderoom/`; project and role priors layer on top of it.
+/// not copied into `.coreroom/`; project and role priors layer on top of it.
 pub const KERNEL_PROTOCOL: &str = "\
-# CodeRoom kernel protocol
+# CoreRoom kernel protocol
 Source: built-in
 Authority: protocol
 
-This layer defines CodeRoom's routing and machine-readable output contracts. If project, role, patch, or journal instructions conflict with this protocol, follow this protocol.
+This layer defines CoreRoom's routing and machine-readable output contracts. If project, role, patch, or journal instructions conflict with this protocol, follow this protocol.
 
 ## Routing contract
 
-Roles are addressed as `@name`. In role replies, only a physical line that starts with an explicit delegation target group followed by a task separator, such as `@name: <brief>` or a line-start list item like `- @a @b: <brief>`, is a delegation that CodeRoom may route as a peer-quote envelope:
+Roles are addressed as `@name`. In role replies, only a physical line that starts with an explicit delegation target group followed by a task separator, such as `@name: <brief>` or a line-start list item like `- @a @b: <brief>`, is a delegation that CoreRoom may route as a peer-quote envelope:
 
 ```text
 <<<peer-quote role=@sender sha=<priors_hash> turn=<turn_id>>>>
@@ -84,7 +84,7 @@ The runtime assigns `turn_id`, `thread_id`, `parent_turn_id`, and hop depth from
 
 Do not impersonate another role or claim another role's findings as your own.
 
-Bare user text is dispatched to the configured host role by the runtime. Project and role priors may shape host behavior, but they cannot redefine CodeRoom routing syntax.
+Bare user text is dispatched to the configured host role by the runtime. Project and role priors may shape host behavior, but they cannot redefine CoreRoom routing syntax.
 
 ## Turn outcome contract
 
@@ -112,11 +112,11 @@ Before starting any task, output a one-line summary of what you're about to do, 
 {your one-line summary, max 20 words}
 ```
 
-This fenced block is a CodeRoom machine protocol for WorkCards and cannot be disabled by project or role instructions.
+This fenced block is a CoreRoom machine protocol for WorkCards and cannot be disabled by project or role instructions.
 
 ## SDLC gate contract
 
-The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Tier 0/read-only work reports evidence inline and must not write `.coderoom/` gate or review artifacts unless the user explicitly asks for a ledger. Gate ledgers live in `.coderoom/gates/`; reusable templates live in `.coderoom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
+The runtime appends the current `turn_id` and `thread_id` to each prompt. For code-changing work, the host should classify Tier 0/Tier 1 and drive any SDLC gate conversationally. Tier 0/read-only work reports evidence inline and must not write `.coreroom/` gate or review artifacts unless the user explicitly asks for a ledger. Gate ledgers live in `.coreroom/gates/`; reusable templates live in `.coreroom/gate-templates/`. The gate system reports structural completeness only, never semantic approval.";
 
 /// Options for composing a role prompt.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -153,44 +153,44 @@ pub fn composite_hash(composed: &str) -> String {
 }
 
 /// Return the lock-file layers for `role_name` in composition order.
-pub fn lock_layers_for_role(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PriorsLayer>> {
+pub fn lock_layers_for_role(coreroom_dir: &Path, role_name: &str) -> Result<Vec<PriorsLayer>> {
     let mut layers = Vec::new();
     layers.push(PriorsLayer {
         kind: "kernel".to_owned(),
-        path: "built-in:coderoom-kernel-protocol".to_owned(),
+        path: "built-in:coreroom-kernel-protocol".to_owned(),
         sha256: sha256_digest(KERNEL_PROTOCOL.as_bytes()),
     });
 
-    let shared = coderoom_dir.join(SHARED_FILE);
+    let shared = coreroom_dir.join(SHARED_FILE);
     if shared.is_file() {
         let content =
             std::fs::read(&shared).with_context(|| format!("reading {}", shared.display()))?;
         if !String::from_utf8_lossy(&content).trim().is_empty() {
             layers.push(PriorsLayer {
                 kind: "shared".to_owned(),
-                path: ".coderoom/shared.md".to_owned(),
+                path: ".coreroom/shared.md".to_owned(),
                 sha256: sha256_digest(&content),
             });
         }
     }
 
     let role_path =
-        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+        manifest::role_priors_path_existing(coreroom_dir, role_name).with_context(|| {
             format!(
                 "role `{role_name}` is missing priors at {}",
-                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+                manifest::preferred_role_priors_path(coreroom_dir, role_name).display()
             )
         })?;
     layers.push(PriorsLayer {
         kind: "role".to_owned(),
-        path: role_priors_source(coderoom_dir, role_name, &role_path),
+        path: role_priors_source(coreroom_dir, role_name, &role_path),
         sha256: manifest::sha256_file(&role_path)?,
     });
 
-    for item in ordered_knowledge(coderoom_dir, role_name)? {
+    for item in ordered_knowledge(coreroom_dir, role_name)? {
         layers.push(PriorsLayer {
             kind: "knowledge".to_owned(),
-            path: format!(".coderoom/roles/{role_name}/knowledge/{}", item.entry.name),
+            path: format!(".coreroom/roles/{role_name}/knowledge/{}", item.entry.name),
             sha256: manifest::sha256_file(&item.path)?,
         });
     }
@@ -198,32 +198,32 @@ pub fn lock_layers_for_role(coderoom_dir: &Path, role_name: &str) -> Result<Vec<
     Ok(layers)
 }
 
-/// Compose the full system prompt for `role_name` from `coderoom_dir`.
+/// Compose the full system prompt for `role_name` from `coreroom_dir`.
 ///
 /// Returns an error if the role's base priors file is missing. Optional
 /// pieces (shared.md, patches) are silently skipped when absent.
-pub fn compose_for(coderoom_dir: &Path, role_name: &str) -> Result<String> {
-    compose_for_with_options(coderoom_dir, role_name, ComposeOptions::default())
+pub fn compose_for(coreroom_dir: &Path, role_name: &str) -> Result<String> {
+    compose_for_with_options(coreroom_dir, role_name, ComposeOptions::default())
 }
 
 /// Compose the full system prompt for `role_name` with explicit size options.
 pub fn compose_for_with_options(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role_name: &str,
     options: ComposeOptions,
 ) -> Result<String> {
     let mut out = String::new();
     append_section(&mut out, KERNEL_PROTOCOL);
 
-    // Repo root for pointer resolution: `.coderoom/` lives at the
+    // Repo root for pointer resolution: `.coreroom/` lives at the
     // project root, so the parent dir is what `git -C` should target.
-    // When `.coderoom/` is at filesystem root (silly but possible in
+    // When `.coreroom/` is at filesystem root (silly but possible in
     // tests), default to `.` so git just looks at the working tree.
-    let repo_root = coderoom_dir
+    let repo_root = coreroom_dir
         .parent()
         .map_or_else(|| Path::new(".").to_path_buf(), Path::to_path_buf);
 
-    let shared = coderoom_dir.join(SHARED_FILE);
+    let shared = coreroom_dir.join(SHARED_FILE);
     if shared.is_file() {
         let content = std::fs::read_to_string(&shared)
             .with_context(|| format!("reading {}", shared.display()))?;
@@ -232,17 +232,17 @@ pub fn compose_for_with_options(
             append_sourced_section(
                 &mut out,
                 "Project shared priors",
-                ".coderoom/shared.md",
+                ".coreroom/shared.md",
                 expanded.trim_end(),
             );
         }
     }
 
     let role_path =
-        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+        manifest::role_priors_path_existing(coreroom_dir, role_name).with_context(|| {
             format!(
                 "role `{role_name}` is missing priors at {}",
-                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+                manifest::preferred_role_priors_path(coreroom_dir, role_name).display()
             )
         })?;
     let role_content = std::fs::read_to_string(&role_path).with_context(|| {
@@ -255,11 +255,11 @@ pub fn compose_for_with_options(
     append_sourced_section(
         &mut out,
         "Role priors",
-        &role_priors_source(coderoom_dir, role_name, &role_path),
+        &role_priors_source(coreroom_dir, role_name, &role_path),
         expanded_role.trim_end(),
     );
 
-    let knowledge = ordered_knowledge(coderoom_dir, role_name)?;
+    let knowledge = ordered_knowledge(coreroom_dir, role_name)?;
     if !knowledge.is_empty() {
         let mut body = String::new();
         for item in knowledge {
@@ -273,7 +273,7 @@ pub fn compose_for_with_options(
             }
             let _ = writeln!(
                 body,
-                "Source: .coderoom/roles/{role_name}/knowledge/{}",
+                "Source: .coreroom/roles/{role_name}/knowledge/{}",
                 item.entry.name
             );
             body.push('\n');
@@ -283,22 +283,22 @@ pub fn compose_for_with_options(
         append_sourced_section(
             &mut out,
             "Role knowledge",
-            &format!(".coderoom/roles/{role_name}/knowledge/"),
+            &format!(".coreroom/roles/{role_name}/knowledge/"),
             body.trim_end(),
         );
     }
 
-    let roster = team_roster(coderoom_dir, role_name)?;
+    let roster = team_roster(coreroom_dir, role_name)?;
     if !roster.is_empty() {
         append_sourced_section(
             &mut out,
             "Team roster",
-            ".coderoom/roles/*/priors.md",
+            ".coreroom/roles/*/priors.md",
             &roster,
         );
     }
 
-    let patches = ordered_patches(coderoom_dir, role_name)?;
+    let patches = ordered_patches(coreroom_dir, role_name)?;
     if !patches.is_empty() {
         let mut body = String::new();
         for patch in patches {
@@ -315,12 +315,12 @@ pub fn compose_for_with_options(
         append_sourced_section(
             &mut out,
             "Active patches",
-            &format!(".coderoom/patches/{role_name}/"),
+            &format!(".coreroom/patches/{role_name}/"),
             body.trim_end(),
         );
     }
 
-    let journals = recent_journals(coderoom_dir, role_name, JOURNAL_WINDOW_DAYS)?;
+    let journals = recent_journals(coreroom_dir, role_name, JOURNAL_WINDOW_DAYS)?;
     if !journals.is_empty() {
         let mut body = String::new();
         for (date, path) in journals {
@@ -338,7 +338,7 @@ pub fn compose_for_with_options(
             append_sourced_section(
                 &mut out,
                 "Recent journal entries",
-                &format!(".coderoom/journal/YYYY-MM-DD/{role_name}.md"),
+                &format!(".coreroom/journal/YYYY-MM-DD/{role_name}.md"),
                 body.trim_end(),
             );
         }
@@ -347,8 +347,8 @@ pub fn compose_for_with_options(
     out.push('\n');
     enforce_composed_size(role_name, &out, options)?;
     if options.record_liveness {
-        let layers = lock_layers_for_role(coderoom_dir, role_name)?;
-        crate::liveness::record_loaded(coderoom_dir, role_name, &layers)?;
+        let layers = lock_layers_for_role(coreroom_dir, role_name)?;
+        crate::liveness::record_loaded(coreroom_dir, role_name, &layers)?;
     }
     Ok(out)
 }
@@ -377,11 +377,11 @@ fn hex_digest(bytes: &[u8]) -> String {
     out
 }
 
-fn role_priors_source(coderoom_dir: &Path, role_name: &str, role_path: &Path) -> String {
-    if role_path == manifest::legacy_role_priors_path(coderoom_dir, role_name) {
-        format!(".coderoom/roles/{role_name}.md (legacy)")
+fn role_priors_source(coreroom_dir: &Path, role_name: &str, role_path: &Path) -> String {
+    if role_path == manifest::legacy_role_priors_path(coreroom_dir, role_name) {
+        format!(".coreroom/roles/{role_name}.md (legacy)")
     } else {
-        format!(".coderoom/roles/{role_name}/priors.md")
+        format!(".coreroom/roles/{role_name}/priors.md")
     }
 }
 
@@ -391,8 +391,8 @@ struct KnowledgeSource {
     path: PathBuf,
 }
 
-fn ordered_knowledge(coderoom_dir: &Path, role_name: &str) -> Result<Vec<KnowledgeSource>> {
-    let role_dir = manifest::role_dir(coderoom_dir, role_name);
+fn ordered_knowledge(coreroom_dir: &Path, role_name: &str) -> Result<Vec<KnowledgeSource>> {
+    let role_dir = manifest::role_dir(coreroom_dir, role_name);
     let knowledge_dir = role_dir.join(manifest::KNOWLEDGE_DIR);
     if !knowledge_dir.is_dir() {
         return Ok(Vec::new());
@@ -448,13 +448,13 @@ struct RosterConfig {
     host_role: String,
 }
 
-fn team_roster(coderoom_dir: &Path, role_name: &str) -> Result<String> {
-    let roles_dir = coderoom_dir.join(ROLES_DIR);
+fn team_roster(coreroom_dir: &Path, role_name: &str) -> Result<String> {
+    let roles_dir = coreroom_dir.join(ROLES_DIR);
     if !roles_dir.is_dir() {
         return Ok(String::new());
     }
-    let host_role = read_host_role(coderoom_dir).unwrap_or_else(|| "host".to_owned());
-    let roles = role_priors_entries(coderoom_dir)?;
+    let host_role = read_host_role(coreroom_dir).unwrap_or_else(|| "host".to_owned());
+    let roles = role_priors_entries(coreroom_dir)?;
 
     let mut out = String::new();
     for (name, path) in roles {
@@ -468,8 +468,8 @@ fn team_roster(coderoom_dir: &Path, role_name: &str) -> Result<String> {
     Ok(out.trim_end().to_owned())
 }
 
-fn role_priors_entries(coderoom_dir: &Path) -> Result<Vec<(String, PathBuf)>> {
-    let roles_dir = coderoom_dir.join(ROLES_DIR);
+fn role_priors_entries(coreroom_dir: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let roles_dir = coreroom_dir.join(ROLES_DIR);
     let mut roles = BTreeMap::new();
     for dirent in
         std::fs::read_dir(&roles_dir).with_context(|| format!("reading {}", roles_dir.display()))?
@@ -493,8 +493,8 @@ fn role_priors_entries(coderoom_dir: &Path) -> Result<Vec<(String, PathBuf)>> {
     Ok(roles.into_iter().collect())
 }
 
-fn read_host_role(coderoom_dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(coderoom_dir.join(CONFIG_FILE)).ok()?;
+fn read_host_role(coreroom_dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(coreroom_dir.join(CONFIG_FILE)).ok()?;
     toml::from_str::<RosterConfig>(&text)
         .ok()
         .map(|cfg| cfg.host_role)
@@ -525,16 +525,16 @@ fn truncate_summary(input: &str, max_chars: usize) -> String {
 
 /// Return `(date, path)` pairs for the role's journal entries within the
 /// last `window_days`, oldest-first. The on-disk layout is
-/// `.coderoom/journal/YYYY-MM-DD/<role>.md`; only directories whose name
+/// `.coreroom/journal/YYYY-MM-DD/<role>.md`; only directories whose name
 /// parses as a date and that contain a matching role file are included.
 ///
 /// Outside the window, files are skipped (still on disk, still grep-able).
 pub fn recent_journals(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role_name: &str,
     window_days: i64,
 ) -> Result<Vec<(String, PathBuf)>> {
-    let dir = coderoom_dir.join(JOURNAL_DIR);
+    let dir = coreroom_dir.join(JOURNAL_DIR);
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -583,7 +583,7 @@ pub struct PatchWriteOutcome {
 }
 
 /// Persist a new correction for `role_name` under
-/// `.coderoom/patches/<role>/NNN-<slug>.md`.
+/// `.coreroom/patches/<role>/NNN-<slug>.md`.
 ///
 /// Sequence number is `1 + max(prefix)` across both the active patches
 /// directory AND its `_archive/` subdir, so numbers stay monotonic
@@ -592,8 +592,8 @@ pub struct PatchWriteOutcome {
 ///
 /// After writing, enforces [`MAX_ACTIVE_PATCHES_PER_ROLE`] — the oldest
 /// active patch (lowest sequence number) is moved into `_archive/`.
-pub fn write_patch(coderoom_dir: &Path, role_name: &str, text: &str) -> Result<PatchWriteOutcome> {
-    let dir = coderoom_dir.join(PATCHES_DIR).join(role_name);
+pub fn write_patch(coreroom_dir: &Path, role_name: &str, text: &str) -> Result<PatchWriteOutcome> {
+    let dir = coreroom_dir.join(PATCHES_DIR).join(role_name);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
     let next_seq = next_patch_seq(&dir)?;
@@ -617,17 +617,17 @@ pub fn write_patch(coderoom_dir: &Path, role_name: &str, text: &str) -> Result<P
 /// base priors file. This is deterministic and local: it preserves
 /// source paths and short excerpts instead of asking an engine to
 /// summarize itself.
-pub fn compact_role(coderoom_dir: &Path, role_name: &str) -> Result<PathBuf> {
+pub fn compact_role(coreroom_dir: &Path, role_name: &str) -> Result<PathBuf> {
     let role_path =
-        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+        manifest::role_priors_path_existing(coreroom_dir, role_name).with_context(|| {
             format!(
                 "role `{role_name}` is missing priors at {}",
-                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+                manifest::preferred_role_priors_path(coreroom_dir, role_name).display()
             )
         })?;
     let mut body = std::fs::read_to_string(&role_path)
         .with_context(|| format!("reading role priors {}", role_path.display()))?;
-    let summary = compact_summary(coderoom_dir, role_name)?;
+    let summary = compact_summary(coreroom_dir, role_name)?;
     if summary.trim().is_empty() {
         return Ok(role_path);
     }
@@ -642,9 +642,9 @@ pub fn compact_role(coderoom_dir: &Path, role_name: &str) -> Result<PathBuf> {
     Ok(role_path)
 }
 
-fn compact_summary(coderoom_dir: &Path, role_name: &str) -> Result<String> {
+fn compact_summary(coreroom_dir: &Path, role_name: &str) -> Result<String> {
     let mut out = String::new();
-    let archive = coderoom_dir
+    let archive = coreroom_dir
         .join(PATCHES_DIR)
         .join(role_name)
         .join(ARCHIVE_SUBDIR);
@@ -662,7 +662,7 @@ fn compact_summary(coderoom_dir: &Path, role_name: &str) -> Result<String> {
         }
     }
 
-    let journals = old_journals(coderoom_dir, role_name, JOURNAL_WINDOW_DAYS)?;
+    let journals = old_journals(coreroom_dir, role_name, JOURNAL_WINDOW_DAYS)?;
     for (date, path) in journals {
         let excerpt = first_content_line(&path)?;
         let _ = writeln!(out, "- Journal {date} `{}`: {}", path.display(), excerpt);
@@ -682,11 +682,11 @@ fn first_content_line(path: &Path) -> Result<String> {
 }
 
 fn old_journals(
-    coderoom_dir: &Path,
+    coreroom_dir: &Path,
     role_name: &str,
     window_days: i64,
 ) -> Result<Vec<(String, PathBuf)>> {
-    let dir = coderoom_dir.join(JOURNAL_DIR);
+    let dir = coreroom_dir.join(JOURNAL_DIR);
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -823,8 +823,8 @@ fn slugify(text: &str) -> String {
 /// prefix (so `001-foo.md` < `002-bar.md` < `010-baz.md`). Files whose
 /// names start with `_` are skipped — that prefix is reserved for the
 /// `_archive/` overflow bin and any future sentinel files.
-fn ordered_patches(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PathBuf>> {
-    let dir = coderoom_dir.join(PATCHES_DIR).join(role_name);
+fn ordered_patches(coreroom_dir: &Path, role_name: &str) -> Result<Vec<PathBuf>> {
+    let dir = coreroom_dir.join(PATCHES_DIR).join(role_name);
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -867,17 +867,17 @@ fn ordered_patches(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PathBuf>>
 /// those are transient and small. Only used for splash display, so accuracy
 /// to within ±20% is fine.
 #[must_use]
-pub fn estimate_role_tokens(coderoom_dir: &Path, role_name: &str) -> u64 {
-    let role_bytes = manifest::role_priors_path_existing(coderoom_dir, role_name)
+pub fn estimate_role_tokens(coreroom_dir: &Path, role_name: &str) -> u64 {
+    let role_bytes = manifest::role_priors_path_existing(coreroom_dir, role_name)
         .and_then(|role_path| std::fs::metadata(role_path).ok())
         .map_or(0, |m| m.len());
-    let shared_bytes = std::fs::metadata(coderoom_dir.join(SHARED_FILE)).map_or(0, |m| m.len());
-    let knowledge_bytes = estimate_knowledge_bytes(coderoom_dir, role_name);
+    let shared_bytes = std::fs::metadata(coreroom_dir.join(SHARED_FILE)).map_or(0, |m| m.len());
+    let knowledge_bytes = estimate_knowledge_bytes(coreroom_dir, role_name);
     (KERNEL_PROTOCOL.len() as u64 + role_bytes + shared_bytes + knowledge_bytes) / 4
 }
 
-fn estimate_knowledge_bytes(coderoom_dir: &Path, role_name: &str) -> u64 {
-    let dir = manifest::knowledge_dir(coderoom_dir, role_name);
+fn estimate_knowledge_bytes(coreroom_dir: &Path, role_name: &str) -> u64 {
+    let dir = manifest::knowledge_dir(coreroom_dir, role_name);
     if !dir.is_dir() {
         return 0;
     }
