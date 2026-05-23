@@ -173,7 +173,7 @@ impl RuntimeSnapshot {
 }
 
 /// Freshness of the current room/session binding.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionFreshness {
     /// The room started fresh in this process.
@@ -183,6 +183,7 @@ pub enum SessionFreshness {
     /// The room resumed but the source session may be stale.
     Stale,
     /// Session freshness was not observed.
+    #[default]
     Unknown,
 }
 
@@ -192,13 +193,31 @@ pub enum SessionFreshness {
 pub struct RoleRuntimeSnapshot {
     /// Role name without `@`.
     pub role: String,
+    /// Whether this role is enabled in the room.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// Engine id such as `cc`, `codex`, or `gemini`.
     pub engine: String,
     /// Model label when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Role-specific permission mode summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+    /// Role session freshness.
+    #[serde(default)]
+    pub session_state: SessionFreshness,
+    /// Priors freshness when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priors_freshness: Option<RoleMaterialFreshness>,
+    /// Attached knowledge freshness when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_freshness: Option<RoleMaterialFreshness>,
     /// Role lane state.
     pub state: RoleLaneState,
+    /// Whether this role is currently waiting for approval.
+    #[serde(default)]
+    pub waiting_approval: bool,
     /// WorkOrder currently associated with the role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_work_order: Option<String>,
@@ -215,16 +234,32 @@ impl RoleRuntimeSnapshot {
         ensure_nonempty("role.role", &self.role)?;
         ensure_nonempty("role.engine", &self.engine)?;
         if let Some(work_order) = &self.current_work_order {
-            ensure_nonempty("role.currentWorkOrder", work_order)?;
+            ensure_work_order_id(work_order)?;
         }
         Ok(())
     }
+}
+
+/// Freshness for role identity material.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum RoleMaterialFreshness {
+    /// Material hash matches current expectation.
+    Fresh,
+    /// Material hash or liveness signal is stale.
+    Stale,
+    /// Material is missing.
+    Missing,
+    /// Freshness was not observed.
+    Unknown,
 }
 
 /// Role lane state.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum RoleLaneState {
+    /// Role is enabled but no runtime state has been observed yet.
+    Enabled,
     /// Role is configured but not currently doing work.
     Idle,
     /// Role has an active turn.
@@ -661,6 +696,10 @@ impl LayoutHints {
 
 fn default_schema_version() -> u32 {
     CONSOLE_SNAPSHOT_SCHEMA_VERSION
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn ensure_nonempty(field: &str, value: &str) -> Result<()> {

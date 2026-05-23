@@ -21,37 +21,102 @@ waitingApproval = false
 
 [[runtime.roles]]
 role = "host"
+enabled = true
 engine = "cc"
 model = "claude-code"
+permissionMode = "ask"
+sessionState = "resumed"
+priorsFreshness = "fresh"
+knowledgeFreshness = "unknown"
 state = "working"
+waitingApproval = false
 currentWorkOrder = "WO-0242"
 currentGatePhase = "implement"
 lastActivity = "Assembling CoreRoomSnapshot contract"
 
 [[runtime.roles]]
 role = "engineer"
+enabled = true
 engine = "codex"
 model = "gpt-5"
+permissionMode = "ask"
+sessionState = "fresh"
+priorsFreshness = "fresh"
+knowledgeFreshness = "fresh"
 state = "idle"
+waitingApproval = false
 lastActivity = "Available for reducer implementation"
 
 [[runtime.roles]]
 role = "reviewer"
+enabled = true
 engine = "codex"
 model = "gpt-5"
+permissionMode = "ask"
+sessionState = "resumed"
+priorsFreshness = "fresh"
+knowledgeFreshness = "fresh"
 state = "reviewing"
+waitingApproval = false
 currentWorkOrder = "WO-0242"
 currentGatePhase = "review"
 lastActivity = "Reviewing snapshot schema"
 
 [[runtime.roles]]
 role = "security"
+enabled = true
 engine = "cc"
 model = "sonnet"
+permissionMode = "ask"
+sessionState = "stale"
+priorsFreshness = "stale"
+knowledgeFreshness = "stale"
 state = "blocked"
+waitingApproval = false
 currentWorkOrder = "WO-0243"
 currentGatePhase = "discovery"
 lastActivity = "Waiting on source citation model"
+
+[[runtime.roles]]
+role = "qa"
+enabled = true
+engine = "codex"
+model = "gpt-5"
+permissionMode = "ask"
+sessionState = "fresh"
+priorsFreshness = "fresh"
+knowledgeFreshness = "missing"
+state = "waiting-approval"
+waitingApproval = true
+currentWorkOrder = "WO-0245"
+currentGatePhase = "qa"
+lastActivity = "Waiting for approval to run validation"
+
+[[runtime.roles]]
+role = "sre"
+enabled = true
+engine = "cc"
+model = "sonnet"
+permissionMode = "bypass"
+sessionState = "stale"
+priorsFreshness = "unknown"
+knowledgeFreshness = "stale"
+state = "stale-session"
+waitingApproval = false
+lastActivity = "Needs session refresh before deployment review"
+
+[[runtime.roles]]
+role = "product"
+enabled = true
+engine = "gemini"
+model = "pro"
+permissionMode = "ask"
+sessionState = "unknown"
+priorsFreshness = "unknown"
+knowledgeFreshness = "unknown"
+state = "waiting-user"
+waitingApproval = false
+lastActivity = "Waiting for product priority confirmation"
 
 [conversation]
 internalDelegationCount = 3

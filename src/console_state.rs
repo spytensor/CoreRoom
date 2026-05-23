@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::console_snapshot::{
     ConversationSnapshot, ConversationTurn, ConversationVisibility, InternalDelegationActivity,
-    InternalDelegationState,
+    InternalDelegationState, RoleLaneState, RoleRuntimeSnapshot, RuntimeSnapshot, SessionFreshness,
 };
 use crate::conversation_visibility::{decide_visibility, ConversationVisibilityInput};
 use crate::crep::CrepEvent;
@@ -374,6 +374,47 @@ impl ConsoleState {
         Ok(())
     }
 
+    /// Project role lanes into a runtime snapshot for console rendering.
+    #[must_use]
+    pub fn runtime_snapshot(
+        &self,
+        permission_mode: Option<String>,
+        session_state: SessionFreshness,
+    ) -> RuntimeSnapshot {
+        let roles = self
+            .roles
+            .values()
+            .map(|role| RoleRuntimeSnapshot {
+                role: role.role.clone(),
+                enabled: true,
+                engine: role.engine.clone().unwrap_or_else(|| "unknown".to_owned()),
+                model: role.model.clone(),
+                permission_mode: permission_mode.clone(),
+                session_state,
+                priors_freshness: None,
+                knowledge_freshness: None,
+                state: role.state.into(),
+                waiting_approval: role.state == RoleConsoleLifecycle::WaitingApproval,
+                current_work_order: None,
+                current_gate_phase: None,
+                last_activity: role.last_activity.clone(),
+            })
+            .collect::<Vec<_>>();
+        RuntimeSnapshot {
+            room_id: None,
+            host_role: self.host_role.clone(),
+            session_state,
+            permission_mode,
+            active_role: self
+                .roles
+                .values()
+                .find(|role| role.state == RoleConsoleLifecycle::Working)
+                .map(|role| role.role.clone()),
+            waiting_approval: roles.iter().any(|role| role.waiting_approval),
+            roles,
+        }
+    }
+
     fn role_lane(&mut self, role: &str) -> &mut RoleConsoleState {
         self.roles
             .entry(role.to_owned())
@@ -489,6 +530,19 @@ pub enum RoleConsoleLifecycle {
     Interrupted,
     /// Role stopped.
     Stopped,
+}
+
+impl From<RoleConsoleLifecycle> for RoleLaneState {
+    fn from(value: RoleConsoleLifecycle) -> Self {
+        match value {
+            RoleConsoleLifecycle::Unknown => Self::Enabled,
+            RoleConsoleLifecycle::Idle => Self::Idle,
+            RoleConsoleLifecycle::Queued | RoleConsoleLifecycle::Working => Self::Working,
+            RoleConsoleLifecycle::WaitingApproval => Self::WaitingApproval,
+            RoleConsoleLifecycle::Interrupted => Self::Blocked,
+            RoleConsoleLifecycle::Stopped => Self::StaleSession,
+        }
+    }
 }
 
 /// Folded streaming summary for a turn.
