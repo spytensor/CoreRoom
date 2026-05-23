@@ -36,6 +36,59 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
+## A-018: CoreRoom product rename and compatibility policy
+
+- **Status:** accepted for v0.7; staged implementation tracked by #218
+- **Filed:** 2026-05-23
+- **Touches:** Product naming, package/release metadata, command policy,
+  project state directory migration, environment-variable aliases, and release
+  notes.
+
+### Problem
+
+A-016 positioned the project as an Engineering Control Room, but kept the
+short brand as CodeRoom for v0.6. That was useful while the host-led control
+kernel was still being proven. By v0.7, the product surface has moved beyond a
+coding-room metaphor: `@host`, GitHub Issues, WorkOrders, source context,
+evidence packets, PRs, CI, and tracker closure are the core product.
+
+Keeping CodeRoom as the active brand now under-describes the project and makes
+search/discovery worse for people looking for AI agent engineering control.
+
+### Accepted change
+
+The product name is **CoreRoom**.
+
+The searchable descriptor is **Engineering Control Room for AI Agents**.
+
+The short positioning statement is:
+
+> CoreRoom is the host-led Engineering Control Room for AI-assisted software
+> engineering change.
+
+The `cr` command remains the stable primary command. The optional long command
+alias is `coreroom`; `croom` remains a legacy alias during the rename window.
+
+`CREP` remains stable and expands to **CoreRoom Event Protocol**.
+
+### Migration impact
+
+The rename is staged. v0.7 updates active product-facing docs, templates,
+runtime/help/splash text, npm metadata, and compatibility primitives.
+
+The Rust crate/library name remains `coderoom` in v0.7. Project state still
+supports legacy `.coderoom/`; future `.coreroom/` migration must be explicit
+and must not silently move user files. `COREROOM_*` environment variables are
+preferred; legacy `CODEROOM_*` aliases remain accepted for one compatibility
+window.
+
+The detailed audit, owner-only GitHub steps, release notes, and rollback plan
+live in `docs/coreroom-rename-plan.md`.
+
+### Decision
+
+Accepted by the user for v0.7 on 2026-05-23. Implemented by #218.
+
 ## A-016: Engineering Control Room product positioning
 
 - **Status:** accepted for v0.6; rename implementation deferred to #218

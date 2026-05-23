@@ -78,6 +78,7 @@ jobs:
           stage="cr-${tag}-${{ matrix.archive_suffix }}"
           mkdir -p "$stage"
           cp "target/${{ matrix.target }}/release/cr" "$stage/cr"
+          cp "$stage/cr" "$stage/coreroom"
           cp "$stage/cr" "$stage/croom"
           cp LICENSE README.md CHANGELOG.md "$stage/"
           tar -czf "$stage.tar.gz" "$stage"

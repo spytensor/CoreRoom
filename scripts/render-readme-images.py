@@ -225,7 +225,7 @@ def render_boot_dashboard() -> None:
 
     left, top, right, bottom = 90, 92, 1440, 653
     draw.rectangle((left, top, right, bottom), fill=PANEL, outline=CYAN, width=2)
-    title = f" codeRoom v{version} "
+    title = f" CoreRoom v{version} "
     draw.rectangle((left + 30, top - 21, left + 30 + text_width(draw, title, TITLE), top + 9), fill=BG)
     draw_text(draw, (left + 36, top - 19), title, CYAN, TITLE)
 
@@ -248,7 +248,7 @@ def render_boot_dashboard() -> None:
     draw.rectangle((136, 427, 209, 464), fill=CYAN)
     draw_text(draw, (148, 430), "1.8k", BG, BOLD)
     draw_text(draw, (237, 431), "base tokens loaded", WHITE, FONT)
-    draw_text(draw, (136, 489), "~/codes/codeRoom", MUTED, FONT)
+    draw_text(draw, (136, 489), "~/codes/CoreRoom", MUTED, FONT)
 
     right_x = 630
     draw_text(draw, (right_x, 176), "tips for getting started", YELLOW, TITLE)

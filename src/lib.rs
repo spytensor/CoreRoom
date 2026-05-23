@@ -1,4 +1,4 @@
-//! CodeRoom — a coordination shell for multi-role agent CLI sessions.
+//! CoreRoom — Engineering Control Room for AI Agents.
 //!
 //! Public API surface is intentionally small at v0.x; the binary `cr` is the
 //! primary consumer. See `docs/architecture.md` for the v0.1 constitution and
@@ -35,6 +35,7 @@ pub mod pointers;
 pub mod priors;
 pub mod project_status;
 pub mod prompt_cmd;
+pub mod rename;
 pub mod repl;
 pub mod role;
 pub mod source_graph;

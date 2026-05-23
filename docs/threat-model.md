@@ -1,6 +1,6 @@
-# CodeRoom Threat Model
+# CoreRoom Threat Model
 
-CodeRoom is a local coordination shell, not a sandbox and not a hosted
+CoreRoom is a local coordination shell, not a sandbox and not a hosted
 security boundary. It still has load-bearing trust assumptions because it
 mixes user input, project-owned prompt files, model output, local logs, and
 engine permission systems in one workflow.

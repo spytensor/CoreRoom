@@ -1,19 +1,17 @@
-# CodeRoom
+# CoreRoom
 
-> Engineering Control Room for AI-assisted software delivery: a host-led
-> multi-agent CLI that coordinates `claude` / `codex` / `gemini` roles through
-> GitHub issue discipline, SDLC gates, role priors, and evidence-based PR
-> workflow.
+> Engineering Control Room for AI Agents: a host-led, GitHub-gated system for
+> AI-assisted software engineering change.
 
 [![CI](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/codeRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![CodeRoom startup dashboard](docs/images/boot-dashboard.png)
+![CoreRoom startup dashboard](docs/images/boot-dashboard.png)
 
-![CodeRoom role work cards](docs/images/work-cards.png)
+![CoreRoom role work cards](docs/images/work-cards.png)
 
 > **Status: v0.5.0 — user-runnable, still pre-1.0.** Claude Code,
-> Codex, and Gemini adapters are wired up; bare `cr` opens CodeRoom
+> Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coderoom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
 > adds host-led SDLC gate ledgers and live `/compact <role|all>` for
@@ -23,10 +21,11 @@
 > `cr init --preset team`, role owners and scoped authority, role
 > knowledge mounts, plan sign-off vetoes, Claude hook scaffolding,
 > priors locking, and stale-priors liveness checks.
-> **v0.6.0** is being designed as the Engineering Control Room turn:
+> **v0.6.0** introduced the host-led Engineering Control Room turn:
 > `@host` becomes the user-facing engineering control role, with GitHub
 > issue driven work, dependency context, evidence packets, and mandatory
-> tracker closure.
+> tracker closure. **v0.7.0** starts the staged CoreRoom rename while keeping
+> `cr` stable.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -36,7 +35,7 @@ conventions, one-off compliance rules, and decisions buried in commit messages
 or comments, one file forces three problems: bloat, attention dilution, and
 no way to express "this rule only matters to backend".
 
-CodeRoom partitions organizational knowledge by role, then makes `@host` the
+CoreRoom partitions organizational knowledge by role, then makes `@host` the
 user-facing control point for turning intent into scoped work, review, evidence,
 and completion. Each specialist role is a separate agent CLI subprocess loaded
 with its own priors. Cross-role routing happens when one role writes an explicit
@@ -57,7 +56,7 @@ delegation line like `@x: <brief>` in its reply.
 - **Short role priors by default.** Generated roles start with compact
   responsibilities; long procedures and reference material belong in
   the underlying engine's skills or project docs, not every role prompt.
-- **Layered prompt contract.** CodeRoom's routing and WorkCard protocol is a
+- **Layered prompt contract.** CoreRoom's routing and WorkCard protocol is a
   built-in kernel layer; `.coderoom/shared.md`,
   `roles/<role>/priors.md`, and `roles/<role>/knowledge/` stay user-owned
   project and role standards.
@@ -71,9 +70,9 @@ delegation line like `@x: <brief>` in its reply.
   their CLIs emit them, and unsupported cost / permission fields are shown
   as `—` instead of fake zeroes.
 - **Permission modes.** Projects can choose `ask`, `auto`, or `bypass`.
-  Claude Code is gated by a CodeRoom-injected PreToolUse hook; Codex and
+  Claude Code is gated by a CoreRoom-injected PreToolUse hook; Codex and
   Gemini approval support follows each engine's native protocol and is shown
-  only when CodeRoom can supervise it.
+  only when CoreRoom can supervise it.
 
 ## Design docs
 
@@ -91,16 +90,21 @@ that grounds the whole project.
 ## Install
 
 ```bash
-npm install -g @spytensor/coderoom
+npm install -g @spytensor/coreroom
 cr --version
 ```
 
 That's it. `cr` is now on your PATH. Same install story as
 `@anthropic-ai/claude-code`, `@openai/codex`, and `@google/gemini-cli` —
-which CodeRoom drives.
+which CoreRoom drives.
+
+The staged v0.7 rename targets `@spytensor/coreroom`; the legacy
+`@spytensor/coderoom` package remains the compatibility spelling during the
+rename window.
 
 If `cr` conflicts with an existing command in your environment, npm also
-installs `croom` as an alias for the same binary.
+installs `coreroom` as a long-form alias and `croom` as a legacy alias for the
+same binary.
 
 The npm package is a thin wrapper: on install, its postinstall script
 downloads the right pre-built binary for your platform from the
@@ -116,7 +120,8 @@ cr upgrade  # install and verify the latest npm package
 ```
 
 `cr start` also checks for updates in the background at most once per day.
-Disable that with `CODEROOM_NO_UPDATE_CHECK=1` or
+Disable that with `COREROOM_NO_UPDATE_CHECK=1`, legacy
+`CODEROOM_NO_UPDATE_CHECK=1`, or
 `[updates] check_on_start = false` in user config.
 
 <details>
@@ -155,7 +160,7 @@ sudo cp target/release/cr /usr/local/bin/
 
 ## Engine CLIs you bring
 
-CodeRoom never ships credentials and never calls the Anthropic / OpenAI /
+CoreRoom never ships credentials and never calls the Anthropic / OpenAI /
 Google APIs directly. It drives whatever `claude`, `codex`, and `gemini`
 binaries are already on your `PATH`, using whichever auth (subscription,
 Console, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) you've configured
@@ -165,11 +170,11 @@ that engine's own CLI and try again.
 > **Heads-up — Anthropic billing change effective 2026-06-15.** Anthropic
 > [reclassified `claude -p` and the Claude Agent SDK](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
 > as programmatic usage drawing from a separate monthly credit pool: $20
-> on Pro, $100 on Max 5x, $200 on Max 20x (non-rollover). CodeRoom uses
-> `claude --print` for every role subprocess, so all CodeRoom multi-role
+> on Pro, $100 on Max 5x, $200 on Max 20x (non-rollover). CoreRoom uses
+> `claude --print` for every role subprocess, so all CoreRoom multi-role
 > sessions on a subscription count against that pool. When it runs out,
 > requests stop by default (or spill to API rates if you've enabled
-> "extra usage"). CodeRoom itself is unchanged — but if you run heavy
+> "extra usage"). CoreRoom itself is unchanged — but if you run heavy
 > multi-role workloads on Pro, consider Max 5x+ or `ANTHROPIC_API_KEY`
 > before June 15.
 
@@ -204,7 +209,7 @@ Useful commands:
 - `cr role host <name>` persists a new host role; `/host <role>` swaps host
   for the current REPL session only.
 - `@all <text>` broadcasts one prompt to every running role.
-- `/resume` lists saved CodeRoom room sessions; `/resume <number|id|prefix|latest>`
+- `/resume` lists saved CoreRoom room sessions; `/resume <number|id|prefix|latest>`
   switches every role to that saved set of engine sessions.
 - `/fresh` clears saved engine session ids and restarts every role cleanly
   without leaving the REPL; use it before audits, release reviews, or other
@@ -231,7 +236,7 @@ Useful commands:
   host-led, with commands kept as debug and recovery controls. Tier 0/read-only
   reviews stay inline unless the user explicitly asks for a ledger.
 - `cr doctor [--fix]` detects old projects whose `shared.md` still contains
-  CodeRoom protocol text that now lives in the built-in kernel.
+  CoreRoom protocol text that now lives in the built-in kernel.
 - `cr show [--role backend] [--tail 20] [--since YYYY-MM-DD]`, `cr cost`,
   `cr compact <role>`, `cr config get/set`, and `cr update` handle inspection,
   spend tracking, priors compaction, layered config, and package upgrades.
@@ -279,7 +284,7 @@ permission_mode = "bypass"
 ```
 
 - `ask` requests approval before tools that are not explicitly allowed. In a
-  live REPL, Claude Code hooks and Codex MCP approvals surface as CodeRoom
+  live REPL, Claude Code hooks and Codex MCP approvals surface as CoreRoom
   prompts; use `/allow <tool>` or choose "allow session" when you trust the
   call. Existing allow/deny policy is surfaced at startup; use
   `/permissions clear` before audits or release reviews that need fresh
@@ -287,7 +292,7 @@ permission_mode = "bypass"
 - `auto` allows low-risk read-only tools and asks for risky or unknown tools.
 - `bypass` is explicit yolo mode. It is not required for Claude Code. Codex
   can run `ask` / `auto` only from a live REPL with a permission bridge;
-  headless Codex runs still need `bypass`. In bypass mode, CodeRoom disables
+  headless Codex runs still need `bypass`. In bypass mode, CoreRoom disables
   Codex's own command sandbox as well as approvals, matching the yolo semantics
   of the other adapters.
 - For compatibility with projects created before per-role permission modes,

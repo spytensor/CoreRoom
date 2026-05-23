@@ -29,8 +29,8 @@ dependency context, evidence packets, status rollups, and tracker closure.
 - [x] #214: Implement GitHub-native WorkOrder/Issue/PR/CI status sync.
 - [x] #215: Implement host-managed worker action layer.
 - [x] #216: Implement multi-repo source graph and remote snapshots.
-- [ ] #217: Implement release readiness and project status rollup. (in progress)
-- [ ] #218: Implement CoreRoom rename and compatibility migration.
+- [x] #217: Implement release readiness and project status rollup.
+- [ ] #218: Implement CoreRoom rename and compatibility migration. (in progress)
 
 ## Notes
 

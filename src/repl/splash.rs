@@ -192,14 +192,14 @@ fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usiz
 
 /// Per-role permission gate descriptor shown on the dashboard.
 ///
-/// The dashboard's job here is to keep the user from assuming CodeRoom
+/// The dashboard's job here is to keep the user from assuming CoreRoom
 /// gates every role's tool calls. Two states matter:
 ///
 /// - **CR-gated** — engine is `cc` and the configured `permission_mode`
-///   is `ask`/`auto`. CodeRoom's PreToolUse hook intercepts. Rendered
+///   is `ask`/`auto`. CoreRoom's PreToolUse hook intercepts. Rendered
 ///   in [`output::MUTE`] (visually "covered").
 /// - **No CR gate** — anything else: `bypass` on any engine, or any
-///   mode on `codex`/`gemini` (CodeRoom doesn't intermediate tool calls
+///   mode on `codex`/`gemini` (CoreRoom doesn't intermediate tool calls
 ///   on those engines). Rendered in [`output::WARN`] so the user can
 ///   tell at a glance that they own the diff review.
 ///
@@ -477,7 +477,7 @@ pub(super) fn render_home_at_width(
     // ── title (top border)
     let version_str = format!("v{}", env!("CARGO_PKG_VERSION"));
     let title = join_cells(&[
-        styled_cell("codeRoom", "codeRoom".with(output::SPLASH_FRAME).bold()),
+        styled_cell("CoreRoom", "CoreRoom".with(output::SPLASH_FRAME).bold()),
         plain_cell(" "),
         styled_cell(
             &version_str,
@@ -634,7 +634,7 @@ pub(super) fn print_help(cfg: &Config) {
     println!("  /compact <role|all> compact live engine context when supported");
     println!("  /fresh              restart all roles with clean engine sessions");
     println!("  /refresh <role>     re-instantiate role with latest priors+patches");
-    println!("  /resume [id]        list or switch saved CodeRoom sessions");
+    println!("  /resume [id]        list or switch saved CoreRoom sessions");
     println!("  /transcript <role>  show that role's recent spoken turns");
     println!("  /journal <role>     ask role to write today's journal entry");
     println!("  /welcome            re-show the first-run welcome card");

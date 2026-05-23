@@ -1,6 +1,6 @@
 # Development guide
 
-How to actually work on CodeRoom locally. For higher-level concerns
+How to actually work on CoreRoom locally. For higher-level concerns
 (commit style, branching, releases), see [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Toolchain
@@ -10,7 +10,7 @@ How to actually work on CodeRoom locally. For higher-level concerns
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup component add rustfmt clippy
 
-# Engine CLIs that CodeRoom drives
+# Engine CLIs that CoreRoom drives
 npm install -g @anthropic-ai/claude-code
 npm install -g @openai/codex          # codex CLI 0.128+
 npm install -g @google/gemini-cli     # gemini CLI 0.32+

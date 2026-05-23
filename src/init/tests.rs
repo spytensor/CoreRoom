@@ -103,7 +103,7 @@ fn snapshot_init_role_picker() {
         4,
     ));
     insta::assert_snapshot!(rendered, @r"
-pick roles · setting up coderoom in codeRoom
+pick roles · setting up CoreRoom in codeRoom
 space toggles · ↑↓ moves · enter continues · esc backs out
 
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
@@ -135,11 +135,11 @@ fn snapshot_init_role_expansion_picker() {
         4,
     ));
     insta::assert_snapshot!(rendered, @r"
-suggest roles · setting up coderoom in codeRoom
+suggest roles · setting up CoreRoom in codeRoom
 space toggles · ↑↓ moves · enter adds selected · esc skips
 
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
-CodeRoom found only @host. Choose the specialists to add:
+CoreRoom found only @host. Choose the specialists to add:
 
     [x] ● @host        orchestrates requests and keeps the room coherent · exi…
     [ ] ● @engineer    implements changes across the project
@@ -179,7 +179,7 @@ fn snapshot_init_engine_picker() {
         2,
     ));
     insta::assert_snapshot!(rendered, @r"
-assign engines · setting up coderoom in codeRoom
+assign engines · setting up CoreRoom in codeRoom
 ↑/↓ moves · ←/→ cycles engine · enter continues · esc goes back
 
 detected on your system:
@@ -205,7 +205,7 @@ fn snapshot_init_confirm() {
         &snapshot_plan(),
     ));
     insta::assert_snapshot!(rendered, @r"
-ready to write · setting up coderoom in codeRoom
+ready to write · setting up CoreRoom in codeRoom
 nothing is written until Enter
 
 will create:
@@ -225,7 +225,7 @@ will create:
   @security      codex        authn, authz, threat modeling
 
 ! found existing CLAUDE.md (42 lines).
-  coderoom will not touch it; split assistance can land separately.
+  CoreRoom will not touch it; split assistance can land separately.
 
 enter writes · esc goes back · q aborts
 ");
