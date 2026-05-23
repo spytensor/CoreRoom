@@ -277,6 +277,23 @@ role reviews, risks, rollback, PR binding, tracker checkbox, and Evidence
 Ledger updates. Missing evidence keeps the packet `incomplete`. `unverifiedItems`
 must explicitly name what was not checked.
 
+## Tracker Closure
+
+For v0.6, the tracker issue is part of completion evidence. A linked issue is
+not done until the tracker checkbox and Evidence Ledger row are updated.
+
+`@host` must report `implementation complete, tracker incomplete` rather than
+`done` when any of these mismatches are present:
+
+- The linked issue is closed but its tracker checkbox is still unchecked.
+- The implementation PR is merged but the Evidence Ledger row is not
+  `merged` with Tracker Updated `yes`.
+- An Evidence Packet exists but the linked issue is not closed.
+
+When the tracker is stale, `@host` should propose the exact tracker patch:
+which checkbox to tick, which milestone acceptance criteria to update, and how
+to rewrite the Evidence Ledger row.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline

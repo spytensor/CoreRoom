@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the v0.6 Evidence Packet model so host completion summaries are based
   on structured issue, PR, gate, command, test, risk, rollback, tracker, and
   unverified-item evidence instead of model prose.
+- Added v0.6 tracker closure enforcement docs, PR template evidence sections,
+  and stale tracker detection helpers for host completion checks.
 
 ## [0.5.0] - 2026-05-23
 

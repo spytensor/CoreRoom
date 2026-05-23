@@ -55,6 +55,7 @@ Every PR must include:
 - Checked acceptance criteria.
 - Changed files summary.
 - Validation commands and results.
+- Evidence Packet or inline evidence summary.
 - Risks and remaining gaps.
 - Rollback plan.
 - Tracker update section.
@@ -77,6 +78,15 @@ implementation complete, tracker incomplete
 ```
 
 Do not claim `done`.
+
+`@host` must also detect stale tracker states before claiming completion:
+
+- Issue closed but tracker checkbox unchecked.
+- PR merged but Evidence Ledger row is not `merged` with Tracker Updated `yes`.
+- Evidence Packet exists but the linked issue is not closed.
+
+When stale, propose the exact tracker patch/update summary instead of closing
+the work in prose.
 
 ## Host Authority
 
