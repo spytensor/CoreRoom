@@ -68,6 +68,54 @@ Categories:
 Classification is not approval. It decides the workflow path. Persistent state
 changes still follow the confirmation boundary above.
 
+## WorkOrders
+
+Starting in v0.6, persistent engineering work can be represented as a
+WorkOrder under `.coderoom/work-orders/<id>.toml`. A WorkOrder is the
+project-level binding record between host intent, GitHub Issue, SDLC gate,
+branch, PR, tracker row, and evidence expectations. It does not replace the
+GitHub Issue.
+
+The persisted WorkOrder schema uses camelCase keys:
+
+```toml
+schemaVersion = 1
+id = "WO-0207"
+title = "WorkOrder model and GitHub binding"
+objective = "Define a WorkOrder model and bind it to GitHub Issue #207."
+githubIssue = 207
+phase = "v0.6.0 - Engineering Control Room"
+epic = "WorkOrder / GitHub Binding"
+gateThread = "thread-207"
+branch = "feat/v0.6-207-workorder-github-binding"
+pullRequest = 223
+status = "in-review"
+trackerIssue = 202
+trackerCheckbox = "#207 - WorkOrder model and GitHub binding"
+
+acceptanceCriteria = [
+  "Define WorkOrder fields.",
+  "Bind existing GitHub Issue without mutating the issue body.",
+]
+
+requiredEvidence = [
+  "changed-files",
+  "validation",
+  "risks",
+  "rollback",
+  "tracker-update",
+]
+```
+
+Canonical status values are `draft`, `proposed`, `ready`, `in-progress`,
+`in-review`, `merged`, `blocked`, and `closed`.
+
+`@host` may draft a WorkOrder after classifying the request as
+`persistent-workorder`. Creating or binding the GitHub Issue still requires
+user confirmation. Binding an existing issue updates only the local WorkOrder;
+it must not silently change the GitHub Issue body, labels, milestone, or
+comments.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline

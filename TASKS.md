@@ -16,7 +16,7 @@ evidence packets, and mandatory tracker closure.
 - [x] #204: Land A-017 host authority and host-led engineering control protocol.
 - [x] #205: Add AGENTS.md as the external AI worker protocol.
 - [x] #206: Implement host intent classification.
-- [ ] #207: Define WorkOrder model and GitHub binding.
+- [x] #207: Define WorkOrder model and GitHub binding.
 - [ ] #208: Define project Source Registry.
 - [ ] #209: Define WorkOrder-scoped ContextPack.
 - [ ] #210: Define Evidence Packet model.

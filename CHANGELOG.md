@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Defined the host intent classification protocol and fixtures so `@host`
   chooses Tier 0 inline, persistent WorkOrder, constitution, release/audit, or
   insufficient-context paths before persistent state changes.
+- Added the v0.6 WorkOrder model for binding host-led work to GitHub Issues,
+  gate threads, branches, PRs, tracker rows, and required evidence without
+  silently mutating GitHub issue bodies.
 
 ## [0.5.0] - 2026-05-23
 

@@ -44,6 +44,7 @@ Out of scope:
 | Engine session ids | Opaque adapter-issued resume handles | Continue engine conversations when the user accepts resume | Evidence freshness, peer agreement, review provenance, or thread lineage |
 | Runtime turn/thread state | Trusted only while owned by the live dispatcher/process | Route provenance, hop depth, parent/child relationships, queue limits | Rehydration from model text or editable logs for enforcement |
 | `.coderoom/gates/*` | User-editable structural ledger | Tier 1 structural completeness, role-review decisions, and explicit bypass or override records | Semantic correctness, reviewer independence by model claim alone, hidden Tier 0 evidence |
+| `.coderoom/work-orders/*` | User-editable project binding records after schema validation | Local binding between host intake, GitHub Issue, gate thread, branch, PR, tracker row, and expected evidence | Proof that GitHub state changed, user approval happened, tests passed, tracker rows were updated, or work is semantically complete |
 
 ## Runtime Invariants
 
@@ -121,6 +122,13 @@ architecture amendment before implementation.
     WorkOrders, register sources, update trackers, prepare completion claims,
     or close evidence gaps by prose.
 
+13. WorkOrders bind state; they do not prove state.
+    A WorkOrder can link a GitHub Issue, gate thread, branch, PR, tracker row,
+    and evidence expectations, but it is still a local project file. GitHub
+    Issue creation or binding requires confirmation. Binding an existing issue
+    must not silently mutate the issue body, labels, milestone, or comments.
+    Completion still depends on external evidence and tracker closure.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -137,6 +145,7 @@ role-written journals:
 - Whether a role veto exists for the current plan SHA.
 - Whether a user override exists and carries the required justification.
 - Whether the host has confirmed a persistent state change.
+- Whether a WorkOrder GitHub Issue binding was confirmed by the user.
 - Whether a tracker row or Evidence Ledger update is complete.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.
