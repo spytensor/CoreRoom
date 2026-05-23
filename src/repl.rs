@@ -706,7 +706,13 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
 }
 
 fn warn_if_priors_lock_drift(coderoom_dir: &Path, allow_large_priors: bool) {
-    let report = crate::lock::verify(coderoom_dir, priors::ComposeOptions { allow_large_priors });
+    let report = crate::lock::verify(
+        coderoom_dir,
+        priors::ComposeOptions {
+            allow_large_priors,
+            ..Default::default()
+        },
+    );
     match report {
         Ok(report) if report.is_clean() => {}
         Ok(report) => {
@@ -2208,6 +2214,7 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
     let compose_role = name.to_owned();
     let compose_options = priors::ComposeOptions {
         allow_large_priors: context.allow_large_priors,
+        record_liveness: true,
     };
     let composed = tokio::task::spawn_blocking(move || {
         priors::compose_for_with_options(&compose_dir, &compose_role, compose_options)

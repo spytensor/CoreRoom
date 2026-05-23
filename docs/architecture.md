@@ -391,6 +391,11 @@ the SHA no longer matches, composition fails loudly. Composed priors warn above
 100KB and hard-error above 500KB unless the caller passes
 `--allow-large-priors`.
 
+Local liveness telemetry is stored in `.coderoom/liveness/<role>.json` and
+is gitignored by default. A role-turn compose records each loaded shared,
+role, and knowledge segment with `last_matched_at` and `hit_count`; `cr doctor`
+uses that sidecar to surface stale priors without pruning them automatically.
+
 The built-in kernel is not copied into `.coderoom/`. It owns the routing
 syntax (`@role: <brief>` delegation lines), peer brief envelope (`<<<peer-quote ...>>>>`,
 with legacy `From @role:` accepted during migration), patch/journal authority
@@ -472,7 +477,7 @@ cr start                         # enter REPL; spawn all configured roles
 
 # global commands (outside REPL)
 cr prompt show <role>            # print the exact composed system prompt
-cr doctor [--fix]                # detect or remove legacy protocol in shared.md
+cr doctor [--fix] [--stale-days N] # detect legacy shared.md and stale priors
 cr show <session>                # raw transcript dump
 cr cost                          # cost breakdown per role since YYYY-MM-DD
 ```

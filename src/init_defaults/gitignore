@@ -3,6 +3,7 @@ messages.jsonl
 permission_policy.json
 sessions/
 transcripts/
+liveness/
 
 # Patches and journals are committed by default (they're the project's
 # accumulated knowledge). If you'd rather keep them local, uncomment:

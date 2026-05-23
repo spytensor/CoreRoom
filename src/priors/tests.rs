@@ -151,6 +151,7 @@ fn compose_hard_errors_above_size_limit_unless_overridden() {
         "backend",
         ComposeOptions {
             allow_large_priors: true,
+            ..Default::default()
         },
     )
     .unwrap();

@@ -5,12 +5,24 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 
 use crate::config::CODEROOM_DIR;
+use crate::liveness::{self, DEFAULT_STALE_DAYS};
 
 /// Options for `cr doctor`.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct DoctorOptions {
     /// Rewrite files when a safe, exact fix is available.
     pub fix: bool,
+    /// Priors liveness stale threshold in days.
+    pub stale_days: i64,
+}
+
+impl Default for DoctorOptions {
+    fn default() -> Self {
+        Self {
+            fix: false,
+            stale_days: DEFAULT_STALE_DAYS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +69,12 @@ const LEGACY_MARKERS: &[&str] = &[
 
 /// Run CodeRoom project checks and optionally apply exact safe fixes.
 pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
+    check_shared(project_root, options.fix)?;
+    report_liveness(project_root, options.stale_days)?;
+    Ok(())
+}
+
+fn check_shared(project_root: &Path, fix: bool) -> Result<()> {
     let shared = project_root.join(CODEROOM_DIR).join("shared.md");
     let content = match std::fs::read_to_string(&shared) {
         Ok(content) => content,
@@ -73,7 +91,7 @@ pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
             Ok(())
         }
         SharedProtocolStatus::LegacyExact | SharedProtocolStatus::LegacyMixed => {
-            if options.fix {
+            if fix {
                 let fixed = fixed_shared(&content).expect("classified exact legacy block");
                 std::fs::write(&shared, fixed)
                     .with_context(|| format!("writing {}", shared.display()))?;
@@ -96,6 +114,31 @@ pub fn run(project_root: &Path, options: DoctorOptions) -> Result<()> {
             shared.display()
         ),
     }
+}
+
+fn report_liveness(project_root: &Path, stale_days: i64) -> Result<()> {
+    let stale_days = stale_days.max(0);
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    let stale = liveness::stale_segments(&coderoom_dir, stale_days)?;
+    if stale.is_empty() {
+        println!("ok: no stale priors (threshold: {stale_days} days)");
+        return Ok(());
+    }
+
+    println!("warn: stale priors (threshold: {stale_days} days)");
+    for segment in stale {
+        let last = segment
+            .last_cited_at
+            .as_deref()
+            .or(segment.last_matched_at.as_deref())
+            .unwrap_or("never");
+        println!(
+            "  @{} {} hits={} last={} attached={}",
+            segment.role, segment.path, segment.hit_count, last, segment.attached_at
+        );
+        println!("    prune: {}", segment.recommendation);
+    }
+    Ok(())
 }
 
 fn classify_shared(content: &str) -> SharedProtocolStatus {
@@ -185,7 +228,14 @@ mod tests {
     #[test]
     fn fix_exact_legacy_template_with_project_template() {
         let tmp = shared_project(LEGACY_SHARED_PROTOCOL);
-        run(tmp.path(), DoctorOptions { fix: true }).unwrap();
+        run(
+            tmp.path(),
+            DoctorOptions {
+                fix: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let body = fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("shared.md")).unwrap();
         assert!(body.contains("# Team-wide priors"));
         assert!(!body.contains("# Shared CodeRoom protocol"));
@@ -198,7 +248,14 @@ mod tests {
             LEGACY_SHARED_PROTOCOL.trim_end()
         );
         let tmp = shared_project(&mixed);
-        run(tmp.path(), DoctorOptions { fix: true }).unwrap();
+        run(
+            tmp.path(),
+            DoctorOptions {
+                fix: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let body = fs::read_to_string(tmp.path().join(CODEROOM_DIR).join("shared.md")).unwrap();
         assert!(body.contains("# Team-wide priors"));
         assert!(body.contains("## Preserved project priors"));
