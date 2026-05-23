@@ -23,6 +23,12 @@ Bump scope must be a directory or module name (e.g. `adapter-cc`, `crep`,
 
 <!-- Closes #N / Refs #M / "none" if standalone -->
 
+## Acceptance criteria
+
+<!-- Copy the linked issue AC and tick only what this PR satisfies. -->
+
+- [ ] AC-1:
+
 ## Test plan
 
 - [ ] `cargo fmt --all -- --check` passes
@@ -30,6 +36,41 @@ Bump scope must be a directory or module name (e.g. `adapter-cc`, `crep`,
 - [ ] `cargo test --all-features --locked` passes
 - [ ] (if touching shell harness) `shellcheck spike/*.sh` passes
 - [ ] Manual smoke (describe what you ran, against which engine):
+
+## Evidence packet
+
+- WorkOrder:
+- Gate thread:
+- Changed files:
+- Commands run:
+- Test/check results:
+- Role reviews:
+- Risks:
+- Rollback:
+- Unverified items:
+
+## Tracker update
+
+For v0.6 issues, the PR is incomplete until tracker #202 is updated.
+
+- Tracker issue: #202
+- Issue checkbox updated:
+  - [ ] yes
+  - [ ] no, reason:
+- Milestone AC updated, if applicable:
+  - [ ] yes
+  - [ ] no, reason:
+- Evidence Ledger row updated:
+  - [ ] yes
+  - [ ] no, reason:
+
+If implementation is complete but tracker #202 is stale, report
+`implementation complete, tracker incomplete`; do not claim `done`.
+
+## Risk and rollback
+
+- Risk:
+- Rollback:
 
 ## Out of scope
 

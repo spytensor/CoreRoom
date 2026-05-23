@@ -20,7 +20,7 @@ evidence packets, and mandatory tracker closure.
 - [x] #208: Define project Source Registry.
 - [x] #209: Define WorkOrder-scoped ContextPack.
 - [x] #210: Define Evidence Packet model.
-- [ ] #211: Enforce tracker update protocol and PR evidence template.
+- [x] #211: Enforce tracker update protocol and PR evidence template.
 - [ ] #212: Add end-to-end host-led dogfood validation.
 
 ## Notes
