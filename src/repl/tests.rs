@@ -559,7 +559,7 @@ fn splash_pair_rows_align_at_every_width() {
 fn snapshot_splash_frame_shape_at_80() {
     let (left_w, right_w) = splash_columns(80, 28);
     let title = join_cells(&[
-        styled_cell("codeRoom", "codeRoom".with(output::SPLASH_FRAME).bold()),
+        styled_cell("CoreRoom", "CoreRoom".with(output::SPLASH_FRAME).bold()),
         plain_cell(" "),
         styled_cell("v0.1.17", "v0.1.17".with(output::SPLASH_VERSION)),
     ]);
@@ -575,7 +575,7 @@ fn snapshot_splash_frame_shape_at_80() {
     ]
     .join("\n");
     insta::assert_snapshot!(rendered, @r"
-┌─ codeRoom v0.1.17 ───────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.1.17 ───────────────────────────────────────────────────────────┐
 │ welcome back, chao             tips for getting started                      │
 └──────────────────────────────────────────────────────────────────────────────┘");
 }
@@ -636,7 +636,7 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ codeRoom v0.5.0 ────────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.5.0 ────────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │

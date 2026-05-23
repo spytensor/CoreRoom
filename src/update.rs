@@ -33,7 +33,7 @@ use crossterm::style::Stylize;
 
 /// npm package name. Bumping this requires re-running the npm publish
 /// flow and updating the README.
-const NPM_PACKAGE: &str = "@spytensor/coderoom";
+const NPM_PACKAGE: &str = crate::rename::CURRENT_NPM_PACKAGE;
 
 /// Compile-time version of the running binary. We compare against this
 /// to detect whether `npm install -g` produced any real change.
@@ -43,8 +43,8 @@ const UPDATE_CHECK_THROTTLE: Duration = Duration::from_secs(24 * 60 * 60);
 /// How the `cr` binary appears to have been installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallSource {
-    /// Installed via `npm install -g @spytensor/coderoom`. We can
-    /// re-run the install to upgrade.
+    /// Installed via `npm install -g @spytensor/coreroom` or legacy
+    /// `@spytensor/coderoom`. We can re-run the install to upgrade.
     Npm {
         /// Resolved path to the running binary (for diagnostics).
         binary: PathBuf,
@@ -104,10 +104,11 @@ pub fn check() -> Result<()> {
 /// Best-effort once-per-day update notifier used by `cr start`.
 ///
 /// The check runs on a background thread and never fails startup. It is
-/// disabled by `CODEROOM_NO_UPDATE_CHECK=1` or user config
+/// disabled by `COREROOM_NO_UPDATE_CHECK=1`, legacy
+/// `CODEROOM_NO_UPDATE_CHECK=1`, or user config
 /// `[updates] check_on_start = false`.
 pub fn maybe_notify_on_start() {
-    if std::env::var("CODEROOM_NO_UPDATE_CHECK").is_ok() || !user_allows_update_check() {
+    if update_check_disabled_by_env() || !user_allows_update_check() {
         return;
     }
     let Some(cache_path) = update_cache_path() else {
@@ -134,6 +135,24 @@ pub fn maybe_notify_on_start() {
     });
 }
 
+fn update_check_disabled_by_env() -> bool {
+    update_check_disabled_by_values(
+        std::env::var("COREROOM_NO_UPDATE_CHECK").ok().as_deref(),
+        std::env::var("CODEROOM_NO_UPDATE_CHECK").ok().as_deref(),
+    )
+}
+
+fn update_check_disabled_by_values(current: Option<&str>, legacy: Option<&str>) -> bool {
+    crate::rename::resolve_env_alias_from_values(
+        "COREROOM_NO_UPDATE_CHECK",
+        current,
+        "CODEROOM_NO_UPDATE_CHECK",
+        legacy,
+    )
+    .value
+    .is_some()
+}
+
 fn user_allows_update_check() -> bool {
     let Some(path) = crate::config_layered::user_config_path() else {
         return true;
@@ -152,7 +171,7 @@ fn user_allows_update_check() -> bool {
 }
 
 fn update_cache_path() -> Option<PathBuf> {
-    dirs::cache_dir().map(|dir| dir.join("coderoom").join("update-check.txt"))
+    dirs::cache_dir().map(|dir| dir.join("coreroom").join("update-check.txt"))
 }
 
 fn cache_is_fresh(path: &Path) -> bool {
@@ -266,7 +285,7 @@ pub fn upgrade() -> Result<()> {
 fn print_cargo_instructions(binary: &Path) {
     println!("Detected cargo install at {}", binary.display());
     println!();
-    println!("CodeRoom is not yet published on crates.io (v0.2).");
+    println!("CoreRoom is not yet published on crates.io.");
     println!("To upgrade, reinstall via npm (recommended) or rebuild from source:");
     println!();
     println!("  npm install -g {NPM_PACKAGE}@latest    # recommended");
@@ -355,7 +374,7 @@ fn parse_version_output(stdout: &str) -> Result<String> {
 /// Heuristics (cheap, no IO beyond what's in the path itself):
 ///
 /// - Path component contains `node_modules` AND somewhere upstream is
-///   `@spytensor/coderoom` → npm.
+///   `@spytensor/coreroom` or legacy `@spytensor/coderoom` → npm.
 /// - Path is under `$CARGO_HOME/bin` (or `~/.cargo/bin` if `$CARGO_HOME`
 ///   is unset) → cargo.
 /// - Otherwise → unknown.
@@ -383,7 +402,9 @@ fn is_npm_path(p: &Path) -> bool {
     // bin-shimmed global install (`.../bin/cr` symlinking the above
     // — but `current_exe()` resolves the symlink so we typically see
     // the per-package layout after canonicalize()).
-    s.contains("node_modules") && s.contains("@spytensor/coderoom")
+    s.contains("node_modules")
+        && (s.contains(crate::rename::CURRENT_NPM_PACKAGE)
+            || s.contains(crate::rename::LEGACY_NPM_PACKAGE))
 }
 
 fn is_cargo_path(p: &Path) -> bool {
@@ -410,6 +431,14 @@ mod tests {
     fn classify_npm_layout() {
         let p = Path::new(
             "/home/me/.nvm/versions/node/v20.10.0/lib/node_modules/@spytensor/coderoom/bin/cr",
+        );
+        assert!(matches!(classify(p), InstallSource::Npm { .. }));
+    }
+
+    #[test]
+    fn classify_current_npm_layout() {
+        let p = Path::new(
+            "/home/me/.nvm/versions/node/v20.10.0/lib/node_modules/@spytensor/coreroom/bin/cr",
         );
         assert!(matches!(classify(p), InstallSource::Npm { .. }));
     }
@@ -463,6 +492,14 @@ mod tests {
     fn parse_npm_view_rejects_empty() {
         assert!(parse_npm_view_version("").is_err());
         assert!(parse_npm_view_version("\n").is_err());
+    }
+
+    #[test]
+    fn update_check_env_alias_accepts_current_and_legacy_names() {
+        assert!(update_check_disabled_by_values(Some("1"), None));
+        assert!(update_check_disabled_by_values(None, Some("1")));
+        assert!(update_check_disabled_by_values(Some("1"), Some("legacy-1")));
+        assert!(!update_check_disabled_by_values(None, None));
     }
 
     #[test]

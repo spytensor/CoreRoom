@@ -80,14 +80,14 @@ pub fn require_any_installed() -> anyhow::Result<Engines> {
 /// The Screen 1 layout. Plain printing, no raw mode.
 fn print_no_engine_screen() {
     println!();
-    println!("{}", "codeRoom · setup".with(output::EM).bold());
+    println!("{}", "CoreRoom · setup".with(output::EM).bold());
     println!("{}", "─────────────────".with(output::FADE));
     println!(
         "{}",
         "no agent CLI detected on this system.".with(output::TEXT)
     );
     println!();
-    println!("{}", "CodeRoom needs at least one of:".with(output::TEXT));
+    println!("{}", "CoreRoom needs at least one of:".with(output::TEXT));
     println!();
     // Pad the plain label first; styling SGR escapes would inflate the
     // byte length and break the column.

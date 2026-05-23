@@ -1,4 +1,4 @@
-# CodeRoom — v0.1 Architecture
+# CoreRoom — v0.1 Architecture
 
 This is the constitution for v0.1. Anything in here is locked unless explicitly
 revisited via amendment. New ideas during implementation that contradict this
@@ -11,7 +11,7 @@ Operational trust boundaries live in `docs/threat-model.md`. Any change to
 routing, permissions, resume, gates, priors, logs, or role memory should use
 that document's review checklist before changing this architecture.
 
-## What CodeRoom is
+## What CoreRoom is
 
 A coordination shell that runs multiple agent CLI sessions as named "roles"
 (e.g. `@backend`, `@security`, `@frontend`) sharing a single chat-style
@@ -31,7 +31,7 @@ The CLI binary is `cr`.
 
 ## Role Invariance Principle
 
-CodeRoom's roles are not replacements for the engineering roles in your
+CoreRoom's roles are not replacements for the engineering roles in your
 organization. They are perspectives — borrowed eyes attached to priors —
 that you summon while you still hold the work. The user is the single
 accountability anchor: every change of state in the project repo lands
@@ -86,7 +86,7 @@ or comments, a single file forces three problems:
   any individual rule
 - **No expressivity** — "this rule only matters to backend" cannot be said
 
-Real organizational knowledge is partitioned by role. CodeRoom mirrors that
+Real organizational knowledge is partitioned by role. CoreRoom mirrors that
 partition: each role carries only its own priors, addresses only what it
 knows, and contributes its viewpoint to the shared chat.
 

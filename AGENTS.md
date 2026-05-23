@@ -1,21 +1,22 @@
-# CodeRoom AI Worker Protocol
+# CoreRoom AI Worker Protocol
 
 This file is the entry point for external AI coding workers operating in this
 repository, including Codex, Claude Code, and other terminal coding agents.
 
 ## Current Project Phase
 
-Active milestone: v0.6.0 - Engineering Control Room.
+Active milestone: v0.7.0 - CoreRoom GitHub-native Engineering Loop.
 
-Primary tracker: #202.
+Primary tracker: #213.
 
-Backlog tracker: #213 for v0.7. Do not work on v0.7 issues while v0.6 is active
-unless the user explicitly pulls one into v0.6.
+v0.6 tracker #202 is complete. Do not work on v0.8+ issues unless the user
+explicitly pulls one into the active milestone.
 
 ## Operating Model
 
-CodeRoom is moving toward an Engineering Control Room for AI-assisted software
-delivery. The happy path is:
+CoreRoom is the Engineering Control Room for AI Agents: a host-led,
+GitHub-gated system for AI-assisted software engineering change. The happy
+path is:
 
 ```text
 user intent -> @host -> scoped issue/work -> branch -> PR -> CI/evidence -> tracker
@@ -32,7 +33,8 @@ Only pick up an issue when all are true:
 - The issue has `codex-ready`.
 - The issue is not labelled `constitution`.
 - The issue is not labelled `human-only`.
-- The issue is not in the v0.7 backlog unless the user explicitly re-scoped it.
+- The issue belongs to the active v0.7 milestone, unless the user explicitly
+  re-scopes it.
 
 If an issue is ambiguous, blocked, missing acceptance criteria, or conflicts
 with this file, comment on the issue and stop. Do not guess.
@@ -40,8 +42,8 @@ with this file, comment on the issue and stop. Do not guess.
 ## Branch and PR Discipline
 
 - Use one branch per issue.
-- For v0.6 issues, branch from `main` as
-  `feat/v0.6-<issue-number>-<short-slug>`.
+- For v0.7 issues, branch from `main` as
+  `feat/v0.7-<issue-number>-<short-slug>`.
 - Implement strictly against the issue Acceptance Criteria.
 - Do not touch files outside the issue scope unless the PR explains why.
 - Do not mix constitution decisions with implementation unless the issue
@@ -64,7 +66,7 @@ Every PR must include:
 
 An issue is not done until the tracker is updated.
 
-For v0.6, the completing PR must update #202 by:
+For v0.7, the completing PR must update #213 by:
 
 - Ticking the issue checkbox.
 - Updating any satisfied milestone acceptance criteria.
@@ -90,7 +92,7 @@ the work in prose.
 
 ## Host Authority
 
-The user is the final owner. Inside CodeRoom, `@host` is the highest in-room
+The user is the final owner. Inside CoreRoom, `@host` is the highest in-room
 authority because it faces the user. Specialist roles may advise or block within
 declared authority scopes, but they do not bypass `@host` for project-level
 state, completion claims, or tracker closure.
@@ -113,7 +115,7 @@ tests and explain why that scope is sufficient.
 
 - Do not work on `constitution` or `human-only` issues unless the user directly
   instructs this specific worker in the current conversation.
-- Do not pick up v0.7 while #202 is active.
+- Do not pick up v0.8+ work while #213 is active.
 - Do not infer completion from model prose.
 - Do not update trackers without evidence.
 - Do not silently change package names, binary names, repo names, release

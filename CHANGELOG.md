@@ -1,6 +1,9 @@
 # Changelog
 
-All notable changes to CodeRoom are documented here.
+All notable changes to CoreRoom are documented here.
+
+Historical entries may refer to CodeRoom where they describe releases before
+the v0.7 staged rename.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -46,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths, pinned source citations, drift checks, and no-silent-refresh plans.
 - Added the v0.7 project status rollup for host-facing milestone cards,
   release readiness decisions, source citations, risks, and tracker blockers.
+- Accepted the v0.7 CoreRoom rename policy: active product surfaces use
+  **CoreRoom**, the descriptor is **Engineering Control Room for AI Agents**,
+  `cr` remains stable, `coreroom` becomes the long-form npm alias, `.coderoom/`
+  remains supported during the migration window, and `COREROOM_*` environment
+  variables are preferred with legacy `CODEROOM_*` aliases.
 
 ## [0.5.0] - 2026-05-23
 

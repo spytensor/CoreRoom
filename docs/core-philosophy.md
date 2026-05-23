@@ -1,4 +1,4 @@
-# CodeRoom — Core Philosophy
+# CoreRoom — Core Philosophy
 
 `docs/architecture.md` locks the **mechanism**. This document locks the
 **principles** that mechanism serves, the threat model it operates under, and
@@ -20,7 +20,7 @@ or comments, one file forces three problems that compound:
   any individual rule.
 - **No expressivity** — "this rule only matters to backend" cannot be said.
 
-Real organizational knowledge is partitioned by role. CodeRoom mirrors that
+Real organizational knowledge is partitioned by role. CoreRoom mirrors that
 partition.
 
 ## Role is a perspective, not a replacement

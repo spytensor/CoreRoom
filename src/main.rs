@@ -1,4 +1,4 @@
-//! `cr` — the CodeRoom CLI binary.
+//! `cr` — the CoreRoom CLI binary.
 //!
 //! Subcommands at v0.1:
 //!
@@ -16,7 +16,7 @@
 //! - `cr lock`                   — regenerate `.coderoom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
 //! - `cr gate ...`               — inspect SDLC gate ledgers
-//! - `cr doctor [--fix] [--stale-days N]` — inspect CodeRoom project files
+//! - `cr doctor [--fix] [--stale-days N]` — inspect CoreRoom project files
 //! - `cr show [--role ROLE] [--since YYYY-MM-DD] [--tail N]` — replay events
 //! - `cr cost [--since YYYY-MM-DD]` — summarize reported engine spend
 
@@ -39,7 +39,7 @@ use coderoom::init::{InitHookMode, InitPreset};
 #[command(
     name = "cr",
     version,
-    about = "CodeRoom — coordination shell for multi-role agent CLI sessions",
+    about = "CoreRoom — Engineering Control Room for AI Agents",
     long_about = None,
 )]
 struct Cli {
@@ -190,7 +190,7 @@ switch to `@HEAD` when you've reviewed the new content.")]
         #[command(subcommand)]
         command: GateCmd,
     },
-    /// Diagnose CodeRoom project files.
+    /// Diagnose CoreRoom project files.
     Doctor {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
@@ -412,7 +412,7 @@ enum GateCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// CodeRoom thread id.
+        /// CoreRoom thread id.
         #[arg(long)]
         thread: String,
         /// Gate tier: 0 or 1.
@@ -460,7 +460,7 @@ enum GateCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// CodeRoom thread id.
+        /// CoreRoom thread id.
         thread: String,
         /// Target phase.
         #[arg(value_parser = parse_gate_phase)]
@@ -585,7 +585,7 @@ enum GateCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// CodeRoom thread id.
+        /// CoreRoom thread id.
         thread: String,
         /// Reviewer role. A leading `@` is accepted.
         role: String,
@@ -601,7 +601,7 @@ enum GateCmd {
         /// Project root. Defaults to the current working directory.
         #[arg(long)]
         project: Option<PathBuf>,
-        /// CodeRoom thread id.
+        /// CoreRoom thread id.
         thread: String,
         /// Role whose blocking review is overruled.
         #[arg(long)]
@@ -1364,7 +1364,7 @@ fn confirm_yolo() -> Result<bool> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Ok(true);
     }
-    print!("Run this CodeRoom session with permission_mode=bypass for every role? [y/N] ");
+    print!("Run this CoreRoom session with permission_mode=bypass for every role? [y/N] ");
     std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;

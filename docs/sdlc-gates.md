@@ -1,6 +1,6 @@
 # SDLC Gates
 
-CodeRoom's SDLC gate support is host-first. Users can ask for work normally;
+CoreRoom's SDLC gate support is host-first. Users can ask for work normally;
 the host role is expected to classify the work, initialize a gate when needed,
 delegate review, and close the gate before claiming completion.
 

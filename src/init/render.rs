@@ -153,7 +153,7 @@ pub(super) fn render_role_expansion_picker(
     let _ = writeln!(
         out,
         "{}",
-        "CodeRoom found only @host. Choose the specialists to add:".with(output::DIM)
+        "CoreRoom found only @host. Choose the specialists to add:".with(output::DIM)
     );
     let _ = writeln!(out);
 
@@ -278,7 +278,7 @@ pub(super) fn render_confirm(
         let _ = writeln!(
             out,
             "  {}",
-            "coderoom will not touch it; split assistance can land separately.".dark_grey()
+            "CoreRoom will not touch it; split assistance can land separately.".dark_grey()
         );
     }
 
@@ -297,7 +297,7 @@ fn push_header(out: &mut String, project_name: &str, title: &str, subtitle: &str
         "{} {} {}",
         title.bold(),
         "·".dark_grey(),
-        format!("setting up coderoom in {project_name}").dark_grey()
+        format!("setting up CoreRoom in {project_name}").dark_grey()
     );
     let _ = writeln!(out, "{}", subtitle.dark_grey());
     let _ = writeln!(out);

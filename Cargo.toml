@@ -5,11 +5,11 @@ edition = "2021"
 rust-version = "1.85"
 authors = ["Charlie Zhu <chaojie.zhu.cn@gmail.com>"]
 license = "MIT"
-description = "A coordination shell for multi-role agent CLI sessions in a single chat-style terminal."
+description = "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control."
 homepage = "https://github.com/spytensor/codeRoom"
 repository = "https://github.com/spytensor/codeRoom"
 readme = "README.md"
-keywords = ["cli", "ai", "agents", "claude", "codex"]
+keywords = ["cli", "ai", "agents", "coreroom", "codex"]
 categories = ["command-line-utilities", "development-tools"]
 publish = false  # flip to true when ready to publish to crates.io
 
@@ -108,6 +108,6 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-# CodeRoom is the project name and shows up in prose throughout doc comments;
+# CoreRoom is the project name and shows up in prose throughout doc comments;
 # backticking it everywhere would clutter the docs without informing the reader.
 doc_markdown = "allow"

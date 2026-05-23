@@ -39,7 +39,7 @@ use thiserror::Error;
 
 use crate::adapter::{Engine, PermissionMode, RoleConfig};
 
-/// Standard subdirectory inside a project that holds CodeRoom state.
+/// Standard subdirectory inside a project that holds legacy CodeRoom state.
 pub const CODEROOM_DIR: &str = ".coderoom";
 
 /// File name of the project-level config inside [`CODEROOM_DIR`].

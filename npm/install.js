@@ -24,7 +24,7 @@ function detectPlatform() {
   if (platform === 'linux') os = 'linux';
   else if (platform === 'darwin') os = 'macos';
   else throw new Error(
-    `coderoom: unsupported platform "${platform}". ` +
+    `coreroom: unsupported platform "${platform}". ` +
     `Supported: linux, darwin (macOS). ` +
     `Build from source if you need windows: https://github.com/${REPO}#install`
   );
@@ -33,7 +33,7 @@ function detectPlatform() {
   if (arch === 'x64') cpu = 'x86_64';
   else if (arch === 'arm64') cpu = 'aarch64';
   else throw new Error(
-    `coderoom: unsupported arch "${arch}". Supported: x64, arm64.`
+    `coreroom: unsupported arch "${arch}". Supported: x64, arm64.`
   );
 
   return { os, cpu, label: `${os}-${cpu}` };
@@ -46,7 +46,7 @@ function get(url, redirectsLeft = 5) {
         url,
         {
           headers: {
-            'User-Agent': `coderoom-npm-installer/${VERSION}`,
+            'User-Agent': `coreroom-npm-installer/${VERSION}`,
             Accept: 'application/octet-stream',
           },
         },
@@ -117,7 +117,7 @@ async function main() {
     if (/^name *= *"coderoom"/m.test(cargoToml)) { // matches the cargo crate name, not this npm package
 
       console.log(
-        'coderoom: detected source checkout — skipping binary download. ' +
+        'coreroom: detected source checkout — skipping binary download. ' +
           'Run `cargo build --release` to use the local build.'
       );
       return;
@@ -135,11 +135,11 @@ async function main() {
   fs.mkdirSync(binDir, { recursive: true });
   const tarPath = path.join(binDir, archive);
 
-  console.log(`coderoom: downloading ${archive} ...`);
+  console.log(`coreroom: downloading ${archive} ...`);
   await downloadToFile(`${baseUrl}/${archive}`, tarPath);
 
   // Verify checksum against the published .sha256 file.
-  console.log('coderoom: verifying checksum ...');
+  console.log('coreroom: verifying checksum ...');
   const expected = (await fetchText(`${baseUrl}/${archive}.sha256`))
     .split(/\s+/)[0]
     .toLowerCase();
@@ -150,7 +150,7 @@ async function main() {
     );
   }
 
-  console.log('coderoom: extracting ...');
+  console.log('coreroom: extracting ...');
   const tar = spawnSync('tar', ['-xzf', tarPath, '-C', binDir], {
     stdio: 'inherit',
   });
@@ -168,11 +168,11 @@ async function main() {
   fs.rmSync(extractedDir, { recursive: true, force: true });
   fs.unlinkSync(tarPath);
 
-  console.log(`coderoom: installed cr ${tag} for ${label}`);
+  console.log(`coreroom: installed cr ${tag} for ${label}`);
 }
 
 main().catch((err) => {
-  console.error(`\ncoderoom installation failed: ${err.message || err}`);
+  console.error(`\ncoreroom installation failed: ${err.message || err}`);
   console.error(
     `\nFalling back: install the pre-built binary directly from\n` +
       `  https://github.com/${REPO}/releases/tag/v${VERSION}\n`

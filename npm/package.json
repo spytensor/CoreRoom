@@ -1,14 +1,16 @@
 {
-  "name": "@spytensor/coderoom",
+  "name": "@spytensor/coreroom",
   "version": "0.5.0",
-  "description": "A coordination shell for multi-role agent CLI sessions in a single chat-style terminal.",
+  "description": "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control.",
   "keywords": [
     "cli",
     "ai",
     "agents",
     "claude",
     "codex",
-    "gemini"
+    "gemini",
+    "coreroom",
+    "engineering-control-room"
   ],
   "homepage": "https://github.com/spytensor/codeRoom",
   "repository": {
@@ -22,6 +24,7 @@
   "author": "Charlie Zhu",
   "bin": {
     "cr": "./bin/cr",
+    "coreroom": "./bin/cr",
     "croom": "./bin/cr"
   },
   "scripts": {
