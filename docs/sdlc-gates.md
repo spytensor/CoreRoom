@@ -358,6 +358,21 @@ Source refresh plans require explicit confirmation and never allow silent
 remote refresh. ContextPacks may cite graph source ids and graph paths, but
 role visibility is checked per source slice before delegation.
 
+## v0.7 Project Status Rollup
+
+`@host` can render a project or milestone status card from WorkOrder GitHub
+facts, PR/CI state, Evidence Packet state, tracker rows, ContextPack/source
+citations, source drift findings, and known risks. The card is conversational
+and release-note friendly, not a dashboard dependency.
+
+The rollup distinguishes `not-started`, `ready`, `in-progress`, `in-review`,
+`failed-ci`, `blocked`, `implementation-complete-tracker-incomplete`, `merged`,
+and `closed`. Release readiness is a checkpoint decision: ready to release,
+continue work, blocked waiting human input, or unsafe to claim done. It cannot
+be true while any required tracker/Evidence Ledger row is not `merged/yes`, CI
+is failing, a human blocker exists, high risk is open, or source context is
+stale.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
