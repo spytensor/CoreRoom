@@ -294,6 +294,25 @@ When the tracker is stale, `@host` should propose the exact tracker patch:
 which checkbox to tick, which milestone acceptance criteria to update, and how
 to rewrite the Evidence Ledger row.
 
+## v0.7 GitHub-Native WorkOrder Lifecycle
+
+In v0.7, `@host` can derive WorkOrder status from GitHub facts without treating
+model prose as authority. The lifecycle is structural:
+
+| Lifecycle | Source facts |
+| --- | --- |
+| `not-started` | Issue is missing/open without ready labels, branch, or PR. |
+| `ready` | Issue is open with `status:ready` or `codex-ready`, but no branch or PR exists. |
+| `in-progress` | Branch exists, but no PR exists. |
+| `in-review` | PR is open and CI is not failing. |
+| `failed-ci` | Any required CI/check fact is `fail` or `cancelled`; this blocks completion even if the tracker is checked. |
+| `blocked` | Issue carries `status:blocked`, an explicit blocker exists, or the PR was closed without merge. |
+| `merged-tracker-stale` | PR is merged, but issue closure, Evidence Packet, tracker checkbox, or Evidence Ledger is incomplete. |
+| `closed` | Issue is closed, PR is merged, Evidence Packet is complete, tracker checkbox is checked, and Evidence Ledger is `merged` / `yes`. |
+
+This mirrors the Hermes-style checkpoint rule: worker output or a merged PR is
+not final until `@host` verifies evidence and closes the tracker row.
+
 ## Tier 0 / Read-Only Boundary
 
 Tier 0 covers read-only reviews and tiny, low-risk edits where an inline
