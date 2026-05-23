@@ -268,7 +268,7 @@ def render_boot_dashboard() -> None:
 
     draw_text(draw, (right_x, 539), "/help for commands", MUTED, FONT)
     draw_text(draw, (132, 714), "type a task · @role · /help · /exit", MUTED, SMALL)
-    prompt(draw, 88, 754, "@host drive the v0.5.0 virtual-team release")
+    prompt(draw, 88, 754, "@host verify the CoreRoom v0.7.0 release")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     image.save(OUT_DIR / "boot-dashboard.png")
@@ -423,7 +423,7 @@ def right_rail(draw: ScaledDraw) -> None:
 
 def render_work_cards() -> None:
     image, draw = new_canvas()
-    prompt(draw, 82, 84, "@host drive release readiness for v0.5.0")
+    prompt(draw, 82, 84, "@host verify CoreRoom v0.7.0 release readiness")
     status_line(draw, 134, "@host")
     active_card(
         draw,
@@ -432,9 +432,9 @@ def render_work_cards() -> None:
         "drive Tier 1 release gate",
         "recording gate evidence",
         [
-            ("✓", GREEN, "cr gate init --tier 1 --feature v0.5.0"),
-            ("✓", GREEN, "recorded research, plan, and sign-off artifacts"),
-            ("…", WHITE, "waiting for independent review + verification"),
+            ("✓", GREEN, "bound WorkOrder #234 to PR #235 and tag v0.7.0"),
+            ("✓", GREEN, "recorded rename audit, tests, clippy, and npm dry-run"),
+            ("…", WHITE, "collecting publish evidence for @spytensor/coreroom"),
         ],
         PURPLE,
     )
@@ -453,7 +453,7 @@ def render_work_cards() -> None:
         684,
         "@ci",
         "@host",
-        "fmt, clippy, tests, release build, and remote CI are green",
+        "fmt, clippy, tests, release build, and GitHub Release assets are green",
         CI,
         PURPLE,
     )
@@ -461,7 +461,7 @@ def render_work_cards() -> None:
         draw,
         732,
         "@ci",
-        "GitHub Release assets and npm latest are live for v0.5.0.",
+        "Evidence packet tracks tag, release assets, npm package, and tracker closure.",
         CI,
     )
 
