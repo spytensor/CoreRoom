@@ -454,6 +454,7 @@ pub(crate) fn role_spoke_events_from_text_with_ids(
     if let Some(title) = extracted.title {
         events.push(CrepEvent::WorkTitle {
             role: role.to_owned(),
+            priors_hash: String::new(),
             title,
             turn_id: turn_id.to_owned(),
             thread_id: thread_id.to_owned(),
@@ -465,6 +466,7 @@ pub(crate) fn role_spoke_events_from_text_with_ids(
     let mentions = cc::parse_mentions(&body);
     events.push(CrepEvent::RoleSpoke {
         role: role.to_owned(),
+        priors_hash: String::new(),
         text: body,
         mentions,
         cost_usd,
@@ -735,6 +737,7 @@ mod tests {
             events[0],
             CrepEvent::WorkTitle {
                 role: "qa".into(),
+                priors_hash: String::new(),
                 title: "Review adapter timeout paths".into(),
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
@@ -744,6 +747,7 @@ mod tests {
             events[1],
             CrepEvent::RoleSpoke {
                 role: "qa".into(),
+                priors_hash: String::new(),
                 text: "I checked with @backend.".into(),
                 mentions: vec!["backend".into()],
                 cost_usd: 0.5,

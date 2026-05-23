@@ -166,6 +166,7 @@ mod tests {
     fn spoke(role: &str, cost: f64, cache: u64) -> CrepEvent {
         CrepEvent::RoleSpoke {
             role: role.into(),
+            priors_hash: String::new(),
             text: "x".into(),
             mentions: Vec::new(),
             cost_usd: cost,
@@ -202,6 +203,7 @@ mod tests {
                 spoke("frontend", 0.02, 500),
                 CrepEvent::RoleStopped {
                     role: "backend".into(),
+                    priors_hash: String::new(),
                     reason: StopReason::Completed,
                     turn_id: None,
                 },
@@ -263,6 +265,7 @@ mod tests {
                 },
                 CrepEvent::RoleStopped {
                     role: "backend".into(),
+                    priors_hash: String::new(),
                     reason: StopReason::Completed,
                     turn_id: None,
                 },

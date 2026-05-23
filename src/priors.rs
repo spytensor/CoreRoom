@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::config::{CONFIG_FILE, ROLES_DIR};
 use crate::manifest::{
@@ -122,6 +123,77 @@ The runtime appends the current `turn_id` and `thread_id` to each prompt. For co
 pub struct ComposeOptions {
     /// Allow composed priors above the hard size limit.
     pub allow_large_priors: bool,
+}
+
+/// One content-addressed layer that contributes to a role's identity lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriorsLayer {
+    /// Stable layer class, for example `kernel`, `shared`, `role`, or `knowledge`.
+    pub kind: String,
+    /// Stable project-relative source path, or a built-in source label.
+    pub path: String,
+    /// Raw SHA-256 hex digest of the layer content.
+    pub sha256: String,
+}
+
+/// SHA-256 hex digest for arbitrary bytes.
+#[must_use]
+pub fn sha256_digest(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_digest(&hasher.finalize())
+}
+
+/// Composite priors hash stored in CREP events.
+#[must_use]
+pub fn composite_hash(composed: &str) -> String {
+    format!("sha256:{}", sha256_digest(composed.as_bytes()))
+}
+
+/// Return the lock-file layers for `role_name` in composition order.
+pub fn lock_layers_for_role(coderoom_dir: &Path, role_name: &str) -> Result<Vec<PriorsLayer>> {
+    let mut layers = Vec::new();
+    layers.push(PriorsLayer {
+        kind: "kernel".to_owned(),
+        path: "built-in:coderoom-kernel-protocol".to_owned(),
+        sha256: sha256_digest(KERNEL_PROTOCOL.as_bytes()),
+    });
+
+    let shared = coderoom_dir.join(SHARED_FILE);
+    if shared.is_file() {
+        let content =
+            std::fs::read(&shared).with_context(|| format!("reading {}", shared.display()))?;
+        if !String::from_utf8_lossy(&content).trim().is_empty() {
+            layers.push(PriorsLayer {
+                kind: "shared".to_owned(),
+                path: ".coderoom/shared.md".to_owned(),
+                sha256: sha256_digest(&content),
+            });
+        }
+    }
+
+    let role_path =
+        manifest::role_priors_path_existing(coderoom_dir, role_name).with_context(|| {
+            format!(
+                "role `{role_name}` is missing priors at {}",
+                manifest::preferred_role_priors_path(coderoom_dir, role_name).display()
+            )
+        })?;
+    layers.push(PriorsLayer {
+        kind: "role".to_owned(),
+        path: role_priors_source(coderoom_dir, role_name, &role_path),
+        sha256: manifest::sha256_file(&role_path)?,
+    });
+
+    for item in ordered_knowledge(coderoom_dir, role_name)? {
+        layers.push(PriorsLayer {
+            kind: "knowledge".to_owned(),
+            path: format!(".coderoom/roles/{role_name}/knowledge/{}", item.entry.name),
+            sha256: manifest::sha256_file(&item.path)?,
+        });
+    }
+
+    Ok(layers)
 }
 
 /// Compose the full system prompt for `role_name` from `coderoom_dir`.
@@ -289,6 +361,14 @@ fn append_sourced_section(out: &mut String, title: &str, source: &str, body: &st
     section.push('\n');
     section.push_str(body.trim_end());
     append_section(out, &section);
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn role_priors_source(coderoom_dir: &Path, role_name: &str, role_path: &Path) -> String {

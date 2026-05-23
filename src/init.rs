@@ -32,6 +32,7 @@ use signal_hook::iterator::{Handle as SignalHandle, Signals};
 use crate::adapter::Engine;
 use crate::config::{Config, CODEROOM_DIR, CONFIG_FILE, ROLES_DIR};
 use crate::detect;
+use crate::lock::LOCK_FILE;
 use crate::output;
 use crate::role::{self, RoleAddition};
 
@@ -289,6 +290,7 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     };
 
     write_all(&coderoom_dir, &role_plan)?;
+    crate::lock::write(&coderoom_dir, crate::priors::ComposeOptions::default())?;
     let hook = if options.hook_mode.enabled() {
         Some(hooks::install_or_upgrade(project_root)?)
     } else {
@@ -532,6 +534,7 @@ fn planned_files(project_root: &Path, roles: &[RolePlan], with_claude_hooks: boo
     let coderoom_dir = project_root.join(CODEROOM_DIR);
     let mut paths = vec![
         coderoom_dir.join(CONFIG_FILE),
+        coderoom_dir.join(LOCK_FILE),
         coderoom_dir.join("shared.md"),
     ];
     let roles_dir = coderoom_dir.join(ROLES_DIR);

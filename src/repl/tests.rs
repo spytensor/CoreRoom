@@ -86,6 +86,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
         },
         CrepEvent::RoleSpoke {
             role: "security".into(),
+            priors_hash: String::new(),
             text: "not this role".into(),
             mentions: vec![],
             cost_usd: 0.0,
@@ -97,6 +98,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "tool-1".into(),
@@ -105,6 +107,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "README.md".into(),
@@ -129,6 +132,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
 fn show_filter_tail_zero_renders_no_events() {
     let events = vec![CrepEvent::RoleStopped {
         role: "backend".into(),
+        priors_hash: String::new(),
         reason: StopReason::Completed,
         turn_id: None,
     }];
@@ -145,6 +149,7 @@ fn show_filter_tail_zero_renders_no_events() {
 fn show_normalizes_legacy_cr_task_role_spoke() {
     let event = CrepEvent::RoleSpoke {
         role: "security".into(),
+        priors_hash: String::new(),
         text: "```cr-task\nReview permissions\n```\n\nFindings for @backend.".into(),
         mentions: vec!["backend".into()],
         cost_usd: 0.0,
@@ -690,12 +695,14 @@ fn snapshot_render_event_lines() {
         },
         CrepEvent::WorkTitle {
             role: "backend".into(),
+            priors_hash: String::new(),
             title: "Review work cards".into(),
             turn_id: String::new(),
             thread_id: String::new(),
         },
         CrepEvent::RoleSpoke {
             role: "backend".into(),
+            priors_hash: String::new(),
             text: "Ready for @security.".into(),
             mentions: vec!["security".into()],
             cost_usd: 0.12,
@@ -707,6 +714,7 @@ fn snapshot_render_event_lines() {
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "cargo test --all-features"}),
             tool_use_id: "tool-1".into(),
@@ -715,6 +723,7 @@ fn snapshot_render_event_lines() {
         },
         CrepEvent::ToolCallExecuted {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "tests passed".into(),
@@ -723,6 +732,7 @@ fn snapshot_render_event_lines() {
         },
         CrepEvent::PermissionDenied {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             reason: "destructive shell ops require review".into(),
@@ -731,6 +741,7 @@ fn snapshot_render_event_lines() {
         },
         CrepEvent::RoleStopped {
             role: "backend".into(),
+            priors_hash: String::new(),
             reason: StopReason::Refreshed,
             turn_id: None,
         },
@@ -755,6 +766,7 @@ fn snapshot_render_event_lines() {
 fn multi_line_role_spoke_uses_inset_message_block() {
     let event = CrepEvent::RoleSpoke {
         role: "backend".into(),
+        priors_hash: String::new(),
         text: "First paragraph.\nSecond paragraph.\nThird paragraph.".into(),
         cost_usd: 0.0,
         cache_read: 0,
@@ -782,6 +794,7 @@ fn turn_dispatched_renders_as_full_width_handoff_banner() {
     // count depends on the role-name width.
     let dispatched = CrepEvent::TurnDispatched {
         role: "backend".into(),
+        priors_hash: String::new(),
         turn_id: String::new(),
         thread_id: String::new(),
         parent_turn_id: None,
@@ -799,6 +812,7 @@ fn turn_dispatched_renders_as_full_width_handoff_banner() {
     // that haven't actually changed the speaker on-screen.
     let queued = CrepEvent::TurnDispatched {
         role: "frontend".into(),
+        priors_hash: String::new(),
         turn_id: String::new(),
         thread_id: String::new(),
         parent_turn_id: None,
@@ -815,6 +829,7 @@ fn turn_dispatched_banner_pads_to_exact_width_in_tight_fits() {
     // it pads with spaces so the rendered line is exactly `width`.
     let dispatched = CrepEvent::TurnDispatched {
         role: "backend".into(),
+        priors_hash: String::new(),
         turn_id: String::new(),
         thread_id: String::new(),
         parent_turn_id: None,
@@ -835,6 +850,7 @@ fn turn_dispatched_banner_handles_long_role_names() {
     // the total width remains exactly `width`.
     let dispatched = CrepEvent::TurnDispatched {
         role: "docs-reviewer".into(),
+        priors_hash: String::new(),
         turn_id: String::new(),
         thread_id: String::new(),
         parent_turn_id: None,
@@ -920,6 +936,7 @@ fn turn_dispatched_collapses_on_narrow_terminals() {
     // on one line.
     let dispatched = CrepEvent::TurnDispatched {
         role: "backend".into(),
+        priors_hash: String::new(),
         turn_id: String::new(),
         thread_id: String::new(),
         parent_turn_id: None,
@@ -935,6 +952,7 @@ fn turn_dispatched_collapses_on_narrow_terminals() {
 fn role_spoke_renders_markdown_lite_with_wrapping() {
     let event = CrepEvent::RoleSpoke {
         role: "security".into(),
+            priors_hash: String::new(),
         text: "# Main Risk\n\n- **Bash** can run broad commands that need review.\n\n```text\n# not a heading\n**not bold**\n```".into(),
         cost_usd: 0.0,
         cache_read: 0,
@@ -966,6 +984,7 @@ fn turn_activity_folds_tool_events() {
     for event in [
         CrepEvent::ToolCallProposed {
             role: "host".into(),
+            priors_hash: String::new(),
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "1".into(),
@@ -974,6 +993,7 @@ fn turn_activity_folds_tool_events() {
         },
         CrepEvent::ToolCallProposed {
             role: "host".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "ls"}),
             tool_use_id: "2".into(),
@@ -982,6 +1002,7 @@ fn turn_activity_folds_tool_events() {
         },
         CrepEvent::ToolCallExecuted {
             role: "host".into(),
+            priors_hash: String::new(),
             tool_use_id: "1".into(),
             ok: true,
             output_summary: "README.md".into(),
@@ -990,6 +1011,7 @@ fn turn_activity_folds_tool_events() {
         },
         CrepEvent::ToolCallExecuted {
             role: "host".into(),
+            priors_hash: String::new(),
             tool_use_id: "2".into(),
             ok: true,
             output_summary: "Cargo.toml".into(),
@@ -1012,6 +1034,7 @@ fn turn_activity_folds_tool_events() {
 fn turn_activity_ignores_other_roles() {
     let event = CrepEvent::ToolCallProposed {
         role: "security".into(),
+        priors_hash: String::new(),
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "README.md"}),
         tool_use_id: "1".into(),
@@ -1110,6 +1133,7 @@ fn turn_activity_top_denied_tools_orders_by_frequency() {
 fn turn_activity_permission_denied_event_folds_into_denied_count() {
     let event = CrepEvent::PermissionDenied {
         role: "host".into(),
+        priors_hash: String::new(),
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "src/main.rs"}),
         reason: "denied by CodeRoom".into(),
@@ -1204,6 +1228,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
     };
     s.update_from_event(&CrepEvent::ToolCallProposed {
         role: "security".into(),
+        priors_hash: String::new(),
         tool_name: "Bash".into(),
         tool_input: serde_json::json!({"command": "ls"}),
         tool_use_id: "t-1".into(),
@@ -1212,6 +1237,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
     });
     s.update_from_event(&CrepEvent::ToolCallProposed {
         role: "security".into(),
+        priors_hash: String::new(),
         tool_name: "Read".into(),
         tool_input: serde_json::json!({"file_path": "Cargo.toml"}),
         tool_use_id: "t-2".into(),
@@ -1234,6 +1260,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
     // Events for a different role must not move the slot.
     s.update_from_event(&CrepEvent::ToolCallProposed {
         role: "other".into(),
+        priors_hash: String::new(),
         tool_name: "Edit".into(),
         tool_input: serde_json::json!({}),
         tool_use_id: "t-3".into(),
@@ -1855,6 +1882,7 @@ fn turn_interrupted_finalizes_work_card() {
     // Pre-existing tool step so the interrupted card has content.
     work.apply_event(&CrepEvent::ToolCallProposed {
         role: "security".into(),
+        priors_hash: String::new(),
         tool_name: "Bash".into(),
         tool_input: serde_json::json!({"command": "rg secret"}),
         tool_use_id: "tool-1".into(),

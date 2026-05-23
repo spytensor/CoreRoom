@@ -28,7 +28,6 @@
 //! native approval prompt.
 
 use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -268,6 +267,7 @@ async fn emit_cc_interrupt_events(
     let _ = events
         .send(CrepEvent::TurnInterrupted {
             role: role.clone(),
+            priors_hash: String::new(),
             turn_id: event_turn_id,
             thread_id: event_thread_id,
             source: crate::crep::InterruptSource::UserHalt,
@@ -340,13 +340,6 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", raw.replace('\'', "'\\''"))
 }
 
-/// Cheap, non-cryptographic content fingerprint. Stable for the same
-/// content across runs (within a single Rust release; `DefaultHasher` is
-/// allowed to change algorithms across releases). Sufficient for drift
-/// detection in v0.1 — replace with `sha2` if/when we publish hashes.
-///
-/// `pub(crate)` so sibling adapters (codex, gemini) can reuse the same
-/// fingerprint format and produce comparable `priors_hash` values.
 /// Build the stream-json `{"type":"user", message:{...}}` envelope cc
 /// expects on stdin. Scans `text` for `@./` / `@/` / `~/` image refs
 /// and appends `{"type":"image","source":{"type":"base64",...}}`
@@ -401,10 +394,12 @@ fn build_user_envelope(role: &str, text: &str) -> serde_json::Value {
     })
 }
 
+/// Stable SHA-256 content fingerprint for a composed priors prompt.
+///
+/// `pub(crate)` so sibling adapters (codex, gemini) can reuse the same
+/// fingerprint format and produce comparable `priors_hash` values.
 pub(crate) fn fingerprint(content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("dh1:{:016x}", hasher.finish())
+    crate::priors::composite_hash(content)
 }
 
 /// Parse `@<name>` references out of a reply, deduplicated, in order of
@@ -550,6 +545,7 @@ fn extract_permission_denials(
                 .to_owned();
             CrepEvent::PermissionDenied {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_name,
                 tool_input,
                 reason,
@@ -582,6 +578,7 @@ fn extract_assistant_events(
                     if let Some(title) = crate::work::extract_cr_task(text).title {
                         events.push(CrepEvent::WorkTitle {
                             role: role.to_owned(),
+                            priors_hash: String::new(),
                             title,
                             turn_id: turn_id.to_owned(),
                             thread_id: thread_id.to_owned(),
@@ -591,6 +588,7 @@ fn extract_assistant_events(
             }
             Some("tool_use") => events.push(CrepEvent::ToolCallProposed {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_name: block
                     .get("name")
                     .and_then(Value::as_str)
@@ -644,6 +642,7 @@ fn extract_tool_results(
                 .unwrap_or(false);
             CrepEvent::ToolCallExecuted {
                 role: role.to_owned(),
+                priors_hash: String::new(),
                 tool_use_id: block
                     .get("tool_use_id")
                     .and_then(Value::as_str)
@@ -881,6 +880,7 @@ async fn wait_child(
     let _ = events
         .send(CrepEvent::RoleStopped {
             role,
+            priors_hash: String::new(),
             reason,
             turn_id,
         })

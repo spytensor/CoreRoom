@@ -13,6 +13,8 @@
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr [start] [--project PATH] [--allow-large-priors]` — enter the REPL
 //! - `cr prompt show <role>`     — print a role's effective prompt
+//! - `cr lock`                   — regenerate `.coderoom/priors.lock`
+//! - `cr verify`                 — verify priors lock content
 //! - `cr gate ...`               — inspect SDLC gate ledgers
 //! - `cr doctor [--fix]`         — inspect CodeRoom project files
 //! - `cr show [--role ROLE] [--since YYYY-MM-DD] [--tail N]` — replay events
@@ -21,7 +23,7 @@
 use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use coderoom::adapter::{Engine, PermissionMode};
 use coderoom::config::AuthorityScope;
@@ -66,6 +68,18 @@ enum Cmd {
         /// Starter role preset: default or team.
         #[arg(long, value_parser = parse_init_preset, default_value = "default")]
         preset: InitPreset,
+    },
+    /// Regenerate `.coderoom/priors.lock` after intentional priors changes.
+    Lock {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Verify `.coderoom/priors.lock` against current priors content.
+    Verify {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
     /// Manage roles in the current project's `.coderoom/config.toml`.
     Role {
@@ -724,6 +738,8 @@ fn main() -> Result<()> {
         cli.command,
         Some(
             Cmd::Init { .. }
+                | Cmd::Lock { .. }
+                | Cmd::Verify { .. }
                 | Cmd::Role { .. }
                 | Cmd::Config { .. }
                 | Cmd::Prompt { .. }
@@ -762,6 +778,8 @@ fn main() -> Result<()> {
             opts.preset = preset;
             coderoom::init::run(&project_root_or_cwd(project)?, opts)
         }
+        Some(Cmd::Lock { project }) => run_lock(project),
+        Some(Cmd::Verify { project }) => run_verify(project),
         Some(Cmd::Role { command }) => run_role_cmd(command),
         Some(Cmd::Start {
             project,
@@ -928,6 +946,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                 &root,
                 &CrepEvent::PhaseAdvanced {
                     thread: transition.thread_id.clone(),
+                    priors_hash: String::new(),
                     from: transition.from,
                     to: transition.to,
                     actor: transition.actor.clone(),
@@ -1089,6 +1108,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                 &root,
                 &CrepEvent::PlanReviewed {
                     role: record.reviewer.role.clone(),
+                    priors_hash: String::new(),
                     decision: record.decision,
                     plan_sha: record.plan_sha.clone(),
                 },
@@ -1121,6 +1141,7 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
                 &root,
                 &CrepEvent::PlanOverridden {
                     role: override_record.role.clone(),
+                    priors_hash: String::new(),
                     reason: override_record.reason.clone(),
                 },
             )?;
@@ -1295,6 +1316,35 @@ fn run_start(
         };
         coderoom::repl::run_with_options(&project_root, options).await
     })
+}
+
+fn run_lock(project: Option<PathBuf>) -> Result<()> {
+    let root = project_root_or_cwd(project)?;
+    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
+    let lock = coderoom::lock::write(&coderoom_dir, coderoom::priors::ComposeOptions::default())?;
+    println!(
+        "✓ wrote {} ({} role{})",
+        coderoom::lock::lock_path(&coderoom_dir).display(),
+        lock.roles.len(),
+        if lock.roles.len() == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
+fn run_verify(project: Option<PathBuf>) -> Result<()> {
+    let root = project_root_or_cwd(project)?;
+    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
+    let report =
+        coderoom::lock::verify(&coderoom_dir, coderoom::priors::ComposeOptions::default())?;
+    if report.is_clean() {
+        println!("✓ priors lock verified ({})", report.lock_path.display());
+        return Ok(());
+    }
+    println!("priors lock drift detected:");
+    for drift in &report.drifts {
+        println!("  - {drift}");
+    }
+    bail!("run `cr lock` after reviewing intentional priors changes");
 }
 
 fn confirm_yolo() -> Result<bool> {

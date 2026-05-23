@@ -4,6 +4,7 @@ use tracing::debug;
 use unicode_width::UnicodeWidthStr;
 
 use crate::crep::CrepEvent;
+use crate::gate::GatePhase;
 use crate::output;
 
 use super::text::{one_line, truncate_inline};
@@ -120,17 +121,8 @@ pub(super) fn render_event_line_at_width(
             from,
             to,
             actor,
-        } => format!(
-            "  {} {}",
-            "▸".with(output::SPLASH_ACCENT),
-            format!(
-                "gate {thread} phase: {} -> {} by {actor}",
-                from.label(),
-                to.label()
-            )
-            .with(output::DIM)
-            .italic()
-        ),
+            ..
+        } => render_phase_advanced(thread, *from, *to, actor),
         CrepEvent::PhaseBlocked {
             role,
             phase,
@@ -151,8 +143,9 @@ pub(super) fn render_event_line_at_width(
             role,
             decision,
             plan_sha,
+            ..
         } => render_plan_reviewed(role, host_role, decision.label(), plan_sha),
-        CrepEvent::PlanOverridden { role, reason } => {
+        CrepEvent::PlanOverridden { role, reason, .. } => {
             render_plan_overridden(role, host_role, reason)
         }
         // `TurnDispatched` is the cross-role handoff boundary. When
@@ -191,6 +184,20 @@ pub(super) fn render_event_line_at_width(
             )
         }
     }
+}
+
+fn render_phase_advanced(thread: &str, from: GatePhase, to: GatePhase, actor: &str) -> String {
+    format!(
+        "  {} {}",
+        "▸".with(output::SPLASH_ACCENT),
+        format!(
+            "gate {thread} phase: {} -> {} by {actor}",
+            from.label(),
+            to.label()
+        )
+        .with(output::DIM)
+        .italic()
+    )
 }
 
 fn render_plan_reviewed(role: &str, host_role: &str, decision: &str, plan_sha: &str) -> String {

@@ -285,6 +285,7 @@ mod tests {
         let mut work = TurnWork::new("security", "host", "scan repo");
         work.apply_event(&CrepEvent::ToolCallProposed {
             role: "security".into(),
+            priors_hash: String::new(),
             tool_name: "Read".into(),
             tool_input: serde_json::json!({"file_path": "README.md"}),
             tool_use_id: "tool-1".into(),
@@ -293,6 +294,7 @@ mod tests {
         });
         work.apply_event(&CrepEvent::ToolCallExecuted {
             role: "security".into(),
+            priors_hash: String::new(),
             tool_use_id: "tool-1".into(),
             ok: true,
             output_summary: "README.md".into(),
@@ -312,6 +314,7 @@ mod tests {
         let mut work = TurnWork::new("security", "host", "scan repo");
         work.apply_event(&CrepEvent::ToolCallProposed {
             role: "security".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             tool_use_id: "tool-1".into(),
@@ -320,6 +323,7 @@ mod tests {
         });
         work.apply_event(&CrepEvent::PermissionDenied {
             role: "security".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: serde_json::json!({"command": "rm -rf target"}),
             reason: "requires review".into(),

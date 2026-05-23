@@ -59,6 +59,9 @@ pub enum CrepEvent {
     RoleSessionUpdated {
         /// Configured name of the role.
         role: String,
+        /// Composite priors hash for the role session that reported this id.
+        #[serde(default)]
+        priors_hash: String,
         /// Engine-issued session/thread id that can be passed back into
         /// the adapter on the next spawn.
         session_id: String,
@@ -75,6 +78,9 @@ pub enum CrepEvent {
     TurnDispatched {
         /// Configured name of the dispatched role.
         role: String,
+        /// Composite priors hash for the role context that will receive this turn.
+        #[serde(default)]
+        priors_hash: String,
         /// Opaque turn id, also carried on every later turn-scoped event.
         turn_id: TurnId,
         /// Opaque conversation-thread id; preserved across auto-routed
@@ -94,6 +100,9 @@ pub enum CrepEvent {
     WorkTitle {
         /// Configured name of the role whose current work title changed.
         role: String,
+        /// Composite priors hash for the role context that produced this title.
+        #[serde(default)]
+        priors_hash: String,
         /// Sanitized one-line work title.
         title: String,
         /// Opaque turn id this title belongs to. Empty string for v0.1
@@ -112,6 +121,9 @@ pub enum CrepEvent {
     RoleSpoke {
         /// Configured name of the role that spoke.
         role: String,
+        /// Composite priors hash for the role context that produced this reply.
+        #[serde(default)]
+        priors_hash: String,
         /// Final assistant-turn text. UI and message-bus consumers render
         /// this directly.
         text: String,
@@ -148,6 +160,10 @@ pub enum CrepEvent {
     PhaseAdvanced {
         /// CodeRoom thread id / gate id.
         thread: String,
+        /// Composite priors hash when the transition is tied to a role
+        /// context. Empty for user/system-only gate transitions.
+        #[serde(default)]
+        priors_hash: String,
         /// Previous phase.
         from: GatePhase,
         /// New phase.
@@ -163,6 +179,9 @@ pub enum CrepEvent {
         phase: GatePhase,
         /// Role that declared the block.
         role: String,
+        /// Composite priors hash for the role turn that declared the block.
+        #[serde(default)]
+        priors_hash: String,
         /// Human-readable reason.
         reason: String,
     },
@@ -170,6 +189,9 @@ pub enum CrepEvent {
     PlanReviewed {
         /// Role that recorded the review.
         role: String,
+        /// Composite priors hash when the review is tied to a role context.
+        #[serde(default)]
+        priors_hash: String,
         /// Review decision.
         decision: PlanReviewDecision,
         /// SHA-256 of the plan artifact at review time.
@@ -179,6 +201,9 @@ pub enum CrepEvent {
     PlanOverridden {
         /// Role whose blocking review was overruled.
         role: String,
+        /// Composite priors hash when the override is tied to a role context.
+        #[serde(default)]
+        priors_hash: String,
         /// Human-readable override reason.
         reason: String,
     },
@@ -189,6 +214,9 @@ pub enum CrepEvent {
     RoleOutputDelta {
         /// Configured name of the role that emitted text.
         role: String,
+        /// Composite priors hash for the role context that emitted this text.
+        #[serde(default)]
+        priors_hash: String,
         /// Append-only text chunk emitted by the engine.
         text_delta: String,
         /// Monotonic sequence number within the role adapter's current turn.
@@ -211,6 +239,9 @@ pub enum CrepEvent {
     TurnInterrupted {
         /// Configured name of the interrupted role.
         role: String,
+        /// Composite priors hash for the interrupted role context.
+        #[serde(default)]
+        priors_hash: String,
         /// Opaque turn id matching the dispatched turn.
         turn_id: TurnId,
         /// Opaque conversation-thread id of the interrupted turn.
@@ -229,6 +260,9 @@ pub enum CrepEvent {
     ToolCallProposed {
         /// Configured name of the role proposing the call.
         role: String,
+        /// Composite priors hash for the role context that proposed this call.
+        #[serde(default)]
+        priors_hash: String,
         /// Engine-native tool identifier (e.g. `"Bash"`, `"Edit"`, `"Read"`).
         tool_name: String,
         /// Engine-native tool input as opaque JSON; preserved verbatim so
@@ -250,6 +284,9 @@ pub enum CrepEvent {
     ToolCallExecuted {
         /// Configured name of the role that ran the tool.
         role: String,
+        /// Composite priors hash for the role context that ran this call.
+        #[serde(default)]
+        priors_hash: String,
         /// Engine-issued tool-use id matching a prior `ToolCallProposed`.
         tool_use_id: String,
         /// Whether the tool exited successfully.
@@ -270,6 +307,9 @@ pub enum CrepEvent {
     PermissionDenied {
         /// Configured name of the role whose tool call was denied.
         role: String,
+        /// Composite priors hash for the role context whose call was denied.
+        #[serde(default)]
+        priors_hash: String,
         /// Engine-native tool identifier of the denied call.
         tool_name: String,
         /// Engine-native tool input that triggered the deny.
@@ -290,6 +330,9 @@ pub enum CrepEvent {
     RoleStopped {
         /// Configured name of the role that stopped.
         role: String,
+        /// Composite priors hash for the role context that stopped.
+        #[serde(default)]
+        priors_hash: String,
         /// Why the role stopped.
         reason: StopReason,
         /// Set when the role stopped while a specific turn was in
@@ -305,6 +348,56 @@ pub enum CrepEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<TurnId>,
     },
+}
+
+impl CrepEvent {
+    /// Return this event's role-context priors hash when the event has one.
+    #[must_use]
+    pub fn priors_hash(&self) -> Option<&str> {
+        match self {
+            Self::RoleStarted { priors_hash, .. }
+            | Self::RoleSessionUpdated { priors_hash, .. }
+            | Self::TurnDispatched { priors_hash, .. }
+            | Self::WorkTitle { priors_hash, .. }
+            | Self::RoleSpoke { priors_hash, .. }
+            | Self::PhaseAdvanced { priors_hash, .. }
+            | Self::PhaseBlocked { priors_hash, .. }
+            | Self::PlanReviewed { priors_hash, .. }
+            | Self::PlanOverridden { priors_hash, .. }
+            | Self::RoleOutputDelta { priors_hash, .. }
+            | Self::TurnInterrupted { priors_hash, .. }
+            | Self::ToolCallProposed { priors_hash, .. }
+            | Self::ToolCallExecuted { priors_hash, .. }
+            | Self::PermissionDenied { priors_hash, .. }
+            | Self::RoleStopped { priors_hash, .. } => Some(priors_hash),
+        }
+    }
+
+    /// Stamp a role-context priors hash onto events that carry one.
+    pub fn stamp_priors_hash(&mut self, hash: &str) {
+        match self {
+            Self::RoleStarted { priors_hash, .. }
+            | Self::RoleSessionUpdated { priors_hash, .. }
+            | Self::TurnDispatched { priors_hash, .. }
+            | Self::WorkTitle { priors_hash, .. }
+            | Self::RoleSpoke { priors_hash, .. }
+            | Self::PhaseAdvanced { priors_hash, .. }
+            | Self::PhaseBlocked { priors_hash, .. }
+            | Self::PlanReviewed { priors_hash, .. }
+            | Self::PlanOverridden { priors_hash, .. }
+            | Self::RoleOutputDelta { priors_hash, .. }
+            | Self::TurnInterrupted { priors_hash, .. }
+            | Self::ToolCallProposed { priors_hash, .. }
+            | Self::ToolCallExecuted { priors_hash, .. }
+            | Self::PermissionDenied { priors_hash, .. }
+            | Self::RoleStopped { priors_hash, .. }
+                if priors_hash.is_empty() =>
+            {
+                hash.clone_into(priors_hash);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Why a role stopped.
@@ -416,6 +509,7 @@ mod tests {
     fn role_session_updated_roundtrips() {
         let event = CrepEvent::RoleSessionUpdated {
             role: "qa".into(),
+            priors_hash: String::new(),
             session_id: "thread-abc".into(),
         };
         let wire = serde_json::to_value(&event).unwrap();
@@ -429,6 +523,7 @@ mod tests {
     fn role_spoke_carries_mentions_and_cost() {
         let event = CrepEvent::RoleSpoke {
             role: "backend".into(),
+            priors_hash: String::new(),
             text: "Will check with @security and @frontend.".into(),
             mentions: vec!["security".into(), "frontend".into()],
             cost_usd: 0.0625,
@@ -453,6 +548,7 @@ mod tests {
     fn role_spoke_carries_phase_block_when_present() {
         let event = CrepEvent::RoleSpoke {
             role: "security".into(),
+            priors_hash: String::new(),
             text: "Blocked pending review.".into(),
             mentions: vec![],
             cost_usd: 0.0,
@@ -480,6 +576,7 @@ mod tests {
         ] {
             let event = CrepEvent::RoleSpoke {
                 role: "host".into(),
+                priors_hash: String::new(),
                 text: "ok".into(),
                 mentions: vec![],
                 cost_usd: 0.0,
@@ -574,6 +671,7 @@ mod tests {
     fn role_stopped_with_in_flight_turn_round_trips() {
         let event = CrepEvent::RoleStopped {
             role: "backend".into(),
+            priors_hash: String::new(),
             reason: StopReason::Crashed,
             turn_id: Some("t-7".into()),
         };
@@ -587,6 +685,7 @@ mod tests {
     fn phase_events_round_trip() {
         let advanced = CrepEvent::PhaseAdvanced {
             thread: "thread-1".into(),
+            priors_hash: String::new(),
             from: GatePhase::Intake,
             to: GatePhase::Discovery,
             actor: "user".into(),
@@ -595,15 +694,18 @@ mod tests {
             thread: "thread-1".into(),
             phase: GatePhase::Review,
             role: "security".into(),
+            priors_hash: String::new(),
             reason: "missing threat model".into(),
         };
         let reviewed = CrepEvent::PlanReviewed {
             role: "sre".into(),
+            priors_hash: String::new(),
             decision: PlanReviewDecision::Approve,
             plan_sha: "abc123".into(),
         };
         let overridden = CrepEvent::PlanOverridden {
             role: "security".into(),
+            priors_hash: String::new(),
             reason: "accepted release risk".into(),
         };
 
@@ -632,6 +734,7 @@ mod tests {
     fn turn_dispatched_event_shape() {
         let event = CrepEvent::TurnDispatched {
             role: "security".into(),
+            priors_hash: String::new(),
             turn_id: "t-2".into(),
             thread_id: "th-1".into(),
             parent_turn_id: Some("t-1".into()),
@@ -649,6 +752,7 @@ mod tests {
     fn turn_interrupted_carries_partial_payload() {
         let event = CrepEvent::TurnInterrupted {
             role: "security".into(),
+            priors_hash: String::new(),
             turn_id: "t-3".into(),
             thread_id: "th-2".into(),
             source: InterruptSource::UserHalt,
@@ -692,6 +796,7 @@ mod tests {
         ] {
             let event = CrepEvent::TurnInterrupted {
                 role: "security".into(),
+                priors_hash: String::new(),
                 turn_id: "tu-1".into(),
                 thread_id: "th-1".into(),
                 source,
@@ -723,6 +828,7 @@ mod tests {
         let chain = [
             CrepEvent::TurnDispatched {
                 role: "host".into(),
+                priors_hash: String::new(),
                 turn_id: "tu-1".into(),
                 thread_id: "th-7".into(),
                 parent_turn_id: None,
@@ -730,6 +836,7 @@ mod tests {
             },
             CrepEvent::TurnDispatched {
                 role: "backend".into(),
+                priors_hash: String::new(),
                 turn_id: "tu-2".into(),
                 thread_id: "th-7".into(),
                 parent_turn_id: Some("tu-1".into()),
@@ -737,6 +844,7 @@ mod tests {
             },
             CrepEvent::TurnDispatched {
                 role: "security".into(),
+                priors_hash: String::new(),
                 turn_id: "tu-3".into(),
                 thread_id: "th-7".into(),
                 parent_turn_id: Some("tu-2".into()),
@@ -771,6 +879,7 @@ mod tests {
         // skipped on serialize when None.
         let event = CrepEvent::RoleStopped {
             role: "backend".into(),
+            priors_hash: String::new(),
             reason: StopReason::Completed,
             turn_id: None,
         };
@@ -788,6 +897,7 @@ mod tests {
     fn work_title_roundtrips() {
         let event = CrepEvent::WorkTitle {
             role: "backend".into(),
+            priors_hash: String::new(),
             title: "Review adapter timeout paths".into(),
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
@@ -803,6 +913,7 @@ mod tests {
     fn tool_call_proposed_preserves_arbitrary_input() {
         let event = CrepEvent::ToolCallProposed {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: json!({"command": "ls", "description": "list files"}),
             tool_use_id: "toolu_01abc".into(),
@@ -818,6 +929,7 @@ mod tests {
     fn permission_denied_preserves_reason() {
         let event = CrepEvent::PermissionDenied {
             role: "backend".into(),
+            priors_hash: String::new(),
             tool_name: "Bash".into(),
             tool_input: json!({"command": "rm -rf /"}),
             reason: "destructive shell ops are denied by hook".into(),
@@ -849,6 +961,7 @@ mod tests {
     fn role_stopped_event_shape() {
         let event = CrepEvent::RoleStopped {
             role: "backend".into(),
+            priors_hash: String::new(),
             reason: StopReason::Completed,
             turn_id: None,
         };
@@ -874,6 +987,7 @@ mod tests {
             (
                 CrepEvent::RoleSessionUpdated {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     session_id: "s".into(),
                 },
                 "role_session_updated",
@@ -881,6 +995,7 @@ mod tests {
             (
                 CrepEvent::TurnDispatched {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
                     parent_turn_id: None,
@@ -891,6 +1006,7 @@ mod tests {
             (
                 CrepEvent::WorkTitle {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     title: "t".into(),
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
@@ -900,6 +1016,7 @@ mod tests {
             (
                 CrepEvent::RoleSpoke {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     text: "t".into(),
                     mentions: vec![],
                     cost_usd: 0.0,
@@ -914,6 +1031,7 @@ mod tests {
             (
                 CrepEvent::PhaseAdvanced {
                     thread: "th-1".into(),
+                    priors_hash: String::new(),
                     from: GatePhase::Intake,
                     to: GatePhase::Discovery,
                     actor: "user".into(),
@@ -925,6 +1043,7 @@ mod tests {
                     thread: "th-1".into(),
                     phase: GatePhase::Review,
                     role: "security".into(),
+                    priors_hash: String::new(),
                     reason: "missing evidence".into(),
                 },
                 "phase_blocked",
@@ -932,6 +1051,7 @@ mod tests {
             (
                 CrepEvent::PlanReviewed {
                     role: "sre".into(),
+                    priors_hash: String::new(),
                     decision: PlanReviewDecision::Approve,
                     plan_sha: "abc123".into(),
                 },
@@ -940,6 +1060,7 @@ mod tests {
             (
                 CrepEvent::PlanOverridden {
                     role: "sre".into(),
+                    priors_hash: String::new(),
                     reason: "accepted risk".into(),
                 },
                 "plan_overridden",
@@ -947,6 +1068,7 @@ mod tests {
             (
                 CrepEvent::RoleOutputDelta {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     text_delta: "chunk".into(),
                     sequence: 1,
                     turn_id: "t-1".into(),
@@ -957,6 +1079,7 @@ mod tests {
             (
                 CrepEvent::TurnInterrupted {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
                     source: InterruptSource::UserHalt,
@@ -968,6 +1091,7 @@ mod tests {
             (
                 CrepEvent::ToolCallProposed {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     tool_name: "Bash".into(),
                     tool_input: json!({}),
                     tool_use_id: "id".into(),
@@ -979,6 +1103,7 @@ mod tests {
             (
                 CrepEvent::ToolCallExecuted {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     tool_use_id: "id".into(),
                     ok: true,
                     output_summary: String::new(),
@@ -990,6 +1115,7 @@ mod tests {
             (
                 CrepEvent::PermissionDenied {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     tool_name: "Bash".into(),
                     tool_input: json!({}),
                     reason: "no".into(),
@@ -1001,6 +1127,7 @@ mod tests {
             (
                 CrepEvent::RoleStopped {
                     role: "r".into(),
+                    priors_hash: String::new(),
                     reason: StopReason::Completed,
                     turn_id: None,
                 },
@@ -1010,6 +1137,10 @@ mod tests {
         for (event, expected_tag) in cases {
             let wire = serde_json::to_value(&event).unwrap();
             assert_eq!(wire["type"], expected_tag, "variant: {event:?}");
+            assert!(
+                wire.get("priors_hash").is_some(),
+                "missing priors_hash for {event:?}"
+            );
         }
     }
 }

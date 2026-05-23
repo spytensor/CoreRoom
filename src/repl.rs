@@ -313,6 +313,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
             .with_context(|| format!("reloading config in {}", project_root.display()))?;
         println!();
     }
+    warn_if_priors_lock_drift(&coderoom_dir, options.allow_large_priors);
 
     let first_run = is_first_run(&coderoom_dir);
     print_home(&cfg, &coderoom_dir, project_root, first_run);
@@ -704,6 +705,29 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
     Ok(())
 }
 
+fn warn_if_priors_lock_drift(coderoom_dir: &Path, allow_large_priors: bool) {
+    let report = crate::lock::verify(coderoom_dir, priors::ComposeOptions { allow_large_priors });
+    match report {
+        Ok(report) if report.is_clean() => {}
+        Ok(report) => {
+            let mut summary = report.drifts.iter().take(3).cloned().collect::<Vec<_>>();
+            if report.drifts.len() > summary.len() {
+                summary.push(format!(
+                    "{} more drift item(s)",
+                    report.drifts.len() - summary.len()
+                ));
+            }
+            output::warn(format!(
+                "priors.lock is out of sync: {}; run `cr lock` after reviewing intentional priors changes",
+                summary.join("; ")
+            ));
+        }
+        Err(error) => {
+            output::warn(format!("could not verify priors.lock: {error:#}"));
+        }
+    }
+}
+
 async fn prompt(stdout: &mut tokio::io::Stdout) -> Result<()> {
     let prompt = output::prompt();
     stdout.write_all(prompt.as_bytes()).await?;
@@ -879,7 +903,10 @@ async fn send_and_drain(
 
     while let Some(current) = dispatcher.pop_next() {
         maybe_note_resumed_role(resumed_notice_pending, &current.role);
-        publish_turn_dispatched(bus, &current).await;
+        let priors_hash = roles
+            .get(&current.role)
+            .map_or("", |running| running.priors_hash.as_str());
+        publish_turn_dispatched(bus, &current, priors_hash).await;
         let Some(captured) = drain_one_turn_handling_ctrl_c(
             roles,
             rx,
@@ -1068,6 +1095,7 @@ async fn record_phase_block_if_declared(
                 thread: captured.thread_id.clone(),
                 phase: block.phase,
                 role: current.role.clone(),
+                priors_hash: captured.priors_hash.clone(),
                 reason: block.reason,
             })
             .await?;
@@ -1204,10 +1232,11 @@ impl DispatchSkip {
     }
 }
 
-async fn publish_turn_dispatched(bus: &Arc<MessageBus>, turn: &QueuedTurn) {
+async fn publish_turn_dispatched(bus: &Arc<MessageBus>, turn: &QueuedTurn, priors_hash: &str) {
     if let Err(error) = bus
         .publish(CrepEvent::TurnDispatched {
             role: turn.role.clone(),
+            priors_hash: priors_hash.to_owned(),
             turn_id: turn.turn_id.clone(),
             thread_id: turn.thread_id.clone(),
             parent_turn_id: turn.parent_turn_id.clone(),
@@ -1847,7 +1876,10 @@ async fn write_journal(
         parent_turn_id: None,
         depth: 0,
     };
-    publish_turn_dispatched(bus, &turn).await;
+    let priors_hash = roles
+        .get(role)
+        .map_or("", |running| running.priors_hash.as_str());
+    publish_turn_dispatched(bus, &turn, priors_hash).await;
     let Ok(Some(captured)) = drain_one_turn_handling_ctrl_c(
         roles,
         rx,
@@ -2247,6 +2279,7 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
     spawn_event_forwarder(
         rname.clone(),
         project_root.clone(),
+        priors_hash.clone(),
         rx_events,
         Arc::clone(context.bus),
     );
@@ -2286,11 +2319,13 @@ fn writepriors_tempfile(role: &str, composed: &str) -> Result<NamedTempFile> {
 fn spawn_event_forwarder(
     role: String,
     project_root: PathBuf,
+    priors_hash: String,
     mut rx: mpsc::Receiver<CrepEvent>,
     bus: Arc<MessageBus>,
 ) {
     tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
+        while let Some(mut event) = rx.recv().await {
+            event.stamp_priors_hash(&priors_hash);
             let session_id = match &event {
                 CrepEvent::RoleStarted { session_id, .. }
                 | CrepEvent::RoleSessionUpdated { session_id, .. } => Some(session_id),
