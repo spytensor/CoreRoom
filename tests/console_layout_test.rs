@@ -121,6 +121,14 @@ fn right_rail_contains_effective_project_roles_evidence_sources_and_alerts() {
     assert!(rail
         .sections
         .iter()
+        .any(|section| section.kind == RightRailSectionKind::Changes
+            && section
+                .rows
+                .iter()
+                .any(|row| row.label == "changed files" && row.value == "present")));
+    assert!(rail
+        .sections
+        .iter()
         .any(|section| section.kind == RightRailSectionKind::ActiveRoles
             && section
                 .rows

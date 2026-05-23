@@ -647,11 +647,11 @@ fn changes_section(snapshot: &CoreRoomSnapshot) -> RightRailSection {
                 None,
             ),
             row(
-                "dirty",
-                dirty_state_label(snapshot.project.dirty_state),
+                "changed files",
+                changed_files_label(snapshot.project.dirty_state),
                 Some(dirty_state(snapshot.project.dirty_state)),
                 None,
-                None,
+                Some(dirty_state_label(snapshot.project.dirty_state).to_owned()),
             ),
         ],
     }
@@ -856,6 +856,14 @@ fn dirty_state_label(state: DirtyState) -> &'static str {
         DirtyState::Clean => "clean",
         DirtyState::Dirty => "dirty",
         DirtyState::Unknown => "unknown",
+    }
+}
+
+fn changed_files_label(state: DirtyState) -> &'static str {
+    match state {
+        DirtyState::Clean => "none observed",
+        DirtyState::Dirty => "present",
+        DirtyState::Unknown => "not observed",
     }
 }
 

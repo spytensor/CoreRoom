@@ -22,12 +22,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
+use crate::console_conversation::build_public_conversation;
 use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
-    ConversationVisibility, CoreRoomSnapshot, DirtyState, HealthSeverity, StatusState,
-    WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, StatusState, WorkLifecycle,
 };
 
 /// Load and validate a TOML-encoded CoreRoom console snapshot.
@@ -266,6 +266,7 @@ fn pulse_line(pulse: &OverviewPulse) -> Line<'_> {
 }
 
 fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
+    let panel = build_public_conversation(snapshot);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
         Span::styled("Public session: ", label_style()),
@@ -273,19 +274,14 @@ fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSna
         Span::raw(snapshot.runtime.host_role.clone()),
         Span::styled(
             format!(
-                "  internal delegations hidden: {}",
-                snapshot.conversation.internal_delegation_count
+                "  hidden delegation: {} internal / {} side-rail",
+                panel.hidden_internal_count, panel.side_rail_turn_count
             ),
             Style::default().fg(Color::DarkGray),
         ),
     ]));
     lines.push(Line::raw(""));
-    for turn in snapshot.conversation.public_turns.iter().filter(|turn| {
-        matches!(
-            turn.visibility,
-            ConversationVisibility::PublicTranscript | ConversationVisibility::SideRail
-        )
-    }) {
+    for turn in &panel.turns {
         lines.push(Line::from(vec![
             speaker_span(&turn.speaker),
             Span::raw(" "),
