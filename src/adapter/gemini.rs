@@ -323,6 +323,7 @@ impl GeminiLoop {
                             turn_id,
                             thread_id,
                             outcome: crate::crep::TurnOutcome::Continue,
+                            phase_block: None,
                         })
                         .await;
                 }

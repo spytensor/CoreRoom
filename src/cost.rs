@@ -173,6 +173,7 @@ mod tests {
             turn_id: String::new(),
             thread_id: String::new(),
             outcome: crate::crep::TurnOutcome::Continue,
+            phase_block: None,
         }
     }
 

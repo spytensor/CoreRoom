@@ -192,7 +192,9 @@ these. UI, message bus, and patch logic only ever see CREP.
 | `RoleStarted`      | Subprocess up, system prompt loaded              | role, engine, model, session_id, priors_hash     |
 | `RoleSessionUpdated` | Adapter learned a real resumable session id after startup | role, session_id                         |
 | `TurnDispatched`   | (v0.2) REPL fired a turn at a role               | role, turn_id, thread_id, parent_turn_id, queue_position |
-| `RoleSpoke`        | Role emitted a final assistant turn              | role, text, mentions[], cost_usd, cache_read, turn_id, thread_id |
+| `RoleSpoke`        | Role emitted a final assistant turn              | role, text, mentions[], cost_usd, cache_read, turn_id, thread_id, outcome, phase_block |
+| `PhaseAdvanced`    | Gate phase advanced or rolled back explicitly    | thread, from, to, actor                         |
+| `PhaseBlocked`     | Role blocked the active gate phase               | thread, phase, role, reason                     |
 | `TurnInterrupted`  | (v0.2) `/halt` or watchdog cancelled the turn    | role, turn_id, thread_id, source, partial_text, partial_mentions |
 | `ToolCallProposed` | PreToolUse fired                                 | role, tool_name, tool_input, tool_use_id, turn_id, thread_id |
 | `ToolCallExecuted` | PostToolUse fired                                | role, tool_use_id, ok, output_summary, turn_id, thread_id |
@@ -208,11 +210,28 @@ wire for v0.1 log replay only.
 `RoleSpoke.mentions` is the parsed list of `@x` references found in `text`.
 The wrapper surfaces those references in logs; auto-routing is narrower and
 uses only explicit delegation blocks whose line starts with `@role:`.
+`RoleSpoke.phase_block` is parsed from a trailing
+`cr-phase-block: <reason>` marker. The REPL strips the marker, records
+`PhaseBlocked`, and suppresses follow-up auto-routing for that blocked turn.
 
 JSONL append-only log at `.coderoom/messages.jsonl`. The full transcript view
 the user sees is just a render of this stream filtered to events that humans
 care about (RoleStarted, RoleSpoke, ToolCallProposed/Executed summary,
 PermissionDenied, RoleStopped).
+
+## Phase Gate Workflow
+
+Gate ledgers carry an explicit SDLC phase. The linear workflow is:
+
+```text
+intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed
+```
+
+`rejected` is a terminal branch from `review` or `signoff`. `cr gate phase
+<thread> <next-phase>` is the explicit transition command. It rejects skipped
+forward phases and regressions; rollback requires a justification via
+`--rollback`. Each entered phase creates `.coderoom/gates/<thread>/<phase>.md`
+for structured notes, evidence, decisions, or blockers.
 
 ## Engine adapters
 

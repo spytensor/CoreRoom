@@ -218,8 +218,8 @@ Useful commands:
   `/permissions clear` resets them for a fresh review. Examples:
   `/allow Read`, `/deny Bash`.
 - `cr prompt show <role>` prints the exact effective prompt for a role.
-- `cr gate status|validate|close` inspects SDLC gate ledgers under
-  `.coderoom/gates/`; the normal path is host-led, with commands kept as
+- `cr gate status|phase|validate|close` inspects and advances SDLC gate ledgers
+  under `.coderoom/gates/`; the normal path is host-led, with commands kept as
   debug and recovery controls. Tier 0/read-only reviews stay inline unless the
   user explicitly asks for a ledger.
 - `cr doctor [--fix]` detects old projects whose `shared.md` still contains

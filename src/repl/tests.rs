@@ -93,6 +93,7 @@ fn show_filter_keeps_role_events_and_applies_tail() {
             turn_id: String::new(),
             thread_id: String::new(),
             outcome: crate::crep::TurnOutcome::Continue,
+            phase_block: None,
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -151,6 +152,7 @@ fn show_normalizes_legacy_cr_task_role_spoke() {
         turn_id: String::new(),
         thread_id: String::new(),
         outcome: crate::crep::TurnOutcome::Continue,
+        phase_block: None,
     };
 
     let normalized = normalize_show_event(&event);
@@ -637,7 +639,7 @@ fn snapshot_boot_dashboard_at_80() {
 │ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
 │ ● @security  codex  · default · bypass                                       │
 │                                         what's new in 0.4.4                  │
-│  2.8k  base tokens loaded               • legacy budget_per_role_usd projec… │
+│  3.3k  base tokens loaded               • legacy budget_per_role_usd projec… │
 │ /repo/codeRoom                          • older top-level user defaults sti… │
 │                                         • hotfix release keeps v0.4.3 SDLC … │
 │                                                                              │
@@ -646,6 +648,34 @@ fn snapshot_boot_dashboard_at_80() {
 └──────────────────────────────────────────────────────────────────────────────┘
   type a task · @role · /help · /exit
 ");
+}
+
+#[test]
+fn boot_dashboard_shows_active_gate_phase() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = splash_snapshot_config();
+    crate::gate::init(
+        tmp.path(),
+        crate::gate::GateInit {
+            thread_id: "thread-1".to_owned(),
+            feature: "phase flow".to_owned(),
+            tier: crate::gate::GateTier::Tier1,
+            phase: crate::gate::GatePhase::Plan,
+            implementer: None,
+        },
+    )
+    .unwrap();
+
+    let rendered = strip_ansi(&render_home_at_width(
+        &cfg,
+        &tmp.path().join(crate::config::CODEROOM_DIR),
+        tmp.path(),
+        false,
+        80,
+        Some("Ada"),
+    ));
+
+    assert!(rendered.contains("gate thread-1 · phase plan"));
 }
 
 #[test]
@@ -673,6 +703,7 @@ fn snapshot_render_event_lines() {
             turn_id: String::new(),
             thread_id: String::new(),
             outcome: crate::crep::TurnOutcome::Continue,
+            phase_block: None,
         },
         CrepEvent::ToolCallProposed {
             role: "backend".into(),
@@ -731,6 +762,7 @@ fn multi_line_role_spoke_uses_inset_message_block() {
         turn_id: String::new(),
         thread_id: String::new(),
         outcome: crate::crep::TurnOutcome::Continue,
+        phase_block: None,
     };
     let rendered = strip_ansi(&render_event_line(&event, "host"));
     insta::assert_snapshot!(rendered, @r"
@@ -910,6 +942,7 @@ fn role_spoke_renders_markdown_lite_with_wrapping() {
         turn_id: String::new(),
         thread_id: String::new(),
         outcome: crate::crep::TurnOutcome::Continue,
+        phase_block: None,
     };
     let rendered = strip_ansi(&render_event_line_at_width(&event, "host", 48));
 

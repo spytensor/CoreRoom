@@ -20,6 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::gate::GatePhase;
 use crate::turn::TurnId;
 
 /// A single event in the CodeRoom Event Protocol stream.
@@ -136,6 +137,34 @@ pub enum CrepEvent {
         /// the `cr-status:` marker behave exactly as before.
         #[serde(default)]
         outcome: TurnOutcome,
+        /// Reason carried by a trailing `cr-phase-block: <reason>`
+        /// marker. The REPL records this as a durable
+        /// [`CrepEvent::PhaseBlocked`] event against the active gate
+        /// thread, then suppresses auto-routing for the blocked turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase_block: Option<String>,
+    },
+    /// A gate phase advanced or rolled back by explicit user action.
+    PhaseAdvanced {
+        /// CodeRoom thread id / gate id.
+        thread: String,
+        /// Previous phase.
+        from: GatePhase,
+        /// New phase.
+        to: GatePhase,
+        /// User or system actor responsible for the transition.
+        actor: String,
+    },
+    /// A role blocked the current gate phase with a declared reason.
+    PhaseBlocked {
+        /// CodeRoom thread id / gate id.
+        thread: String,
+        /// Phase that was blocked.
+        phase: GatePhase,
+        /// Role that declared the block.
+        role: String,
+        /// Human-readable reason.
+        reason: String,
     },
     /// Streaming assistant text for the current role turn. This is a
     /// broadcast-only live UI event, not a turn boundary, and must not
@@ -391,6 +420,7 @@ mod tests {
             turn_id: "t-1".into(),
             thread_id: "th-1".into(),
             outcome: TurnOutcome::Continue,
+            phase_block: None,
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(wire["type"], "role_spoke");
@@ -399,6 +429,27 @@ mod tests {
         assert_eq!(wire["thread_id"], "th-1");
         // Default-valued outcome still serializes (informational for `cr show`).
         assert_eq!(wire["outcome"], "continue");
+        let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn role_spoke_carries_phase_block_when_present() {
+        let event = CrepEvent::RoleSpoke {
+            role: "security".into(),
+            text: "Blocked pending review.".into(),
+            mentions: vec![],
+            cost_usd: 0.0,
+            cache_read: 0,
+            turn_id: "tu-1".into(),
+            thread_id: "th-1".into(),
+            outcome: TurnOutcome::NeedsUser,
+            phase_block: Some("missing threat model".into()),
+        };
+
+        let wire = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(wire["phase_block"], "missing threat model");
         let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
         assert_eq!(event, parsed);
     }
@@ -420,6 +471,7 @@ mod tests {
                 turn_id: "tu-1".into(),
                 thread_id: "th-1".into(),
                 outcome: variant,
+                phase_block: None,
             };
             let wire = serde_json::to_value(&event).unwrap();
             assert_eq!(wire["outcome"], expected, "variant {variant:?}");
@@ -459,6 +511,26 @@ mod tests {
     }
 
     #[test]
+    fn role_spoke_legacy_wire_defaults_phase_block_to_none() {
+        let legacy = json!({
+            "type": "role_spoke",
+            "role": "backend",
+            "text": "ok",
+            "mentions": [],
+            "cost_usd": 0.0,
+            "cache_read": 0,
+            "outcome": "continue",
+        });
+        let parsed: CrepEvent = serde_json::from_value(legacy).unwrap();
+        match parsed {
+            CrepEvent::RoleSpoke { phase_block, .. } => {
+                assert_eq!(phase_block, None);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
     fn role_spoke_legacy_log_replay_tolerates_missing_turn_ids() {
         // v0.1-shaped messages.jsonl has no turn_id / thread_id;
         // deserialization must still succeed and fall back to empty.
@@ -493,6 +565,28 @@ mod tests {
         assert_eq!(wire["turn_id"], "t-7");
         let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
         assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn phase_events_round_trip() {
+        let advanced = CrepEvent::PhaseAdvanced {
+            thread: "thread-1".into(),
+            from: GatePhase::Intake,
+            to: GatePhase::Discovery,
+            actor: "user".into(),
+        };
+        let blocked = CrepEvent::PhaseBlocked {
+            thread: "thread-1".into(),
+            phase: GatePhase::Review,
+            role: "security".into(),
+            reason: "missing threat model".into(),
+        };
+
+        for event in [advanced, blocked] {
+            let wire = serde_json::to_value(&event).unwrap();
+            let parsed: CrepEvent = serde_json::from_value(wire).unwrap();
+            assert_eq!(event, parsed);
+        }
     }
 
     #[test]
@@ -740,7 +834,7 @@ mod tests {
 
     #[test]
     fn type_tag_is_snake_case_for_all_variants() {
-        let cases: [(CrepEvent, &str); 11] = [
+        let cases: [(CrepEvent, &str); 13] = [
             (
                 CrepEvent::RoleStarted {
                     role: "r".into(),
@@ -787,8 +881,27 @@ mod tests {
                     turn_id: "t-1".into(),
                     thread_id: "th-1".into(),
                     outcome: TurnOutcome::Continue,
+                    phase_block: None,
                 },
                 "role_spoke",
+            ),
+            (
+                CrepEvent::PhaseAdvanced {
+                    thread: "th-1".into(),
+                    from: GatePhase::Intake,
+                    to: GatePhase::Discovery,
+                    actor: "user".into(),
+                },
+                "phase_advanced",
+            ),
+            (
+                CrepEvent::PhaseBlocked {
+                    thread: "th-1".into(),
+                    phase: GatePhase::Review,
+                    role: "security".into(),
+                    reason: "missing evidence".into(),
+                },
+                "phase_blocked",
             ),
             (
                 CrepEvent::RoleOutputDelta {

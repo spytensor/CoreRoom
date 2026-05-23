@@ -103,7 +103,9 @@ fn event_role(event: &CrepEvent) -> &str {
         | CrepEvent::ToolCallProposed { role, .. }
         | CrepEvent::ToolCallExecuted { role, .. }
         | CrepEvent::PermissionDenied { role, .. }
-        | CrepEvent::RoleStopped { role, .. } => role,
+        | CrepEvent::RoleStopped { role, .. }
+        | CrepEvent::PhaseBlocked { role, .. } => role,
+        CrepEvent::PhaseAdvanced { .. } => "",
     }
 }
 
@@ -123,6 +125,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
         turn_id,
         thread_id,
         outcome,
+        phase_block,
     } = event
     else {
         return vec![event.clone()];
@@ -149,6 +152,7 @@ pub(super) fn normalize_show_event(event: &CrepEvent) -> Vec<CrepEvent> {
             turn_id: turn_id.clone(),
             thread_id: thread_id.clone(),
             outcome: *outcome,
+            phase_block: phase_block.clone(),
         });
     }
     events

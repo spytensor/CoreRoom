@@ -84,6 +84,7 @@ fn work_title_dedupe_keeps_first_title_per_turn() {
                 turn_id: "t-1".into(),
                 thread_id: "th-1".into(),
                 outcome: crate::crep::TurnOutcome::Continue,
+                phase_block: None,
             },
             &mut seen,
         ),

@@ -193,6 +193,18 @@ fn kernel_protocol_teaches_turn_outcome_contract() {
 }
 
 #[test]
+fn kernel_protocol_teaches_phase_gate_contract() {
+    assert!(KERNEL_PROTOCOL.contains("## Phase gate contract"));
+    assert!(KERNEL_PROTOCOL.contains(
+        "`intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed`"
+    ));
+    assert!(KERNEL_PROTOCOL.contains("`cr gate phase <thread> <next-phase>`"));
+    assert!(KERNEL_PROTOCOL.contains("`cr-phase-block: <reason>`"));
+    assert!(KERNEL_PROTOCOL.contains("emits `PhaseBlocked`"));
+    assert!(KERNEL_PROTOCOL.contains("does not route follow-up delegations"));
+}
+
+#[test]
 fn shared_then_role_separated_by_fence() {
     let tmp = fixture("backend", "BACKEND_PRIORS");
     fs::write(coderoom_of(&tmp).join(SHARED_FILE), "SHARED_PRIORS").unwrap();

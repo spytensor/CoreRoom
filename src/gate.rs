@@ -110,33 +110,54 @@ impl GateTier {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GatePhase {
-    /// Initial code-first research.
-    Research,
-    /// Plan creation and user review.
+    /// Initial intake and work classification.
+    Intake,
+    /// Discovery and research before planning.
+    #[serde(alias = "research")]
+    Discovery,
+    /// Plan creation before review.
     Plan,
-    /// Implementation is in progress.
-    Implementation,
-    /// Peer or cross-model review is in progress.
+    /// Peer, authority, or cross-model review is in progress.
     Review,
-    /// Pre-commit verification is in progress.
-    Precommit,
     /// Sign-off evidence is being collected.
     Signoff,
+    /// Implementation is in progress.
+    #[serde(alias = "implementation")]
+    Implement,
+    /// QA / verification is in progress.
+    #[serde(alias = "precommit")]
+    Qa,
     /// Gate is closed.
     Closed,
+    /// Gate was rejected from review or signoff.
+    Rejected,
 }
 
 impl GatePhase {
+    /// Linear workflow phases.
+    pub const LINEAR: [Self; 8] = [
+        Self::Intake,
+        Self::Discovery,
+        Self::Plan,
+        Self::Review,
+        Self::Signoff,
+        Self::Implement,
+        Self::Qa,
+        Self::Closed,
+    ];
+
     /// Parse a user-facing phase token.
     pub fn parse(input: &str) -> Result<Self> {
         match input.trim().to_ascii_lowercase().as_str() {
-            "research" => Ok(Self::Research),
+            "intake" => Ok(Self::Intake),
+            "discovery" | "discover" | "research" => Ok(Self::Discovery),
             "plan" => Ok(Self::Plan),
-            "implementation" | "impl" => Ok(Self::Implementation),
             "review" => Ok(Self::Review),
-            "precommit" | "pre-commit" => Ok(Self::Precommit),
             "signoff" | "sign-off" => Ok(Self::Signoff),
+            "implement" | "implementation" | "impl" => Ok(Self::Implement),
+            "qa" | "verify" | "verification" | "precommit" | "pre-commit" => Ok(Self::Qa),
             "closed" | "close" => Ok(Self::Closed),
+            "rejected" | "reject" => Ok(Self::Rejected),
             other => bail!("unknown phase `{other}`"),
         }
     }
@@ -145,14 +166,44 @@ impl GatePhase {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Research => "research",
+            Self::Intake => "intake",
+            Self::Discovery => "discovery",
             Self::Plan => "plan",
-            Self::Implementation => "implementation",
             Self::Review => "review",
-            Self::Precommit => "precommit",
             Self::Signoff => "signoff",
+            Self::Implement => "implement",
+            Self::Qa => "qa",
             Self::Closed => "closed",
+            Self::Rejected => "rejected",
         }
+    }
+
+    /// Return the next legal forward phase, if any.
+    #[must_use]
+    pub fn next(self) -> Option<Self> {
+        Self::LINEAR
+            .iter()
+            .position(|phase| *phase == self)
+            .and_then(|index| Self::LINEAR.get(index + 1).copied())
+    }
+
+    /// Whether `to` is a legal non-rollback transition from this phase.
+    #[must_use]
+    pub fn can_advance_to(self, to: Self) -> bool {
+        self.next() == Some(to)
+            || matches!((self, to), (Self::Review | Self::Signoff, Self::Rejected))
+    }
+
+    /// Whether `to` is an earlier linear phase and therefore a legal rollback.
+    #[must_use]
+    pub fn can_rollback_to(self, to: Self) -> bool {
+        let from = Self::linear_index(self);
+        let to = Self::linear_index(to);
+        matches!((from, to), (Some(from), Some(to)) if to < from)
+    }
+
+    fn linear_index(self) -> Option<usize> {
+        Self::LINEAR.iter().position(|phase| *phase == self)
     }
 }
 
@@ -187,16 +238,18 @@ impl GateResult {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum GateArtifactKind {
-    /// Research artifact.
-    Research,
+    /// Discovery artifact.
+    #[serde(alias = "research")]
+    Discovery,
     /// Implementation plan artifact.
     Plan,
     /// Plan review artifact.
     PlanReview,
     /// Code review artifact.
     Review,
-    /// Pre-commit verification artifact.
-    Precommit,
+    /// QA / verification artifact.
+    #[serde(alias = "precommit")]
+    Qa,
     /// Sign-off artifact.
     Signoff,
 }
@@ -205,11 +258,11 @@ impl GateArtifactKind {
     /// Parse a user-facing artifact kind.
     pub fn parse(input: &str) -> Result<Self> {
         match input.trim().to_ascii_lowercase().as_str() {
-            "research" => Ok(Self::Research),
+            "discovery" | "research" => Ok(Self::Discovery),
             "plan" => Ok(Self::Plan),
             "plan-review" | "plan_review" | "planreview" => Ok(Self::PlanReview),
             "review" | "code-review" | "code_review" => Ok(Self::Review),
-            "precommit" | "pre-commit" => Ok(Self::Precommit),
+            "qa" | "verification" | "precommit" | "pre-commit" => Ok(Self::Qa),
             "signoff" | "sign-off" => Ok(Self::Signoff),
             other => bail!("unknown artifact kind `{other}`"),
         }
@@ -219,11 +272,11 @@ impl GateArtifactKind {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Research => "research",
+            Self::Discovery => "discovery",
             Self::Plan => "plan",
             Self::PlanReview => "plan-review",
             Self::Review => "review",
-            Self::Precommit => "precommit",
+            Self::Qa => "qa",
             Self::Signoff => "signoff",
         }
     }
@@ -312,6 +365,19 @@ pub struct GateBypass {
     pub created_at: String,
 }
 
+/// A role-declared phase block recorded on a gate ledger.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatePhaseBlock {
+    /// Phase that was blocked.
+    pub phase: GatePhase,
+    /// Role that declared the block.
+    pub role: String,
+    /// Human-readable reason from the role.
+    pub reason: String,
+    /// Creation timestamp.
+    pub created_at: String,
+}
+
 /// Append-only note in a gate ledger.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateHistoryEntry {
@@ -351,6 +417,9 @@ pub struct GateLedger {
     /// Explicit accepted risks and bypasses.
     #[serde(default)]
     pub bypasses: Vec<GateBypass>,
+    /// Role-declared phase blocks.
+    #[serde(default)]
+    pub phase_blocks: Vec<GatePhaseBlock>,
     /// Current structural gate result.
     pub result: GateResult,
     /// Creation timestamp.
@@ -426,6 +495,34 @@ pub struct VerificationInput {
     pub evidence: String,
 }
 
+/// Parameters for an explicit phase transition.
+#[derive(Debug, Clone)]
+pub struct PhaseAdvanceInput {
+    /// Thread id.
+    pub thread_id: String,
+    /// Target phase.
+    pub to: GatePhase,
+    /// Actor responsible for the transition.
+    pub actor: String,
+    /// Rollback justification. When present, target must be an earlier phase.
+    pub rollback_reason: Option<String>,
+}
+
+/// Result of a phase transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseTransition {
+    /// Thread id.
+    pub thread_id: String,
+    /// Previous phase.
+    pub from: GatePhase,
+    /// New phase.
+    pub to: GatePhase,
+    /// Actor responsible for the transition.
+    pub actor: String,
+    /// Rollback justification, when this was a rollback.
+    pub rollback_reason: Option<String>,
+}
+
 /// Structural validation output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateValidation {
@@ -499,6 +596,7 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
         reviewers: Vec::new(),
         verifications: Vec::new(),
         bypasses: Vec::new(),
+        phase_blocks: Vec::new(),
         result: GateResult::Incomplete,
         created_at: now.clone(),
         updated_at: now,
@@ -513,6 +611,14 @@ pub fn init(project_root: &Path, input: GateInit) -> Result<GateLedger> {
         ),
     );
     save_ledger(&coderoom_dir, &ledger)?;
+    ensure_phase_artifact(
+        project_root,
+        &ledger,
+        ledger.phase,
+        ledger.phase,
+        "init",
+        None,
+    )?;
     write_active_thread(&coderoom_dir, &ledger.thread_id)?;
     Ok(ledger)
 }
@@ -621,6 +727,119 @@ pub fn record_verification(project_root: &Path, input: VerificationInput) -> Res
     })
 }
 
+/// Explicitly advance or roll back a gate phase.
+pub fn advance_phase(project_root: &Path, input: &PhaseAdvanceInput) -> Result<PhaseTransition> {
+    let thread_id = input.thread_id.trim();
+    if thread_id.is_empty() {
+        bail!("thread id cannot be empty");
+    }
+    let actor = input.actor.trim();
+    if actor.is_empty() {
+        bail!("phase actor cannot be empty");
+    }
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    ensure_gate_dirs(&coderoom_dir)?;
+    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let from = ledger.phase;
+    let to = input.to;
+    if from == to {
+        bail!("gate `{thread_id}` is already in phase `{}`", to.label());
+    }
+    if matches!(from, GatePhase::Closed | GatePhase::Rejected) {
+        bail!(
+            "gate `{thread_id}` is terminal in phase `{}`; create a new gate for new work",
+            from.label()
+        );
+    }
+
+    let rollback_reason = input
+        .rollback_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    if let Some(reason) = rollback_reason {
+        if !from.can_rollback_to(to) {
+            bail!(
+                "cannot roll back gate `{thread_id}` from `{}` to `{}`; rollback target must be an earlier linear phase",
+                from.label(),
+                to.label()
+            );
+        }
+        ledger.phase = to;
+        ledger.push_history(
+            "phase_rolled_back",
+            format!("{} -> {} by {actor}: {reason}", from.label(), to.label()),
+        );
+    } else {
+        if !from.can_advance_to(to) {
+            bail!(
+                "cannot advance gate `{thread_id}` from `{}` to `{}`; phases are linear and cannot be skipped",
+                from.label(),
+                to.label()
+            );
+        }
+        ledger.phase = to;
+        ledger.push_history(
+            "phase_advanced",
+            format!("{} -> {} by {actor}", from.label(), to.label()),
+        );
+    }
+
+    let transition = PhaseTransition {
+        thread_id: ledger.thread_id.clone(),
+        from,
+        to,
+        actor: actor.to_owned(),
+        rollback_reason: rollback_reason.map(ToOwned::to_owned),
+    };
+    ensure_phase_artifact(
+        project_root,
+        &ledger,
+        from,
+        to,
+        actor,
+        transition.rollback_reason.as_deref(),
+    )?;
+    save_ledger(&coderoom_dir, &ledger)?;
+    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    Ok(transition)
+}
+
+/// Record a role-declared phase block on an existing gate.
+pub fn record_phase_block(
+    project_root: &Path,
+    thread_id: &str,
+    role: &str,
+    reason: &str,
+) -> Result<GatePhaseBlock> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("phase block reason cannot be empty");
+    }
+    let role = role.trim().trim_start_matches('@');
+    if role.is_empty() {
+        bail!("phase block role cannot be empty");
+    }
+    let coderoom_dir = project_root.join(CODEROOM_DIR);
+    ensure_gate_dirs(&coderoom_dir)?;
+    let mut ledger = load_ledger(&coderoom_dir, thread_id)?;
+    let block = GatePhaseBlock {
+        phase: ledger.phase,
+        role: role.to_owned(),
+        reason: reason.to_owned(),
+        created_at: now_string(),
+    };
+    ledger.phase_blocks.push(block.clone());
+    ledger.result = GateResult::Incomplete;
+    ledger.push_history(
+        "phase_blocked",
+        format!("{} blocked by @{role}: {reason}", ledger.phase.label()),
+    );
+    save_ledger(&coderoom_dir, &ledger)?;
+    write_active_thread(&coderoom_dir, &ledger.thread_id)?;
+    Ok(block)
+}
+
 /// Record an explicit bypass entry.
 pub fn record_bypass(
     project_root: &Path,
@@ -710,6 +929,15 @@ pub fn format_status(ledger: &GateLedger, validation: &GateValidation) -> String
     let _ = writeln!(out, "artifacts: {}", ledger.artifacts.len());
     let _ = writeln!(out, "reviewers: {}", ledger.reviewers.len());
     let _ = writeln!(out, "verifications: {}", ledger.verifications.len());
+    if let Some(block) = ledger.phase_blocks.last() {
+        let _ = writeln!(
+            out,
+            "latest phase block: {} by @{} — {}",
+            block.phase.label(),
+            block.role,
+            block.reason
+        );
+    }
     if !validation.reasons.is_empty() {
         let _ = writeln!(out, "\nblocking:");
         for reason in &validation.reasons {
@@ -828,7 +1056,7 @@ fn validate_tier1(
     }
 
     for kind in [
-        GateArtifactKind::Research,
+        GateArtifactKind::Discovery,
         GateArtifactKind::Plan,
         GateArtifactKind::Review,
         GateArtifactKind::Signoff,
@@ -1233,6 +1461,55 @@ fn write_active_thread(coderoom_dir: &Path, thread_id: &str) -> Result<()> {
         .with_context(|| format!("writing {}", active_path.display()))
 }
 
+/// Return `.coderoom/gates/<thread>/<phase>.md` for a phase artifact.
+#[must_use]
+pub fn phase_artifact_path(project_root: &Path, thread_id: &str, phase: GatePhase) -> PathBuf {
+    project_root
+        .join(CODEROOM_DIR)
+        .join(GATES_DIR)
+        .join(sanitize_thread_id(thread_id))
+        .join(format!("{}.md", phase.label()))
+}
+
+fn ensure_phase_artifact(
+    project_root: &Path,
+    ledger: &GateLedger,
+    from: GatePhase,
+    to: GatePhase,
+    actor: &str,
+    rollback_reason: Option<&str>,
+) -> Result<PathBuf> {
+    let path = phase_artifact_path(project_root, &ledger.thread_id, to);
+    if path.exists() {
+        return Ok(path);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let mut body = String::new();
+    let _ = writeln!(body, "# {} phase", to.label());
+    let _ = writeln!(body);
+    let _ = writeln!(body, "thread: {}", ledger.thread_id);
+    let _ = writeln!(body, "feature: {}", ledger.feature);
+    let _ = writeln!(body, "from: {}", from.label());
+    let _ = writeln!(body, "to: {}", to.label());
+    let _ = writeln!(body, "actor: {actor}");
+    let _ = writeln!(body, "created_at: {}", now_string());
+    if let Some(reason) = rollback_reason {
+        let _ = writeln!(body, "rollback_reason: {reason}");
+    }
+    let _ = writeln!(body);
+    let _ = writeln!(body, "## Notes");
+    let _ = writeln!(body);
+    let _ = writeln!(
+        body,
+        "- Fill in the evidence, decisions, or blockers for this phase."
+    );
+    std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
 fn ledger_path(coderoom_dir: &Path, thread_id: &str) -> PathBuf {
     coderoom_dir
         .join(GATES_DIR)
@@ -1315,7 +1592,7 @@ mod tests {
                 thread_id: "thread-1".to_owned(),
                 feature: "change login flow".to_owned(),
                 tier: GateTier::Tier1,
-                phase: GatePhase::Research,
+                phase: GatePhase::Discovery,
                 implementer: Some(actor("host", Engine::Cc, "claude-sonnet-4")),
             },
         )
@@ -1327,11 +1604,256 @@ mod tests {
         assert!(validation
             .reasons
             .iter()
-            .any(|reason| reason.contains("research artifact is missing")));
+            .any(|reason| reason.contains("discovery artifact is missing")));
         assert!(validation
             .reasons
             .iter()
             .any(|reason| reason.contains("at least two reviewer turns")));
+    }
+
+    #[test]
+    fn phase_transition_advances_linearly_and_creates_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Intake,
+                implementer: None,
+            },
+        )
+        .unwrap();
+
+        assert!(phase_artifact_path(tmp.path(), "thread-1", GatePhase::Intake).is_file());
+        let transition = advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Discovery,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(transition.from, GatePhase::Intake);
+        assert_eq!(transition.to, GatePhase::Discovery);
+        assert_eq!(
+            load(tmp.path(), Some("thread-1")).unwrap().phase,
+            GatePhase::Discovery
+        );
+        let artifact_path = phase_artifact_path(tmp.path(), "thread-1", GatePhase::Discovery);
+        let artifact = std::fs::read_to_string(artifact_path).unwrap();
+        assert!(artifact.contains("# discovery phase"));
+        assert!(artifact.contains("from: intake"));
+        assert!(artifact.contains("to: discovery"));
+        assert!(artifact.contains("actor: user"));
+    }
+
+    #[test]
+    fn phase_transition_rejects_skips_and_regressions_without_rollback() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Intake,
+                implementer: None,
+            },
+        )
+        .unwrap();
+
+        let skip_error = advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Plan,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap_err();
+        assert!(skip_error.to_string().contains("cannot advance"));
+        assert_eq!(
+            load(tmp.path(), Some("thread-1")).unwrap().phase,
+            GatePhase::Intake
+        );
+
+        advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Discovery,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap();
+        advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Plan,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap();
+        let regression_error = advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Discovery,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap_err();
+        assert!(regression_error.to_string().contains("cannot advance"));
+        assert_eq!(
+            load(tmp.path(), Some("thread-1")).unwrap().phase,
+            GatePhase::Plan
+        );
+    }
+
+    #[test]
+    fn phase_transition_allows_rollback_with_reason() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Intake,
+                implementer: None,
+            },
+        )
+        .unwrap();
+        for phase in [GatePhase::Discovery, GatePhase::Plan] {
+            advance_phase(
+                tmp.path(),
+                &PhaseAdvanceInput {
+                    thread_id: "thread-1".to_owned(),
+                    to: phase,
+                    actor: "user".to_owned(),
+                    rollback_reason: None,
+                },
+            )
+            .unwrap();
+        }
+
+        let transition = advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Discovery,
+                actor: "user".to_owned(),
+                rollback_reason: Some("plan needs another pass".to_owned()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(transition.from, GatePhase::Plan);
+        assert_eq!(transition.to, GatePhase::Discovery);
+        assert_eq!(
+            transition.rollback_reason.as_deref(),
+            Some("plan needs another pass")
+        );
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+        assert_eq!(ledger.phase, GatePhase::Discovery);
+        assert!(ledger
+            .history
+            .iter()
+            .any(|entry| entry.event == "phase_rolled_back"));
+    }
+
+    #[test]
+    fn rejected_is_only_a_review_or_signoff_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Review,
+                implementer: None,
+            },
+        )
+        .unwrap();
+
+        advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-1".to_owned(),
+                to: GatePhase::Rejected,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load(tmp.path(), Some("thread-1")).unwrap().phase,
+            GatePhase::Rejected
+        );
+
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-2".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Implement,
+                implementer: None,
+            },
+        )
+        .unwrap();
+        let error = advance_phase(
+            tmp.path(),
+            &PhaseAdvanceInput {
+                thread_id: "thread-2".to_owned(),
+                to: GatePhase::Rejected,
+                actor: "user".to_owned(),
+                rollback_reason: None,
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot advance"));
+    }
+
+    #[test]
+    fn record_phase_block_appends_block_and_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(
+            tmp.path(),
+            GateInit {
+                thread_id: "thread-1".to_owned(),
+                feature: "phase flow".to_owned(),
+                tier: GateTier::Tier1,
+                phase: GatePhase::Plan,
+                implementer: None,
+            },
+        )
+        .unwrap();
+
+        let block =
+            record_phase_block(tmp.path(), "thread-1", "@security", "scope mismatch").unwrap();
+
+        assert_eq!(block.phase, GatePhase::Plan);
+        assert_eq!(block.role, "security");
+        assert_eq!(block.reason, "scope mismatch");
+        let ledger = load(tmp.path(), Some("thread-1")).unwrap();
+        assert_eq!(ledger.phase_blocks, vec![block]);
+        assert_eq!(ledger.result, GateResult::Incomplete);
+        let validation = validate(tmp.path(), Some("thread-1")).unwrap();
+        assert!(
+            format_status(&ledger, &validation).contains("latest phase block: plan by @security")
+        );
     }
 
     #[test]
@@ -1454,7 +1976,7 @@ mod tests {
         )
         .unwrap();
         for (kind, path) in [
-            (GateArtifactKind::Research, "docs/research.md"),
+            (GateArtifactKind::Discovery, "docs/research.md"),
             (GateArtifactKind::Plan, "docs/plan.md"),
             (GateArtifactKind::Review, "docs/review.md"),
             (GateArtifactKind::Signoff, "docs/signoff.md"),
@@ -1525,7 +2047,7 @@ mod tests {
                 thread_id: "thread-1".to_owned(),
                 feature: "change login flow".to_owned(),
                 tier: GateTier::Tier1,
-                phase: GatePhase::Research,
+                phase: GatePhase::Discovery,
                 implementer: None,
             },
         )

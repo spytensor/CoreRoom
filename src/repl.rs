@@ -637,6 +637,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &mut renderer_rx,
                     &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
+                    project_root,
                     &role,
                     &text,
                     &cfg.host_role,
@@ -669,6 +670,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                         &mut renderer_rx,
                         &mut live_renderer_rx,
                         bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
+                        project_root,
                         &role,
                         &text,
                         &cfg.host_role,
@@ -686,6 +688,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &mut renderer_rx,
                     &mut live_renderer_rx,
                     bridge_rx_holder.as_mut().expect("bridge_rx held by REPL"),
+                    project_root,
                     &host,
                     &text,
                     &cfg.host_role,
@@ -850,6 +853,7 @@ async fn send_and_drain(
     rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     live_rx: &mut tokio::sync::broadcast::Receiver<CrepEvent>,
     bridge_rx: &mut tokio::sync::mpsc::Receiver<BridgeRequestSink>,
+    project_root: &Path,
     role: &str,
     text: &str,
     host_role: &str,
@@ -908,6 +912,10 @@ async fn send_and_drain(
             }
             return Ok(());
         };
+
+        if record_phase_block_if_declared(bus, project_root, &current, &captured).await? {
+            continue;
+        }
 
         let known: Vec<&str> = roles.keys().map(String::as_str).collect();
         let route_instructions = extract_route_instructions(&current.role, &captured.text, &known);
@@ -1042,6 +1050,42 @@ async fn send_and_drain(
     }
 
     Ok(())
+}
+
+async fn record_phase_block_if_declared(
+    bus: &Arc<MessageBus>,
+    project_root: &Path,
+    current: &QueuedTurn,
+    captured: &CapturedTurn,
+) -> Result<bool> {
+    let Some(reason) = captured.phase_block.as_deref() else {
+        return Ok(false);
+    };
+    match crate::gate::record_phase_block(project_root, &captured.thread_id, &current.role, reason)
+    {
+        Ok(block) => {
+            bus.publish(CrepEvent::PhaseBlocked {
+                thread: captured.thread_id.clone(),
+                phase: block.phase,
+                role: current.role.clone(),
+                reason: block.reason,
+            })
+            .await?;
+            println!(
+                "  {} {}",
+                "⊘".with(output::WARN),
+                format!(
+                    "@{} blocked {} phase — not routing follow-up delegations",
+                    current.role,
+                    block.phase.label()
+                )
+                .with(output::DIM)
+                .italic(),
+            );
+        }
+        Err(error) => output::bad(format!("phase block not recorded: {error:#}")),
+    }
+    Ok(true)
 }
 
 #[derive(Debug, Clone)]
