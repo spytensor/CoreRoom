@@ -152,6 +152,20 @@ architecture amendment before implementation.
     Model prose alone cannot satisfy changed-file, command, test, review, risk,
     rollback, or tracker evidence. Missing or unverified items must be named.
 
+17. Console snapshots are projections, not authority.
+    Starting with A-019, console panels and future full-screen views are
+    derived from structural facts such as WorkOrders, GitHub lifecycle,
+    Evidence Packets, Source Graph findings, gate ledgers, and CREP replay.
+    A rendered panel can help `@host` decide what to inspect next, but it does
+    not by itself prove completion, freshness, approval, or release readiness.
+
+18. Conversation visibility is a product surface, not an audit boundary.
+    A public transcript should stay focused on `User <-> @host`, while
+    host-managed role delegation can remain internal and appear in side rails,
+    logs, evidence, or Xray views. Hiding internal delegation from the public
+    transcript must never delete durable CREP/log evidence or hide a critical
+    veto, permission outcome, safety finding, or user-confirmation request.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -173,6 +187,9 @@ role-written journals:
 - Whether a ContextPack is fresh enough for delegation.
 - Whether an Evidence Packet is complete enough for a completion claim.
 - Whether a tracker row or Evidence Ledger update is complete.
+- Whether a console panel is fresh, complete, or release-blocking.
+- Whether a specialist role message belongs in the public transcript or only
+  in internal delegation views.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.
 - Whether a resumed role's context is fresh enough for an audit or release
