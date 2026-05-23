@@ -1,0 +1,33 @@
+schemaVersion = 1
+id = "WO-0251"
+title = "v0.8 end-to-end console data plane dogfood validation"
+objective = "Prove the v0.8 CoreRoom console data plane with deterministic host transcript, snapshot, layout, rendered image, evidence packet, tracker closure, and v0.9 readiness risks."
+githubIssue = 251
+phase = "v0.8.0 - Console Data Plane"
+epic = "Dogfood Closure"
+gateThread = "thread-v08-console-dogfood"
+branch = "feat/v0.8-251-console-dogfood"
+pullRequest = 280
+status = "closed"
+acceptanceCriteria = [
+  "Start from a user request to @host for the v0.8 project console.",
+  "Host classifies the request and binds it to a WorkOrder/tracker row.",
+  "Build a CoreRoomSnapshot from project identity, roles/runtime, WorkOrders, GitHub lifecycle, gates, evidence, sources, and alerts.",
+  "Include a public transcript fixture proving User <-> @host remains clear while role delegation is side-rail/internal.",
+  "Include a negative stale-tracker or missing-evidence fixture.",
+  "Generate or reference the console mock image from the snapshot fixture.",
+  "Evidence Packet and tracker #238 are complete before the issue claims done.",
+  "Document remaining v0.9 risks and readiness criteria.",
+]
+requiredEvidence = [
+  "changed-files",
+  "validation",
+  "gate-ledger",
+  "role-reviews",
+  "pull-request",
+  "risks",
+  "rollback",
+  "tracker-update",
+]
+trackerIssue = 238
+trackerCheckbox = "#251 - v0.8: End-to-end console data plane dogfood validation"

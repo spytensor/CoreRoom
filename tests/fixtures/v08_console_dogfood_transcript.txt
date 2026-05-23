@@ -1,0 +1,75 @@
+User:
+@host prove the v0.8 CoreRoom console data plane is ready for v0.9 without turning specialist role activity into noisy public chat.
+
+@host:
+Classification: persistent-workorder
+Reason: this is milestone closure work that must bind to GitHub issue #251, tracker #238, fixture evidence, PR/CI, and a rollback plan.
+
+WorkOrder: WO-0251
+GitHub Issue: #251
+Tracker: #238
+Gate thread: thread-v08-console-dogfood
+
+Gate phase: intake
+Host records the request and confirms this is v0.8 closure, not v0.9 implementation.
+
+Gate phase: discovery
+Required sources:
+- tests/fixtures/console_snapshot_v08.toml
+- tests/fixtures/console_layout_widths.toml
+- docs/images/control-room-console.png
+- docs/v0.8-console-dogfood.md
+- GitHub tracker #238
+
+Role delegation:
+- Internal @reviewer check: confirm public transcript stays User <-> @host.
+- Internal @qa check: confirm stale tracker and missing evidence negative cases exist.
+These delegations are recorded as side-rail/Xray facts, not public transcript turns.
+
+Gate phase: plan
+Plan:
+1. Add WorkOrder and Evidence Packet dogfood fixtures.
+2. Reuse the v0.8 CoreRoomSnapshot fixture.
+3. Validate the generated console image is present and snapshot-driven.
+4. Add a dogfood test proving request -> host classification -> snapshot -> rendered mock/status -> evidence -> tracker closure.
+5. Document v0.9 readiness criteria and remaining risks.
+
+Gate phase: review
+@host surfaces only the review result: accepted with one constraint.
+Constraint: the dogfood proof cannot claim the v0.9 full-screen TUI is implemented.
+
+Gate phase: signoff
+User signoff: proceed with deterministic fixtures and tests.
+
+Gate phase: implement
+Evidence produced:
+- Host transcript fixture.
+- WorkOrder fixture.
+- Evidence Packet fixture.
+- v0.8 console dogfood document.
+- Cargo dogfood validation test.
+
+Gate phase: qa
+Validation:
+- cargo test --test v08_console_dogfood --quiet
+- make readme-images
+- git diff --check
+- cargo fmt --all -- --check
+- cargo clippy --all-targets --all-features -- -D warnings
+- cargo test --all-features --locked --quiet
+
+Evidence Packet: WO-0251
+Rendered console mock: docs/images/control-room-console.png
+Negative fixture: WO-0206 merged-tracker-stale and WO-0251 blocked/missing evidence in the snapshot.
+Tracker closure: #238 / #251 / M-AC-10
+
+Remaining v0.9 risks:
+- ratatui rendering, focus, resize, scroll, and keyboard navigation remain unimplemented.
+- live polling must not become a second authority.
+- console mutations must still route through @host confirmation.
+
+Rollback:
+Revert the dogfood PR; no migration or runtime behavior is included.
+
+Gate phase: closed
+@host may claim v0.8 ready for v0.9 only after PR CI passes and tracker #238 is updated.
