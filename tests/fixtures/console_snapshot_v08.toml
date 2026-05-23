@@ -1,0 +1,207 @@
+schemaVersion = 1
+
+[project]
+project = "CoreRoom"
+repository = "spytensor/CoreRoom"
+remote = "https://github.com/spytensor/CoreRoom"
+branch = "feat/v0.8-242-coreroom-snapshot-schema"
+headSha = "fixture-head"
+dirtyState = "dirty"
+version = "0.7.0"
+activePhase = "v0.8.0 - Console Data Plane"
+trackerIssue = 238
+
+[runtime]
+roomId = "room-v08-console-fixture"
+hostRole = "host"
+sessionState = "resumed"
+permissionMode = "ask"
+activeRole = "host"
+waitingApproval = false
+
+[[runtime.roles]]
+role = "host"
+engine = "cc"
+model = "claude-code"
+state = "working"
+currentWorkOrder = "WO-0242"
+currentGatePhase = "implement"
+lastActivity = "Assembling CoreRoomSnapshot contract"
+
+[[runtime.roles]]
+role = "engineer"
+engine = "codex"
+model = "gpt-5"
+state = "idle"
+lastActivity = "Available for reducer implementation"
+
+[[runtime.roles]]
+role = "reviewer"
+engine = "codex"
+model = "gpt-5"
+state = "reviewing"
+currentWorkOrder = "WO-0242"
+currentGatePhase = "review"
+lastActivity = "Reviewing snapshot schema"
+
+[[runtime.roles]]
+role = "security"
+engine = "cc"
+model = "sonnet"
+state = "blocked"
+currentWorkOrder = "WO-0243"
+currentGatePhase = "discovery"
+lastActivity = "Waiting on source citation model"
+
+[conversation]
+internalDelegationCount = 3
+
+[[conversation.publicTurns]]
+speaker = "user"
+body = "设计 0.8/0.9 的 CoreRoom console，主对话必须清晰，其他角色只在需要时显式出现。"
+visibility = "public-transcript"
+
+[[conversation.publicTurns]]
+speaker = "host"
+body = "我会先建立 console data plane：snapshot、visibility、role lanes、work/evidence/source projections，再在 0.9 做全屏 TUI。"
+visibility = "public-transcript"
+
+[[conversation.publicTurns]]
+speaker = "host"
+body = "Side rail: active tracker #238, work item #242, evidence missing until PR/CI/tracker update."
+visibility = "side-rail"
+
+[[work]]
+id = "WO-0242"
+title = "Define CoreRoomSnapshot schema"
+phase = "v0.8"
+epic = "console-data-plane"
+githubIssue = 242
+branch = "feat/v0.8-242-coreroom-snapshot-schema"
+ciState = "unknown"
+evidenceState = "warn"
+trackerState = "warn"
+lifecycle = "in-progress"
+sourceCitations = ["tracker:#238", "issue:#242", "amendment:A-019"]
+
+[[work]]
+id = "WO-0241"
+title = "Update AI worker protocol and tracker evidence rules"
+phase = "v0.8"
+epic = "console-foundation"
+githubIssue = 241
+branch = "feat/v0.8-241-worker-protocol"
+pullRequest = 269
+ciState = "ok"
+evidenceState = "ok"
+trackerState = "ok"
+lifecycle = "closed"
+sourceCitations = ["pr:#269", "tracker:#238"]
+
+[[work]]
+id = "WO-0240"
+title = "Console control surface and conversation visibility amendment"
+phase = "v0.8"
+epic = "conversation-visibility"
+githubIssue = 240
+branch = "feat/v0.8-240-console-amendment"
+pullRequest = 270
+ciState = "ok"
+evidenceState = "ok"
+trackerState = "ok"
+lifecycle = "closed"
+sourceCitations = ["amendment:A-019", "pr:#270"]
+
+[[work]]
+id = "WO-0206"
+title = "Example stale merged work from v0.6"
+phase = "v0.6"
+epic = "tracker-discipline"
+githubIssue = 206
+pullRequest = 222
+ciState = "ok"
+evidenceState = "ok"
+trackerState = "blocking"
+lifecycle = "merged-tracker-stale"
+sourceCitations = ["evidence:WO-0206", "tracker:#202"]
+
+[[work]]
+id = "WO-0251"
+title = "End-to-end console data plane dogfood validation"
+phase = "v0.8"
+epic = "console-dogfood"
+githubIssue = 251
+ciState = "unknown"
+evidenceState = "blocking"
+trackerState = "warn"
+lifecycle = "blocked"
+sourceCitations = ["tracker:#238"]
+
+[[gates]]
+workOrder = "WO-0242"
+currentPhase = "implement"
+signoffReady = false
+
+[[gates]]
+workOrder = "WO-0251"
+currentPhase = "discovery"
+blockedReason = "Requires snapshot, visibility, role lane, and projection models first."
+missingReviews = ["reviewer", "qa"]
+signoffReady = false
+
+[[evidence]]
+workOrder = "WO-0242"
+status = "incomplete"
+missingFields = ["PR", "CI", "tracker update"]
+unverifiedItems = ["GitHub CI has not run for the snapshot branch yet."]
+rollback = "Revert the PR that introduces src/console_snapshot.rs and its fixtures."
+trackerUpdated = false
+
+[[evidence]]
+workOrder = "WO-0241"
+status = "complete"
+rollback = "Revert PR #269; docs/templates only."
+trackerUpdated = true
+
+[[sources]]
+sourceId = "core-repo"
+status = "pinned"
+trustLevel = "project-source"
+visibleRoles = ["host", "engineer", "reviewer"]
+findings = ["Current repo provides AGENTS.md, tracker, and v0.8 issues."]
+relatedWorkOrders = ["WO-0242", "WO-0245"]
+
+[[sources]]
+sourceId = "readme-console-mock"
+status = "stale"
+trustLevel = "generated"
+visibleRoles = ["host", "frontend", "reviewer"]
+findings = ["Mock image exists in stash and must be regenerated after v0.8 view models settle."]
+relatedWorkOrders = ["WO-0250"]
+
+[github]
+repository = "spytensor/CoreRoom"
+trackerIssue = 238
+openIssues = 11
+openPullRequests = 1
+failingChecks = 0
+
+[[alerts]]
+id = "tracker-stale-example"
+severity = "blocking"
+title = "Merged work cannot be claimed complete while tracker evidence is stale"
+source = "work:WO-0206"
+nextAction = "Update tracker checkbox and Evidence Ledger before closure."
+
+[[alerts]]
+id = "mock-source-stale"
+severity = "warn"
+title = "README console mock must be regenerated from current snapshot model"
+source = "source:readme-console-mock"
+nextAction = "Handle in #250 after view model fixtures are stable."
+
+[layout]
+primaryPane = "conversation"
+minColumns = 100
+preferredColumns = 180
+collapsedPanes = ["role-details", "debug-log"]
