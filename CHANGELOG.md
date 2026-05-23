@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-23
+
+### Added
+
+- **Virtual-team scaffold (#184, #188).** `cr init --preset team` now creates
+  a working host / engineer / reviewer / SRE / security / QA room, including
+  role ownership and scoped authority declarations in `.coderoom/config.toml`.
+  `cr init --with-claude-hooks --preset team` also installs the Claude hook
+  scaffold needed for cross-project permission handling.
+- **Role knowledge mounts (#185).** Roles can attach, list, compose, and detach
+  mounted knowledge files under `roles/<role>/knowledge/`, with deterministic
+  composition order and manifest metadata.
+- **Phase-based SDLC gates (#186, #200).** Gate threads now move through the
+  explicit `intake -> discovery -> plan -> review -> signoff -> implement ->
+  qa -> closed` workflow, recording artifacts, phase transitions, validation,
+  and audit events in the CREP log. `tests/v05_end_to_end.rs` covers the full
+  happy path on a fresh team preset.
+- **Scoped plan sign-off and veto (#183, #187).** Roles with matching authority
+  can approve or reject plans whose `scopes` include their area; rejection
+  blocks the workflow until the user explicitly overrides.
+- **Priors locking and verification (#189).** `cr lock` writes
+  `.coderoom/priors.lock`; `cr verify` checks deterministic role priors,
+  records priors hashes into CREP events, and surfaces drift before role
+  execution.
+- **Priors liveness telemetry (#190).** Role prior composition records local
+  hit metadata under `.coderoom/liveness/`; `cr doctor` reports stale priors,
+  and `cr role knowledge --with-liveness` shows usage signals.
+- **Operational hardening before v0.5.** Added permission-policy status
+  surfaces, bounded auto-route dispatch depth, dogfood orchestration replay
+  coverage, and a routing / permission / resume threat model.
+
+### Fixed
+
+- Tier 0 gate evidence writes are rejected instead of silently accepted.
+- Current-thread peer evidence is required for prior-derived claims.
+- Delegation routing now requires an explicit separator, reducing accidental
+  role fan-out from prose or quoted mentions.
+- Fresh-session guard messaging and routed peer brief rendering were tightened
+  around the v0.5 workflow.
+
 ## [0.4.4] - 2026-05-15
 
 ### Fixed
@@ -1069,7 +1109,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/spytensor/codeRoom/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/spytensor/codeRoom/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/spytensor/codeRoom/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/spytensor/codeRoom/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/spytensor/codeRoom/compare/v0.4.1...v0.4.2

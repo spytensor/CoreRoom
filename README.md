@@ -12,23 +12,17 @@
 
 ![CodeRoom role work cards](docs/images/work-cards.png)
 
-> **Status: v0.4.4 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.5.0 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CodeRoom
 > directly, guides setup when `.coderoom/` is missing, and shows the
-> effective role / engine / model configuration on entry. **v0.2**
-> drops the 5-minute wall-clock kill on long turns (the wrapper
-> trusts each engine to self-terminate), adds `/halt` and two-press
-> Ctrl-C for clean cancellation, renders role replies with markdown-lite
-> formatting, streams Codex/Gemini output as it arrives, and refreshes
-> WorkCard progress visibility. **v0.2.2** lands the chat-room UX
-> polish: per-tool trace lines fold into the WorkCard, `@`/`/` tokens
-> get a dropdown completion menu, cross-role auto-routes show a
-> Slack-style quote of the parent reply, turn handoffs render as a
-> full-width banner, and permission prompts collapse to a single line.
-> **v0.4.3** adds host-led SDLC gate ledgers and live
-> `/compact <role|all>` for supported engines. **v0.4.4** fixes legacy
-> config compatibility for both user and project files that still
-> contain the removed `budget_per_role_usd` field.
+> effective role / engine / model configuration on entry. **v0.4.3**
+> adds host-led SDLC gate ledgers and live `/compact <role|all>` for
+> supported engines. **v0.4.4** fixes legacy config compatibility for
+> both user and project files that still contain the removed
+> `budget_per_role_usd` field. **v0.5.0** adds the virtual-team scaffold:
+> `cr init --preset team`, role owners and scoped authority, role
+> knowledge mounts, plan sign-off vetoes, Claude hook scaffolding,
+> priors locking, and stale-priors liveness checks.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -116,7 +110,7 @@ Disable that with `CODEROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.4.4
+TAG=v0.5.0
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/codeRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \

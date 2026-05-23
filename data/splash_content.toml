@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.5.0"
+items = [
+  "team preset creates host/engineer/reviewer/SRE/security/QA roles",
+  "role authority and plan sign-off block scoped plans until approval",
+  "knowledge mounts, priors lock, and liveness doctor keep context fresh",
+]
+
+[[whats_new]]
 version = "0.4.4"
 items = [
   "legacy budget_per_role_usd project configs no longer block startup",
