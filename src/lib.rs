@@ -33,6 +33,7 @@ pub(crate) mod peer_quote;
 pub mod permissions;
 pub mod pointers;
 pub mod priors;
+pub mod project_status;
 pub mod prompt_cmd;
 pub mod repl;
 pub mod role;

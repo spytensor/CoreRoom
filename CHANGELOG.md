@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmation policy mapping, audit events, and loop safety controls.
 - Added the v0.7 Source Graph model for multi-repo/project context, graph
   paths, pinned source citations, drift checks, and no-silent-refresh plans.
+- Added the v0.7 project status rollup for host-facing milestone cards,
+  release readiness decisions, source citations, risks, and tracker blockers.
 
 ## [0.5.0] - 2026-05-23
 

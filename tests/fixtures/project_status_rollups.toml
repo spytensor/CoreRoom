@@ -1,0 +1,216 @@
+[[cases]]
+name = "healthy-continue-work"
+expectedDecision = "continue-work"
+expectedReleaseReady = false
+expectedState = "in-review"
+expectedSummary = "Active PRs"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "open"
+labels = ["status:in-review"]
+branch = "feat/v0.7-217-release-status-rollup"
+evidence = "incomplete"
+evidencePacket = "WO-0217"
+
+[cases.input.workOrders.github.pullRequest]
+number = 232
+state = "open"
+
+[[cases.input.workOrders.github.checks]]
+name = "test (ubuntu-latest)"
+state = "pending"
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = false
+ledger_status = "in_review"
+ledger_tracker_updated = false
+
+[[cases.input.workOrders.sourceCitations]]
+sourceId = "source-graph"
+pin = "commit:graph-v1"
+graphPaths = ["source-graph->project-status:documents"]
+reason = "Status rollup cites Source Graph facts."
+
+[[cases]]
+name = "at-risk"
+expectedDecision = "unsafe-to-claim-done"
+expectedReleaseReady = false
+expectedState = "in-progress"
+expectedSummary = "Risks"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.risks]]
+level = "high"
+description = "Release notes are incomplete."
+citation = "risk:#217"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "open"
+labels = ["status:ready"]
+branch = "feat/v0.7-217-release-status-rollup"
+evidence = "missing"
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "stale-tracker"
+expectedDecision = "unsafe-to-claim-done"
+expectedReleaseReady = false
+expectedState = "implementation-complete-tracker-incomplete"
+expectedSummary = "Stale tracker rows"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "closed"
+labels = []
+branch = "feat/v0.7-217-release-status-rollup"
+evidence = "complete"
+evidencePacket = "WO-0217"
+
+[cases.input.workOrders.github.pullRequest]
+number = 232
+state = "merged"
+
+[[cases.input.workOrders.github.checks]]
+name = "clippy"
+state = "pass"
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = false
+ledger_status = "in_review"
+ledger_tracker_updated = false
+
+[[cases]]
+name = "failed-ci"
+expectedDecision = "unsafe-to-claim-done"
+expectedReleaseReady = false
+expectedState = "failed-ci"
+expectedSummary = "Failed CI"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "open"
+labels = ["status:in-review"]
+branch = "feat/v0.7-217-release-status-rollup"
+evidence = "incomplete"
+
+[cases.input.workOrders.github.pullRequest]
+number = 232
+state = "open"
+
+[[cases.input.workOrders.github.checks]]
+name = "test (ubuntu-latest)"
+state = "fail"
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "blocked-human-input"
+expectedDecision = "blocked-waiting-human-input"
+expectedReleaseReady = false
+expectedState = "blocked"
+expectedSummary = "Blocked work"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+humanBlocker = "User must approve release risk."
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "open"
+labels = ["status:blocked"]
+evidence = "missing"
+blocker = "User must approve release risk."
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = false
+
+[[cases]]
+name = "release-ready"
+expectedDecision = "ready-to-release"
+expectedReleaseReady = true
+expectedState = "closed"
+expectedSummary = "Closed work"
+
+[cases.input]
+project = "CoreRoom"
+milestone = "v0.7"
+
+[[cases.input.workOrders]]
+id = "WO-0217"
+title = "Release status rollup"
+contextPack = "CTX-WO-0217"
+
+[cases.input.workOrders.github]
+issue = 217
+issueState = "closed"
+labels = []
+branch = "feat/v0.7-217-release-status-rollup"
+evidence = "complete"
+evidencePacket = "WO-0217"
+
+[cases.input.workOrders.github.pullRequest]
+number = 232
+state = "merged"
+
+[[cases.input.workOrders.github.checks]]
+name = "rustfmt"
+state = "pass"
+
+[[cases.input.workOrders.github.checks]]
+name = "clippy"
+state = "pass"
+
+[[cases.input.workOrders.github.checks]]
+name = "test (ubuntu-latest)"
+state = "pass"
+
+[cases.input.workOrders.github.tracker]
+checkbox_checked = true
+ledger_status = "merged"
+ledger_tracker_updated = true
