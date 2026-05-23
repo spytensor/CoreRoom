@@ -31,6 +31,8 @@ pub(super) struct CapturedTurn {
     /// `Continue` short-circuits the chain. Defaults to `Continue`
     /// when the adapter does not (yet) parse the marker.
     pub(super) outcome: TurnOutcome,
+    /// Role-declared phase block reason from `cr-phase-block:`.
+    pub(super) phase_block: Option<String>,
 }
 
 /// Fold noisy tool events during a live turn. Full details are still
@@ -348,6 +350,7 @@ pub(super) async fn drain_one_turn(
                             turn_id,
                             thread_id,
                             outcome,
+                            phase_block,
                             mentions: _,
                         } if spoken == role => {
                             let (cleaned, card) = {
@@ -362,6 +365,7 @@ pub(super) async fn drain_one_turn(
                                 thread_id: thread_id.clone(),
                                 activity: activity.clone(),
                                 outcome: *outcome,
+                                phase_block: phase_block.clone(),
                             });
                             status.clear();
                             if let Some(rendered) = render_stream_delta(

@@ -89,6 +89,10 @@ Bare user text is dispatched to the configured host role by the runtime. Project
 
 End a reply with `cr-status: <variant>` on its own final line (nothing after it) to halt routing of this reply's `@role:` delegations. The runtime strips the marker before the bus sees the text. Variants: `no_increment` (no domain-specific input), `converged` (thread resolved), `needs_user` (user decision required). Omit for normal routing; mid-paragraph occurrences are ignored. Mechanical depth, fan-out, and queue caps still apply.
 
+## Phase gate contract
+
+Code-changing gate ledgers move through this explicit phase order: `intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed`. `rejected` is a terminal branch only from `review` or `signoff`. The host or user advances phases with `cr gate phase <thread> <next-phase>`; do not claim a phase advanced from model text alone. A role that cannot support the current phase should end its reply with `cr-phase-block: <reason>` on its own final line. The runtime strips the marker, emits `PhaseBlocked`, records it on the gate ledger, and does not route follow-up delegations from that blocked turn.
+
 ## Peer provenance contract
 
 Peer claims require current-thread evidence: `<<<peer-quote role=@peer ... turn=<turn_id>>>>`, legacy `From @peer: ...`, or user-pasted current-thread text. When synthesizing, cite `@peer turn=<turn_id>` when available. Never claim consensus, approval, completed review, or merged perspectives from memory, priors, journals, or prior sessions; if missing, delegate with `@peer:` or say you are proposing without peer verification.

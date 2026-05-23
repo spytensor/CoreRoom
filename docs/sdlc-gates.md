@@ -11,6 +11,8 @@ that reviews must preserve, see `docs/threat-model.md`.
 
 - `.coderoom/gates/<thread-id>.json` stores one ledger per work thread.
 - `.coderoom/gates/active` points at the most recently touched ledger.
+- `.coderoom/gates/<thread-id>/<phase>.md` stores the structured notes for
+  each phase the thread enters.
 - `.coderoom/gate-templates/*.md` stores reusable gate prompts.
 
 Ledgers are structural evidence. They do not approve correctness.
@@ -37,17 +39,25 @@ release sign-off is needed.
 cr gate init --thread <thread_id> --tier 1 --feature "short title" \
   --role host --engine cc --model "claude-sonnet-4" --turn <turn_id>
 
-cr gate artifact --thread <thread_id> --kind research --path docs/gates/research.md
+cr gate phase <thread_id> discovery
+cr gate artifact --thread <thread_id> --kind discovery --path docs/gates/discovery.md
+
+cr gate phase <thread_id> plan
 cr gate artifact --thread <thread_id> --kind plan --path docs/gates/plan.md
 
+cr gate phase <thread_id> review
 cr gate reviewer --thread <thread_id> --role security --engine codex \
   --model "gpt-5" --turn <turn_id> --blocking-count 0 --warning-count 1 \
   --file-line-evidence --all-blockings-resolved --artifact docs/gates/review.md
 
+cr gate phase <thread_id> signoff
+cr gate artifact --thread <thread_id> --kind signoff --path docs/gates/signoff.md
+
+cr gate phase <thread_id> implement
+cr gate phase <thread_id> qa
 cr gate verify --thread <thread_id> --command "cargo test --all-features --locked" \
   --ok --evidence "test result: ok. 42 passed; 0 failed"
 
-cr gate artifact --thread <thread_id> --kind signoff --path docs/gates/signoff.md
 cr gate close --thread <thread_id>
 ```
 
@@ -60,7 +70,7 @@ cr gate close --thread <thread_id> --bypass "User accepted missing second review
 
 ## Tier 1 Structural Rules
 
-- Research, plan, review, and sign-off artifacts must be recorded.
+- Discovery, plan, review, and sign-off artifacts must be recorded.
 - Plan artifacts must include a `Sign-off Checklist` with `SO-N` rows.
 - Review artifacts must include reviewer role, engine, model, finding counts,
   `cross_model_satisfied`, and `all_blockings_resolved`.
@@ -73,3 +83,26 @@ cr gate close --thread <thread_id> --bypass "User accepted missing second review
 Tier 0 gates skip these structural requirements and cannot record hidden
 evidence writes. Routing, permission, resume, and reviewer-provenance changes
 should also satisfy the review checklist in `docs/threat-model.md`.
+
+## Phase Workflow
+
+Gate phases are linear:
+
+```text
+intake -> discovery -> plan -> review -> signoff -> implement -> qa -> closed
+```
+
+`rejected` is a terminal branch from `review` or `signoff`. Use
+`cr gate phase <thread_id> <next-phase>` for normal advancement. Skips and
+regressions are rejected; rollback requires `--rollback "<reason>"` and can
+only target an earlier linear phase.
+
+Roles can block the active phase by ending their reply with:
+
+```text
+cr-phase-block: <reason>
+```
+
+The marker must be the final line. CodeRoom strips it from the visible reply,
+records a `PhaseBlocked` event in `.coderoom/messages.jsonl`, appends the block
+to the gate ledger, and suppresses follow-up auto-routing for that turn.

@@ -26,9 +26,10 @@ use clap::{Parser, Subcommand};
 use coderoom::adapter::{Engine, PermissionMode};
 use coderoom::config::AuthorityScope;
 use coderoom::config_cmd::LayerTarget;
+use coderoom::crep::CrepEvent;
 use coderoom::gate::{
-    ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, ReviewInput,
-    VerificationInput,
+    ArtifactInput, GateActor, GateArtifactKind, GateInit, GatePhase, GateTier, PhaseAdvanceInput,
+    ReviewInput, VerificationInput,
 };
 
 #[derive(Debug, Parser)]
@@ -390,8 +391,8 @@ enum GateCmd {
         /// Work item title.
         #[arg(long)]
         feature: String,
-        /// Initial phase. Defaults to research.
-        #[arg(long, value_parser = parse_gate_phase, default_value = "research")]
+        /// Initial phase. Defaults to intake.
+        #[arg(long, value_parser = parse_gate_phase, default_value = "intake")]
         phase: GatePhase,
         /// Implementing role, when known.
         #[arg(long)]
@@ -423,6 +424,23 @@ enum GateCmd {
         /// Thread id. Defaults to the active gate pointer.
         #[arg(long)]
         thread: Option<String>,
+    },
+    /// Explicitly advance or roll back a gate phase.
+    Phase {
+        /// Project root. Defaults to the current working directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// CodeRoom thread id.
+        thread: String,
+        /// Target phase.
+        #[arg(value_parser = parse_gate_phase)]
+        next_phase: GatePhase,
+        /// Actor responsible for this transition. Defaults to `user`.
+        #[arg(long, default_value = "user")]
+        actor: String,
+        /// Roll back to an earlier phase with this justification.
+        #[arg(long)]
+        rollback: Option<String>,
     },
     /// Close a gate only when validation passes, unless bypassed.
     Close {
@@ -826,6 +844,49 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
             }
             Ok(())
         }
+        GateCmd::Phase {
+            project,
+            thread,
+            next_phase,
+            actor,
+            rollback,
+        } => {
+            let root = project_root_or_cwd(project)?;
+            let transition = coderoom::gate::advance_phase(
+                &root,
+                &PhaseAdvanceInput {
+                    thread_id: thread,
+                    to: next_phase,
+                    actor,
+                    rollback_reason: rollback,
+                },
+            )?;
+            append_crep_event(
+                &root,
+                &CrepEvent::PhaseAdvanced {
+                    thread: transition.thread_id.clone(),
+                    from: transition.from,
+                    to: transition.to,
+                    actor: transition.actor.clone(),
+                },
+            )?;
+            if let Some(reason) = transition.rollback_reason {
+                println!(
+                    "rolled back {}: {} -> {} ({reason})",
+                    transition.thread_id,
+                    transition.from.label(),
+                    transition.to.label()
+                );
+            } else {
+                println!(
+                    "advanced {}: {} -> {}",
+                    transition.thread_id,
+                    transition.from.label(),
+                    transition.to.label()
+                );
+            }
+            Ok(())
+        }
         GateCmd::Close {
             project,
             thread,
@@ -989,6 +1050,20 @@ fn run_gate_cmd(cmd: GateCmd) -> Result<()> {
 
 fn selected_gate_thread(root: &Path, explicit: Option<&str>) -> Result<String> {
     Ok(coderoom::gate::load(root, explicit)?.thread_id)
+}
+
+fn append_crep_event(root: &Path, event: &CrepEvent) -> Result<()> {
+    use std::io::Write as _;
+
+    let coderoom_dir = root.join(coderoom::config::CODEROOM_DIR);
+    std::fs::create_dir_all(&coderoom_dir)?;
+    let path = coderoom_dir.join("messages.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)?;
+    writeln!(file, "{}", serde_json::to_string(event)?)?;
+    Ok(())
 }
 
 fn normalize_role(role: &str) -> String {

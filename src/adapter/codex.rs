@@ -1198,6 +1198,8 @@ fn stamp_event_ids(event: &mut CrepEvent, turn_id: &str, thread_id: &str) {
             thread_id.clone_into(event_thread_id);
         }
         CrepEvent::TurnDispatched { .. }
+        | CrepEvent::PhaseAdvanced { .. }
+        | CrepEvent::PhaseBlocked { .. }
         | CrepEvent::RoleStarted { .. }
         | CrepEvent::RoleSessionUpdated { .. }
         | CrepEvent::RoleStopped { .. } => {}
@@ -1415,6 +1417,7 @@ async fn write_loop(
                         turn_id,
                         thread_id: thread_id_for_events,
                         outcome: crate::crep::TurnOutcome::Continue,
+                        phase_block: None,
                     })
                     .await;
             }

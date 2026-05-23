@@ -392,6 +392,16 @@ fn splash_token_pill_cell(total_tokens: u64, max_width: usize) -> UiCell {
     fit_cell(cell, &plain, max_width)
 }
 
+fn gate_phase_cell(project_root: &Path, max_width: usize) -> Option<UiCell> {
+    let ledger = crate::gate::load(project_root, None).ok()?;
+    let plain = format!("gate {} · phase {}", ledger.thread_id, ledger.phase.label());
+    Some(fit_cell(
+        styled_cell(&plain, plain.as_str().with(output::SPLASH_ACCENT).bold()),
+        &plain,
+        max_width,
+    ))
+}
+
 /// Pick the `[[whats_new]]` entry whose `version` matches
 /// `CARGO_PKG_VERSION`, falling back to the head of the list when no
 /// exact match is recorded yet (e.g. a bumped Cargo.toml without a new
@@ -513,9 +523,10 @@ pub(super) fn render_home_at_width(
         role_pad,
         left_w,
     ));
-    left.push(empty_cell());
-    left.push(token_cell);
-    left.push(path_cell);
+    left.extend([empty_cell(), token_cell, path_cell]);
+    if let Some(gate_cell) = gate_phase_cell(project_root, left_w) {
+        left.extend([empty_cell(), gate_cell]);
+    }
 
     // ── right column
     let content = load_splash_content();

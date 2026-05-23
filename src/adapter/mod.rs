@@ -461,6 +461,7 @@ pub(crate) fn role_spoke_events_from_text_with_ids(
     }
     let mut body = extracted.body.trim().to_owned();
     let outcome = extract_status_marker(&mut body);
+    let phase_block = extract_phase_block_marker(&mut body);
     let mentions = cc::parse_mentions(&body);
     events.push(CrepEvent::RoleSpoke {
         role: role.to_owned(),
@@ -471,6 +472,7 @@ pub(crate) fn role_spoke_events_from_text_with_ids(
         turn_id: turn_id.to_owned(),
         thread_id: thread_id.to_owned(),
         outcome,
+        phase_block,
     });
     events
 }
@@ -538,6 +540,35 @@ pub(crate) fn extract_status_marker(text: &mut String) -> crate::crep::TurnOutco
     }
     text.truncate(new_len);
     outcome
+}
+
+/// Parse a trailing `cr-phase-block: <reason>` marker and strip it from
+/// `text` when present.
+pub(crate) fn extract_phase_block_marker(text: &mut String) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let line_start = bytes[..end]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    let last_line = text[line_start..end].trim();
+
+    let reason = last_line.strip_prefix("cr-phase-block:")?.trim().to_owned();
+    let mut new_len = line_start;
+    let bytes = text.as_bytes();
+    while new_len > 0 && bytes[new_len - 1].is_ascii_whitespace() {
+        new_len -= 1;
+    }
+    text.truncate(new_len);
+    if reason.is_empty() {
+        tracing::warn!("empty cr-phase-block reason; stripping marker");
+        None
+    } else {
+        Some(reason)
+    }
 }
 
 /// Errors an adapter may surface during start/teardown.
@@ -720,6 +751,7 @@ mod tests {
                 turn_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 thread_id: crate::turn::LEGACY_TURN_ID.to_owned(),
                 outcome: crate::crep::TurnOutcome::Continue,
+                phase_block: None,
             }
         );
     }
@@ -847,6 +879,30 @@ mod tests {
     }
 
     #[test]
+    fn phase_block_marker_strips_and_returns_reason() {
+        let mut text =
+            "Blocked by missing approval.\n\ncr-phase-block: needs owner signoff\n\n".to_owned();
+
+        let reason = extract_phase_block_marker(&mut text);
+
+        assert_eq!(reason.as_deref(), Some("needs owner signoff"));
+        assert_eq!(text, "Blocked by missing approval.");
+    }
+
+    #[test]
+    fn phase_block_marker_only_recognised_at_end() {
+        let mut text = "cr-phase-block: this is documentation, not a marker\nMore body.".to_owned();
+
+        let reason = extract_phase_block_marker(&mut text);
+
+        assert_eq!(reason, None);
+        assert_eq!(
+            text,
+            "cr-phase-block: this is documentation, not a marker\nMore body."
+        );
+    }
+
+    #[test]
     fn role_spoke_events_strip_status_marker_and_propagate_outcome() {
         let events = role_spoke_events_from_text(
             "security",
@@ -859,6 +915,30 @@ mod tests {
             CrepEvent::RoleSpoke { text, outcome, .. } => {
                 assert_eq!(text, "Nothing in my lens here.");
                 assert_eq!(*outcome, crate::crep::TurnOutcome::NoIncrement);
+            }
+            other => panic!("expected RoleSpoke, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn role_spoke_events_strip_phase_block_marker_and_suppress_status_marker() {
+        let events = role_spoke_events_from_text(
+            "security",
+            "Cannot approve yet.\n\ncr-phase-block: missing threat model\ncr-status: needs_user",
+            0.0,
+            0,
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CrepEvent::RoleSpoke {
+                text,
+                outcome,
+                phase_block,
+                ..
+            } => {
+                assert_eq!(text, "Cannot approve yet.");
+                assert_eq!(*outcome, crate::crep::TurnOutcome::NeedsUser);
+                assert_eq!(phase_block.as_deref(), Some("missing threat model"));
             }
             other => panic!("expected RoleSpoke, got {other:?}"),
         }

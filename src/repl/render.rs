@@ -115,6 +115,38 @@ pub(super) fn render_event_line_at_width(
                 format!("stopped: {reason:?}").with(output::DIM).italic()
             )
         }
+        CrepEvent::PhaseAdvanced {
+            thread,
+            from,
+            to,
+            actor,
+        } => format!(
+            "  {} {}",
+            "▸".with(output::SPLASH_ACCENT),
+            format!(
+                "gate {thread} phase: {} -> {} by {actor}",
+                from.label(),
+                to.label()
+            )
+            .with(output::DIM)
+            .italic()
+        ),
+        CrepEvent::PhaseBlocked {
+            role,
+            phase,
+            reason,
+            ..
+        } => {
+            let role_paint = output::role_color(role, host_role);
+            let role_label = format!("@{role}").with(role_paint).bold();
+            format!(
+                "  {} {role_label} {}",
+                "⊘".with(output::WARN),
+                format!("blocked {} phase: {reason}", phase.label())
+                    .with(output::DIM)
+                    .italic()
+            )
+        }
         // `TurnDispatched` is the cross-role handoff boundary. When
         // the role is *actually starting* (queue_position == 0) we
         // render a full-width banner so the speaker change is an
