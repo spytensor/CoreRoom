@@ -13,6 +13,7 @@ pub mod bus;
 pub mod config;
 pub mod config_cmd;
 pub mod config_layered;
+pub mod console_projection;
 pub mod console_snapshot;
 pub mod console_state;
 pub mod context_pack;
