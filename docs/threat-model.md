@@ -37,6 +37,7 @@ Out of scope:
 | User keystrokes in the live REPL | Authoritative task intent for the current turn | Addressing roles, commands, permission choices, explicit `/fresh` and `/resume` actions | Hidden state changes without visible command feedback |
 | `.coderoom/config.toml` and user config | Trusted configuration after schema validation | Engine selection, model defaults, host role, permission mode, declared role owners and authority scopes | Evidence of review completion, peer consensus, or safety approval |
 | `.coderoom/shared.md`, `.coderoom/roles/*/priors.md`, role `knowledge/`, patches, journals | Project-supplied prompt input | Shape role behavior and local conventions with source headers | Redefining kernel routing syntax, gate rules, permission semantics, or provenance |
+| Host output | Untrusted model text with a privileged coordination duty | User-facing intake, classification drafts, delegation proposals, evidence summaries, and requests for confirmation | Silent persistent state changes, completion proof, permission grants, authority overrides, or tracker closure without evidence |
 | Engine output | Untrusted text plus adapter-parsed events | User-visible replies, explicit delegation text, WorkCard display, tool event summaries | Authoritative turn ids, thread ids, parent ids, hop depth, permission grants, gate completion, or peer consensus |
 | `.coderoom/messages.jsonl` and transcript archives | Editable audit/replay log | `cr show`, transcript citations, debugging, historical display, best-effort cost reporting | Active routing limits, permission enforcement, budget enforcement, gate close decisions, or live provenance |
 | `.coderoom/permission_policy.json` | User-editable session policy | Current allow/deny decisions after startup visibility and `/permissions` inspection | Silent approvals that are not surfaced, historical proof that a decision was attended to |
@@ -113,6 +114,13 @@ architecture amendment before implementation.
     Text emitted by a role, transcript replay, or a journal entry may explain
     the override after the fact, but cannot substitute for it.
 
+12. Host-led control is visible and confirmable.
+    `@host` is the highest in-room coordination authority, but host output is
+    still model text. Persistent project state changes require explicit user
+    confirmation or a visible command path. Non-host roles cannot create
+    WorkOrders, register sources, update trackers, prepare completion claims,
+    or close evidence gaps by prose.
+
 ## Decisions That Must Not Be Reconstructed
 
 The following live decisions must not be reconstructed from model text,
@@ -128,6 +136,8 @@ role-written journals:
 - Whether a role's authority scope applies to a plan.
 - Whether a role veto exists for the current plan SHA.
 - Whether a user override exists and carries the required justification.
+- Whether the host has confirmed a persistent state change.
+- Whether a tracker row or Evidence Ledger update is complete.
 - Whether a tool call is allowed under the current permission policy.
 - Whether a budget, cost ceiling, or spend cap has been enforced.
 - Whether a resumed role's context is fresh enough for an audit or release
@@ -158,6 +168,9 @@ gates, priors, logs, or role memory.
   declared plan scopes, and current plan SHA rather than model prose?
 - If a veto is bypassed, is there an explicit user override with a recorded
   reason?
+- If host-led workflow is involved, does every persistent state change require
+  explicit confirmation or a visible command path?
+- Does completion depend on tracker/evidence state rather than host prose?
 
 If the answer is "no" to any item, either change the implementation or file an
 architecture amendment that explicitly moves the trust boundary.

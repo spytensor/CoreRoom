@@ -21,6 +21,12 @@ role-specific knowledge file (its **priors**). One role is designated the
 Other roles are addressed by `@`-mention. Cross-role routing happens when one
 role writes an explicit delegation line like `@x: <brief>` in its reply.
 
+Starting with A-017, the host is also the in-room engineering control role:
+it is the user-facing owner for intake, classification, delegation, gate
+progression, evidence collection, and tracker closure. The user remains the
+final accountability anchor; host authority is coordination authority, not
+autonomous execution power.
+
 The CLI binary is `cr`.
 
 ## Role Invariance Principle
@@ -58,10 +64,16 @@ Concretely, v0.1 enforces this by construction:
   only by an explicit user action with a reason, recorded in the gate ledger
   and CREP audit trail. A model claim that "the user approved" is not an
   override.
+- **Host is the highest in-room authority.** Starting with A-017, `@host`
+  owns project-level coordination because it is the only role directly
+  accountable to the user. Specialist roles may advise or block within declared
+  authority scopes, but they do not bypass `@host` for WorkOrders, sources,
+  context packs, evidence, tracker updates, or completion claims.
 
 In v0.5 team mode, individual roles may also have a human `owner` who acts as
 the source-of-truth for that role's priors and declared authority. A-015
 accepts the principle; #184, #186, and #187 carry the implementation surface.
+A-017 adds host-led engineering control as a v0.6 coordination rule.
 
 ## Why
 
@@ -86,9 +98,11 @@ violate the constitution.
 - **No new agent runtime.** Tool execution, file editing, sandboxing, MCP —
   all stay inside the engine subprocess. We do not re-implement these.
 - **No automatic task router.** The user `@`-mentions roles. No "smart" PM
-  agent reads requirements and decides who participates. (Models *can* `@`
-  each other within their replies — that is delegation, not routing logic
-  that we own.)
+  agent reads requirements and invisibly decides who participates. (Models
+  *can* `@` each other within their replies — that is delegation, not routing
+  logic that we own.) A-017's host-led flow is different: the user intentionally
+  addresses `@host` or bare text routes to `@host`, and the host delegates
+  visibly through the normal role syntax.
 - **No permission sandbox of our own.** We forward permission decisions
   via the engine's hook contract; we do not invent a new sandbox.
 - **No paid SaaS, no hosted version.** v0.1 is a local CLI. v1 too.
@@ -163,9 +177,13 @@ Each is a one-liner with rationale. Detailed sections follow.
 9. **Host role catches un-addressed text.** The user designates one role as
    `host` in `config.toml`. Bare text in the REPL goes to the host. `@<role>`
    still routes explicitly. The host is a normal role with its own priors —
-   it routes onward by deciding to `@` other roles itself. This is *not*
-   auto-PM-router: the host's behavior is whatever its priors say; the
-   wrapper just does the un-addressed-text → host mapping.
+   it routes onward by deciding to `@` other roles itself. Starting with
+   A-017, the host is also the highest in-room engineering control role for
+   WorkOrders, project sources, context packs, gate progress, evidence, tracker
+   updates, and completion claims. This is *not* an invisible auto-PM-router:
+   the wrapper still only maps un-addressed text to the configured host, and
+   every persistent state change remains visible and subject to user
+   confirmation where A-017 requires it.
 10. **Role authority is declared, not inferred.** A role may carry an
     `owner` and canonical `authority` scopes in `config.toml`. Unknown scopes
     are invalid config. Missing authority means advisory-only, preserving

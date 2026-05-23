@@ -127,6 +127,120 @@ Accepted by the user for v0.6 on 2026-05-23. v0.6 updates product positioning
 only. Repository/package/binary rename implementation is explicitly deferred
 to #218.
 
+## A-017: Host-led engineering control protocol
+
+- **Status:** accepted for v0.6; implementation split across #205-#212
+- **Filed:** 2026-05-23
+- **Touches:** Role Invariance Principle, locked decision 9, SDLC gate docs,
+  threat model, default host priors, and external AI worker protocol.
+
+### Problem
+
+v0.5 made CodeRoom host-first for SDLC gates, but the constitution still
+describes `@host` mostly as the role that catches un-addressed text. That is
+too weak for the Engineering Control Room direction accepted in A-016.
+
+Users should not memorize operational commands for WorkOrders, project sources,
+context packs, evidence packets, tracker updates, or PR evidence. The product
+surface should be:
+
+```text
+user intent -> @host intake -> role/gate/evidence/tracker orchestration
+```
+
+Without a stronger host protocol, v0.6 risks two failure modes:
+
+1. The user is forced back into command choreography, which defeats the point
+   of AI-assisted engineering control.
+2. Specialist roles can appear to mutate project state or declare completion
+   from prose, which weakens accountability and makes tracker drift likely.
+
+### Alternatives considered
+
+1. **Keep host as only the default recipient.** Rejected. That preserves the
+   old chat-room model and leaves WorkOrder/source/evidence discipline outside
+   the product.
+2. **Build a separate automatic project manager/router.** Rejected. It
+   contradicts the no-autonomous-router principle and creates a second control
+   authority beside the user.
+3. **Make every user learn new project commands.** Rejected for happy path.
+   Commands remain valid as automation, CI, debug, and recovery surface, but
+   not as the primary user interface.
+4. **Make `@host` the highest in-room authority while preserving user
+   ownership and Git gate discipline.** Accepted.
+
+### Accepted change
+
+Inside CodeRoom, `@host` is the **highest authority role** because it is the
+only role directly accountable to the user. The user remains the final owner.
+
+`@host` owns these control responsibilities:
+
+- Intake and classify user intent.
+- Decide whether work is Tier 0 inline, persistent WorkOrder, constitution
+  change, release/audit review, or insufficient context.
+- Propose WorkOrders and GitHub Issue bindings for persistent work.
+- Identify required project sources and context before delegation.
+- Delegate to specialist roles with focused asks and expected outputs.
+- Drive SDLC gate phase progression.
+- Collect evidence from changed files, commands, tests, role reviews, PRs,
+  risks, rollback notes, and tracker state.
+- Summarize status and ask the user for meaningful decisions.
+- Update or propose tracker updates before claiming completion.
+
+Other roles remain specialist viewpoints. They may review, advise, and block
+inside declared authority scopes under A-015, but they do not bypass `@host`
+for project-level state changes.
+
+### Confirmation policy
+
+`@host` must ask for explicit user confirmation before:
+
+- Creating or binding a GitHub Issue.
+- Updating a milestone tracker or Evidence Ledger.
+- Registering, refreshing, or re-pinning a project source.
+- Overriding an authority-scoped veto.
+- Advancing from planning/signoff into implementation for Tier 1 work.
+- Preparing a PR completion claim.
+- Claiming release readiness.
+
+`@host` may act without confirmation for:
+
+- Read-only classification.
+- Status summaries.
+- Suggesting roles or sources.
+- Drafting a WorkOrder.
+- Inspecting local state.
+- Reporting missing evidence or blockers.
+
+### Forbidden behavior
+
+`@host` must not:
+
+- Create issues, update trackers, refresh sources, or prepare completion claims
+  silently.
+- Claim completion from model prose alone.
+- Treat stale engine context, journals, or transcripts as proof of current
+  approval.
+- Allow non-host roles to mutate project-level state by suggestion or prose.
+- Weaken GitHub Issue / PR / CI / tracker discipline.
+
+### Migration impact
+
+Existing projects keep the same `host_role` config and bare-text routing. The
+change is behavioral guidance and documentation first: generated host priors
+become stricter, and later v0.6 issues add WorkOrder, Source Registry,
+ContextPack, Evidence Packet, and tracker enforcement.
+
+Commands remain supported. Their product role changes: they are automation,
+CI, debugging, and recovery surface, while the happy path is user -> `@host`.
+
+### Decision
+
+Accepted by the user for v0.6 on 2026-05-23. Follow-up implementation is split
+across #205-#212. This amendment does not create autonomous role execution or a
+new agent runtime.
+
 ## A-001: Adapter contract is role-handle based, not method-per-action
 
 - **Status:** implemented in v0.1.12

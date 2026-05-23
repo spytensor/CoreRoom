@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AI-assisted software delivery. v0.6 keeps the existing `codeRoom` repo,
   `cr` binary, and `@spytensor/coderoom` package while documenting the product
   direction and deferring any rename implementation to v0.7.
+- Accepted the host-led engineering control protocol: `@host` is the highest
+  in-room authority for intake, delegation, gate progress, evidence, and
+  tracker closure while the user remains the final owner.
 
 ## [0.5.0] - 2026-05-23
 
