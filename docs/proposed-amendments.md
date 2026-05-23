@@ -36,6 +36,151 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
+## A-019: Console control surface and conversation visibility
+
+- **Status:** accepted for v0.8; implementation split across #241-#251
+- **Filed:** 2026-05-23
+- **Touches:** What CoreRoom is, locked decision 9, CoreRoom Event Protocol
+  consumers, v0.4 calm CLI visibility budget, threat model, and future v0.9
+  full-screen console work.
+
+### Problem
+
+CoreRoom's v0.5-v0.7 work made the product an Engineering Control Room, but
+the live terminal still risks being interpreted as a multi-agent group chat.
+That is not the desired product surface.
+
+The public session should stay clear:
+
+```text
+User <-> @host
+```
+
+Specialist roles are still valuable, but they are usually host-managed
+background specialists. If every internal role delegation and review finding is
+printed into the main conversation, users get noise instead of engineering
+control. The future v0.9 full-screen console also must not become a second
+authority path beside `@host`; it should be a projection over structural facts.
+
+Without an explicit visibility model, v0.8/v0.9 risk these failure modes:
+
+1. The main conversation becomes a noisy multi-agent chat transcript.
+2. Role-to-role chatter appears equivalent to user-facing decisions.
+3. Console panels show plausible status without a citation or evidence source.
+4. Users cannot tell whether a specialist message was directly requested by
+   them, surfaced by `@host`, or only part of internal delegation.
+5. A future full-screen TUI accidentally bypasses `@host` confirmation
+   boundaries for issue, tracker, source, PR, or release actions.
+
+### Alternatives considered
+
+1. **Show every role message in the public transcript.** Rejected. It is
+   transparent but noisy, and it weakens `@host` as the user-facing engineering
+   control role.
+2. **Hide all specialist-role output completely.** Rejected. Users still need
+   inspectable evidence, blockers, vetoes, and audit trails.
+3. **Make the console a separate operator.** Rejected. That creates a second
+   control authority and violates A-017.
+4. **Keep the existing REPL only and never add a full-screen console.**
+   Rejected for the long term. A K9s-style console is appropriate once it is
+   built from a trustworthy data plane.
+5. **Define v0.8 as the data/view-model foundation and v0.9 as the full-screen
+   renderer.** Accepted. This lets CoreRoom prove the facts before drawing the
+   dashboard.
+
+### Accepted change
+
+Starting in v0.8, CoreRoom defines a **Console Control Surface**:
+
+> The console is a host-led projection over structural engineering facts. It
+> helps the user and `@host` see project state, role activity, work, gates,
+> evidence, sources, and alerts. It is not a new agent runtime, not a second
+> authority channel, and not a substitute for GitHub, PR, CI, tracker, or
+> evidence state.
+
+The default public conversation remains:
+
+```text
+User <-> @host
+```
+
+Bare user text routes to the configured host as before. `@host` remains the
+highest in-room authority for project-level coordination. Specialist roles may
+advise, review, block within declared authority scopes, or produce evidence,
+but they do not bypass `@host` for WorkOrders, project sources, ContextPacks,
+Evidence Packets, tracker updates, PR completion claims, or release readiness.
+
+### Conversation visibility model
+
+CoreRoom now distinguishes four visibility classes:
+
+| Visibility | Contents | Default surface | Authority |
+| --- | --- | --- | --- |
+| `public-transcript` | User messages, `@host` responses, user-addressed role replies, confirmation prompts, surfaced vetoes/risks, final evidence summaries | Main conversation | User and `@host` facing; still not proof by itself |
+| `internal-delegation` | `@host` to role briefs, role to `@host` findings, peer review chatter, intermediate analysis | Logs, Xray, evidence, side-rail summaries | Audit/supporting context only |
+| `side-rail` | Active role, task, gate phase, blocker, source state, evidence status, changed files, PR/CI status | Console right rail / role lanes / progress panels | Derived status only |
+| `debug-log` | Raw CREP, adapter traces, tool details, engine stderr, replay diagnostics | `cr show`, debug/log views, files | Corroboration only |
+
+A specialist role enters the public transcript only when at least one of these
+is true:
+
+- the user explicitly addressed that role;
+- `@host` surfaces a critical role veto, risk, user-confirmation request, or
+  final evidence summary;
+- a permission, safety, or gate outcome changes what the user must decide next.
+
+Otherwise, role output remains internal and is summarized through side-rail
+activity, evidence, logs, or Xray views.
+
+### Console data boundary
+
+v0.8 builds the data plane for the console:
+
+- `CoreRoomSnapshot`
+- observation, citation, and freshness metadata
+- public transcript and internal delegation projection
+- CREP-to-console-state reducer
+- role lane/runtime snapshots
+- WorkOrder, gate, evidence, source, GitHub, and tracker projections
+- actionable health signals and selectors
+- responsive layout model
+- snapshot-driven generated mock
+- dogfood evidence
+
+v0.9 may implement a full-screen TUI only after those facts exist. The v0.9
+renderer must consume the v0.8 snapshot/view models and must not scrape model
+prose or ad hoc terminal text to infer completion.
+
+### Non-goals
+
+- No noisy multi-agent public transcript.
+- No console mutation path that bypasses `@host` and explicit user
+  confirmation.
+- No completion claim based on model prose.
+- No fake metrics that cannot cite a structural source.
+- No silent source refresh.
+- No replacement for GitHub Issues, PRs, CI checks, tracker rows, or Evidence
+  Packets.
+- No full-screen ratatui implementation in v0.8.
+- No change to `cr start` default behavior in v0.8.
+
+### Migration impact
+
+Existing sessions, role routing, and `.coreroom/messages.jsonl` logs remain
+valid. v0.8 adds interpretation rules and view-model contracts; it does not
+delete existing audit data. Existing public transcripts may contain more role
+chatter than the new model prefers, but future console projections should
+separate public conversation from internal delegation where facts permit.
+
+The v0.4 "No full-screen ratatui rewrite" non-goal remains valid for v0.8.
+v0.9 may revisit it only through the v0.9 tracker and only as a derived view
+over the v0.8 data plane.
+
+### Decision
+
+Accepted by the user for v0.8 on 2026-05-23. v0.8 implements the data plane
+and visibility model. v0.9 is reserved for the full-screen CoreRoom Console.
+
 ## A-018: CoreRoom product rename and release policy
 
 - **Status:** implemented in v0.7.0
