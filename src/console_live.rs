@@ -25,10 +25,10 @@ pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
 
 /// Build a live room snapshot from current local project state.
 ///
-/// Unlike the read-only console snapshot, the default live room starts from an
-/// empty current-session workspace. Historical `.coreroom/messages.jsonl`
+/// Unlike the read-only console snapshot, the staged live-room preview starts
+/// from an empty current-session workspace. Historical `.coreroom/messages.jsonl`
 /// projection remains available to `cr console` but must not occupy the
-/// primary user room when plain `cr` starts.
+/// explicit preview room.
 pub fn live_room_snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
     snapshot_from_project_with_conversation(project_root, ConversationSource::CurrentRoom)
 }

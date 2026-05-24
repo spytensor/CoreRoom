@@ -12,6 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.7] - 2026-05-24
+
+### Fixed
+
+- **Truthful default runtime (#317).** Plain `cr` once again enters the mature
+  executable CoreRoom runtime instead of the staged full-screen live-room
+  bridge. The live-room bridge remains available through
+  `cr console --live-room`, but it is explicitly preview-only until it owns
+  role-engine execution, permission prompts, streaming status, and durable turn
+  state.
+- **Live-room preview truthfulness (#318).** The explicit live-room preview now
+  renders a visible composer cursor, avoids duplicate `CoreRoom Workspace`
+  labels, removes repeated identity facts from the preview overview, and labels
+  submitted input as staged preview routing rather than real execution.
+- **Regression-resistant dogfood (#319).** The v0.9 dogfood now distinguishes
+  the executable default path from the explicit live-room preview and fails if
+  staged live-room tokens reappear as the default entrypoint before runtime
+  parity is implemented.
+
 ## [0.9.6] - 2026-05-24
 
 ### Fixed
@@ -1328,7 +1347,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.7...HEAD
+[0.9.7]: https://github.com/spytensor/CoreRoom/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...v0.9.4

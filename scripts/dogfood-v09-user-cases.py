@@ -3,9 +3,9 @@
 
 This script is intentionally heavier than unit tests. It builds the local
 binary, creates a temporary user project, runs real `cr` commands against that
-project, enters the full-screen console through a PTY, exercises the
-default unified live-room composer, its explicit alias, and regenerated README
-visual assets.
+project, verifies the default executable runtime entrypoint, enters the
+full-screen console through a PTY, exercises the explicit live-room preview
+alias, and regenerates README visual assets.
 It is meant for release gating, not fast inner-loop testing.
 """
 
@@ -101,49 +101,33 @@ def dogfood_fresh_project(project: Path) -> None:
 
 
 def dogfood_default_cr_entrypoint(project: Path) -> None:
-    print("\n== Scenario: plain `cr` opens the unified live room")
-    stale_history = "STALE HISTORY MUST NOT OCCUPY DEFAULT LIVE ROOM"
-    (project / ".coreroom" / "messages.jsonl").write_text(
-        '{"type":"turn_dispatched","role":"host","turn_id":"turn-old","thread_id":"thread-main","parent_turn_id":null,"queue_position":0}\n'
-        f'{{"type":"role_spoke","role":"host","text":"{stale_history}","mentions":[],"cost_usd":0.0,"cache_read":0,"turn_id":"turn-old","thread_id":"thread-main"}}\n',
-        encoding="utf-8",
-    )
+    print("\n== Scenario: plain `cr` opens the executable runtime")
     output, code = run_pty_scripted_inputs(
         [str(BIN)],
         cwd=project,
         width=160,
         height=48,
-        wait_for=b"Ask @host",
+        wait_for="⚡ cr".encode("utf-8"),
         inputs=[
-            b"validate unified room from plain cr\r",
-            b"@reviewer check explicit routing\r",
-            b"/exit\r",
+            b"\x04",
         ],
         timeout=24,
     )
     if code != 0:
-        raise DogfoodFailure(f"plain cr unified live room PTY exited with {code}\n{output}")
-    for token in ["CoreRoom", "Project", "CoreRoom Workspace", "Ask @host", "Environment", "Roles"]:
-        require(token, output, "plain cr unified live room render")
-    for token in [
-        "validate unified room from plain cr",
-        "@host received the request",
-        "@reviewer check explicit routing",
-        "@reviewer received the request",
-    ]:
-        require_compact(token, output, "plain cr unified live room composer flow")
+        raise DogfoodFailure(f"plain cr executable runtime PTY exited with {code}\n{output}")
+    for token in ["CoreRoom v", "type a task", "/help for commands"]:
+        require(token, output, "plain cr executable runtime render")
     forbidden = [
-        stale_history,
-        "Conversation",
-        "Composer",
-        "No public request",
+        "CoreRoom Workspace",
+        "Ask @host",
+        "received the request",
+        "staged preview route",
         "CoreRoom console closed; starting REPL",
-        "type a task · @role · /help · /exit",
     ]
     for token in forbidden:
         if token in output:
-            raise DogfoodFailure(f"plain cr unexpectedly showed old flow token: {token}")
-    print("plain `cr` accepted user input in the unified room without old-REPL fallthrough")
+            raise DogfoodFailure(f"plain cr unexpectedly showed staged live-room token: {token}")
+    print("plain `cr` reached the executable runtime entrypoint, not the staged live room")
 
 
 def dogfood_snapshot_console_pty(width: int, height: int) -> None:
@@ -215,18 +199,19 @@ def dogfood_live_room_composer_pty(project: Path) -> None:
     for token in [
         "CoreRoom",
         "Project",
-        "CoreRoom Workspace",
         "Ask @host",
     ]:
         require(token, output, "live-room PTY composer flow")
     for token in [
-        "Environment",
+        "staged router only",
+        "cr > | Ask @host",
         "validate unified room from real pty",
-        "@host received the request",
+        "@host staged preview route",
         "@reviewer check explicit routing",
-        "@reviewer received the request",
+        "@reviewer staged preview route",
+        "Not executing a role turn here",
         "not yet available in the unified room",
-        "cr start",
+        "plain `cr` or `cr start`",
     ]:
         require_compact(token, output, "live-room PTY composer flow")
     if "CoreRoom console closed; starting REPL" in output:
@@ -282,11 +267,17 @@ def run_pty_scripted_inputs(
 def wait_until_seen(
     master: int, output: bytearray, needle: bytes, deadline: float
 ) -> None:
+    text_needle = needle.decode("utf-8", errors="ignore")
     while time.time() < deadline:
         collect_for(master, output, seconds=0.1)
-        if needle in output:
+        if needle in output or (
+            text_needle and text_needle in clean_terminal_text(output.decode("utf-8", errors="replace"))
+        ):
             return
-    raise DogfoodFailure(f"PTY did not render expected token {needle!r}")
+    cleaned_tail = clean_terminal_text(output.decode("utf-8", errors="replace"))[-1200:]
+    raise DogfoodFailure(
+        f"PTY did not render expected token {needle!r}\n{indent_output(cleaned_tail)}"
+    )
 
 
 def collect_for(master: int, output: bytearray, *, seconds: float) -> None:

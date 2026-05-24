@@ -28,13 +28,13 @@ use crate::console_conversation::{
     build_live_room_conversation, InternalTaskCard, LiveRoomConversationPanel, LiveRoomTurnKind,
 };
 use crate::console_health::overview_health_signals;
-use crate::console_layout::{compute_console_layout, RightRailSection};
+use crate::console_layout::{compute_console_layout, RightRailSection, RightRailSectionKind};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_room::{live_room_command_specs, LiveRoomAction, LiveRoomBridge};
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, StatusState,
-    WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, RoleLaneState,
+    StatusState, WorkLifecycle,
 };
 use crate::role_avatar::{role_label, RoleAvatarPack};
 
@@ -493,6 +493,7 @@ fn render_body(
             rail,
             &snapshot.runtime.host_role,
             avatar_pack,
+            surface,
         );
     }
 }
@@ -514,7 +515,11 @@ fn render_center(
         .constraints([Constraint::Length(11), Constraint::Min(8)])
         .split(area);
     let overview = build_console_overview(snapshot);
-    render_overview(frame, chunks[0], &overview);
+    if surface.is_live() {
+        render_live_room_overview(frame, chunks[0], snapshot, &overview);
+    } else {
+        render_overview(frame, chunks[0], &overview);
+    }
     render_room_workspace(frame, chunks[1], snapshot, avatar_pack, surface);
 }
 
@@ -646,6 +651,64 @@ fn render_overview(frame: &mut Frame<'_>, area: Rect, overview: &ConsoleOverview
     for pulse in &overview.pulses {
         lines.push(pulse_line(pulse));
     }
+    if let Some(alert) = overview.alerts.first() {
+        lines.push(Line::from(vec![
+            Span::styled("Alert ", Style::default().fg(Color::Red)),
+            Span::raw(alert.title.clone()),
+            Span::styled(
+                format!(" [{}]", alert.source),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Overview"))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_live_room_overview(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    overview: &ConsoleOverview,
+) {
+    let enabled_roles = snapshot
+        .runtime
+        .roles
+        .iter()
+        .filter(|role| role.enabled)
+        .count();
+    let active_roles = snapshot
+        .runtime
+        .roles
+        .iter()
+        .filter(|role| matches!(role.state, RoleLaneState::Working))
+        .count();
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Surface ", label_style()),
+            Span::raw("live-room preview  "),
+            Span::styled("Runtime ", label_style()),
+            Span::styled("staged router only", Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![Span::styled(
+            "Use plain `cr` or `cr start` for real role-engine turns until full-screen runtime parity lands.",
+            Style::default().fg(Color::DarkGray),
+        )]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Host ", label_style()),
+            Span::raw(format!("@{}  ", snapshot.runtime.host_role)),
+            Span::styled("Roles ", label_style()),
+            Span::raw(format!("enabled {enabled_roles} / active {active_roles}  ")),
+            Span::styled("Input ", label_style()),
+            Span::raw("@role, @all, /help, /exit preview routing"),
+        ]),
+    ];
     if let Some(alert) = overview.alerts.first() {
         lines.push(Line::from(vec![
             Span::styled("Alert ", Style::default().fg(Color::Red)),
@@ -803,23 +866,12 @@ fn live_room_header_lines(
     snapshot: &CoreRoomSnapshot,
     panel: &LiveRoomConversationPanel,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![Span::styled(
-            "CoreRoom Workspace",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![
-            Span::styled("Room: ", label_style()),
-            Span::raw("@user <-> @"),
-            Span::raw(snapshot.runtime.host_role.clone()),
-            Span::styled(
-                "  primary work surface",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-    ];
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Room: ", label_style()),
+        Span::raw("@user <-> @"),
+        Span::raw(snapshot.runtime.host_role.clone()),
+        Span::styled("  preview surface", Style::default().fg(Color::DarkGray)),
+    ])];
     if panel.hidden_internal_count > 0 || !panel.task_cards.is_empty() {
         lines.push(Line::from(vec![
             Span::styled("Side work: ", label_style()),
@@ -896,14 +948,14 @@ fn live_room_action_lines(action: &LiveRoomAction) -> Vec<Line<'static>> {
                         .fg(Color::Magenta)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(" received the request"),
+                Span::raw(" staged preview route"),
                 Span::styled(
                     format!("  from {origin_label}"),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]));
             lines.push(Line::from(vec![Span::styled(
-                "  Runtime handoff is staged here; use `cr start` for legacy full-turn execution until parity closes.",
+                "  Not executing a role turn here; use plain `cr` or `cr start` for real runtime execution.",
                 Style::default().fg(Color::DarkGray),
             )]));
         }
@@ -930,10 +982,18 @@ fn render_right_rail(
     rail: &crate::console_layout::RightRailViewModel,
     host_role: &str,
     avatar_pack: RoleAvatarPack,
+    surface: RoomSurface<'_>,
 ) {
     let items = rail
         .sections
         .iter()
+        .filter(|section| {
+            !(surface.is_live()
+                && matches!(
+                    section.kind,
+                    RightRailSectionKind::Environment | RightRailSectionKind::Changes
+                ))
+        })
         .flat_map(|section| section_to_items(section, host_role, avatar_pack))
         .collect::<Vec<_>>();
     frame.render_widget(
@@ -980,20 +1040,10 @@ fn render_composer(
     bridge: &LiveRoomBridge,
 ) {
     let view = composer.view_model();
-    let input = if view.input.is_empty() {
-        Span::styled(view.prompt_hint, Style::default().fg(Color::DarkGray))
-    } else {
-        Span::raw(view.input)
-    };
     let _ = bridge;
-    let mut lines = vec![Line::from(vec![
-        Span::styled("cr > ", Style::default().fg(Color::Green)),
-        input,
-        view.ghost_suffix.map_or_else(
-            || Span::raw(""),
-            |suffix| Span::styled(suffix, Style::default().fg(Color::DarkGray)),
-        ),
-    ])];
+    let mut input_spans = vec![Span::styled("cr > ", Style::default().fg(Color::Green))];
+    input_spans.extend(composer_input_spans(&view));
+    let mut lines = vec![Line::from(input_spans)];
     if !view.candidates.is_empty() {
         let labels = view
             .candidates
@@ -1018,11 +1068,48 @@ fn render_composer(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Ask @{}", snapshot.runtime.host_role)),
+                    .title(format!("Input @{}", snapshot.runtime.host_role)),
             )
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn composer_input_spans(view: &crate::console_composer::ComposerViewModel) -> Vec<Span<'static>> {
+    let cursor = view.cursor.min(view.input.chars().count());
+    let cursor_span = Span::styled(
+        "|",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
+    if view.input.is_empty() {
+        return vec![
+            cursor_span,
+            Span::styled(
+                format!(" {}", view.prompt_hint),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ];
+    }
+
+    let before = view.input.chars().take(cursor).collect::<String>();
+    let after = view.input.chars().skip(cursor).collect::<String>();
+    let mut spans = Vec::new();
+    if !before.is_empty() {
+        spans.push(Span::raw(before));
+    }
+    spans.push(cursor_span);
+    if let Some(suffix) = &view.ghost_suffix {
+        spans.push(Span::styled(
+            suffix.clone(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    if !after.is_empty() {
+        spans.push(Span::raw(after));
+    }
+    spans
 }
 
 fn render_live_room_footer(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {

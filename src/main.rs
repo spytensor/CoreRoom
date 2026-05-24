@@ -11,7 +11,7 @@
 //! - `cr role set-owner <name> <owner>` — set role owner
 //! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
-//! - `cr` — enter the unified live room for conversation plus dashboard facts
+//! - `cr` — enter the executable CoreRoom runtime
 //! - `cr start [--project PATH] [--allow-large-priors]` — enter the legacy REPL directly
 //! - `cr console [--project PATH] [--snapshot PATH] [--live-room]` — enter the v0.9 full-screen console
 //! - `cr prompt show <role>`     — print a role's effective prompt
@@ -120,7 +120,7 @@ enum Cmd {
         /// derives a live local snapshot from project config and git state.
         #[arg(long, conflicts_with = "live_room")]
         snapshot: Option<PathBuf>,
-        /// Open the same unified live room used by plain `cr`. Keeps
+        /// Open the staged unified live room preview. Keeps
         /// `cr console --snapshot` read-only.
         #[arg(long)]
         live_room: bool,
@@ -1356,20 +1356,6 @@ fn run_start(
 
 fn run_console_first_default() -> Result<()> {
     let project_root = project_root_or_cwd(None)?;
-    if std::io::stdin().is_terminal()
-        && std::io::stdout().is_terminal()
-        && project_root
-            .join(coreroom::config::COREROOM_DIR)
-            .join(coreroom::config::CONFIG_FILE)
-            .is_file()
-    {
-        match coreroom::console_tui::run_live_room_console(&project_root) {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                eprintln!("CoreRoom live room unavailable ({error:#}); starting `cr start`.");
-            }
-        }
-    }
     run_start(Some(project_root), false, false, false)
 }
 
