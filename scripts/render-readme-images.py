@@ -220,9 +220,9 @@ def readme_console_snapshot() -> dict:
     """
     snapshot = deepcopy(console_snapshot_fixture())
     project = snapshot["project"]
-    project["branch"] = "feat/v0.9-261-terminal-qa-readme-visuals"
+    project["branch"] = "main"
     project["dirtyState"] = "dirty"
-    project["version"] = "0.9.0-dev"
+    project["version"] = "0.9.0"
     project["activePhase"] = "v0.9.0 - Full-screen Console"
     project["trackerIssue"] = 239
 

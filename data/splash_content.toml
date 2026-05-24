@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.0"
+items = [
+  "full-screen CoreRoom Console renders project, branch, work, gates, evidence, and sources",
+  "conversation stays user-to-host while specialist activity moves to lanes, Xray, and logs",
+  "real local user-case dogfood now gates console releases before tagging",
+]
+
+[[whats_new]]
 version = "0.7.0"
 items = [
   "CoreRoom rename is complete across repo, npm, Cargo, and releases",
