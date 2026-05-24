@@ -53,8 +53,10 @@ def main() -> int:
         project = Path(tmp) / "fresh-user-project"
         create_sample_project(project)
         dogfood_fresh_project(project)
+        dogfood_default_cr_entrypoint(project)
+        dogfood_live_console_pty(project)
 
-    dogfood_console_pty(width=120, height=40)
+    dogfood_snapshot_console_pty(width=120, height=40)
     dogfood_readme_images()
 
     print("\nDOGFOOD PASS: v0.9 local user-case gate completed")
@@ -94,8 +96,29 @@ def dogfood_fresh_project(project: Path) -> None:
     require("verified", verify.lower(), "priors lock verification")
 
 
-def dogfood_console_pty(width: int, height: int) -> None:
-    print("\n== Scenario: real PTY console entry/exit")
+def dogfood_default_cr_entrypoint(project: Path) -> None:
+    print("\n== Scenario: plain `cr` shows console before REPL")
+    output, code = run_pty_sequence(
+        [str(BIN)],
+        cwd=project,
+        width=120,
+        height=40,
+        sends=[
+            (b"CoreRoom", b"q"),
+            (b"permission bridge unavailable", b"\x04"),
+        ],
+        timeout=18,
+    )
+    if code != 0:
+        raise DogfoodFailure(f"plain cr PTY exited with {code}\n{output}")
+    for token in ["EngineeringControlRoom", "Project", "Conversation", "Roles"]:
+        require(token, output, "plain cr console-first render")
+    require("type a task", output, "plain cr REPL handoff")
+    print("plain `cr` rendered console first, then handed off to the REPL")
+
+
+def dogfood_snapshot_console_pty(width: int, height: int) -> None:
+    print("\n== Scenario: real PTY snapshot console entry/exit")
     assert_file(SNAPSHOT)
     output, code = run_pty(
         [str(BIN), "console", "--snapshot", str(SNAPSHOT)],
@@ -113,6 +136,23 @@ def dogfood_console_pty(width: int, height: int) -> None:
     if "user <-> @host" not in output and "user<->@host" not in output:
         raise DogfoodFailure("missing public user/host transcript marker in console PTY render")
     print(f"PTY console entered and exited cleanly at {width}x{height}")
+
+
+def dogfood_live_console_pty(project: Path) -> None:
+    print("\n== Scenario: real PTY live console without snapshot")
+    live_output, live_code = run_pty(
+        [str(BIN), "console"],
+        cwd=project,
+        width=120,
+        height=40,
+        send_when_seen=b"CoreRoom",
+        send_bytes=b"q",
+        timeout=12,
+    )
+    if live_code != 0:
+        raise DogfoodFailure(f"live console PTY exited with {live_code}\n{live_output}")
+    require("Live CoreRoom session", live_output, "live console PTY render")
+    print("live PTY console entered without --snapshot at 120x40")
 
 
 def dogfood_readme_images() -> None:
@@ -220,6 +260,61 @@ def run_pty(
     text = output.decode("utf-8", errors="replace")
     cleaned = clean_terminal_text(text)
     print(indent_output(cleaned[-1600:]))
+    return cleaned, proc.returncode if proc.returncode is not None else -1
+
+
+def run_pty_sequence(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    width: int,
+    height: int,
+    sends: list[tuple[bytes, bytes]],
+    timeout: int,
+) -> tuple[str, int]:
+    print(f"$ {shell_join(cmd)}  # PTY {width}x{height}, scripted sends")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
+    env = os.environ.copy()
+    env.update({"TERM": "xterm-256color", "COLUMNS": str(width), "LINES": str(height)})
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+    )
+    os.close(slave)
+    output = bytearray()
+    sent = [False for _ in sends]
+    deadline = time.time() + timeout
+    try:
+        while time.time() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.1)
+            if readable:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+                for index, (trigger, payload) in enumerate(sends):
+                    if not sent[index] and trigger in output:
+                        os.write(master, payload)
+                        sent[index] = True
+            if proc.poll() is not None:
+                break
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=2)
+    finally:
+        os.close(master)
+    text = output.decode("utf-8", errors="replace")
+    cleaned = clean_terminal_text(text)
+    print(indent_output(cleaned[-2400:]))
     return cleaned, proc.returncode if proc.returncode is not None else -1
 
 

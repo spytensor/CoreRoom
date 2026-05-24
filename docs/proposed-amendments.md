@@ -98,13 +98,19 @@ The console has these binding rules:
 
 ### Entry and compatibility
 
-`cr start` remains the normal chat REPL entry and must not become a full-screen
-TUI by default in v0.9.
+`cr start` remains the direct chat REPL entry and must not become a full-screen
+TUI by default in v0.9. v0.9.1 adds a narrower default-entrypoint correction:
+bare `cr` may open the read-only console first for initialized projects, then
+hand off to the REPL after the user exits the console. This preserves `cr start`
+as the explicit REPL-only path while making the advertised console visible in
+the real default user path.
 
 The full-screen console may be entered explicitly through:
 
 - a REPL command such as `/console`; and/or
-- a direct command such as `cr console` for automation/debug/recovery.
+- a direct command such as `cr console` for automation/debug/recovery; and/or
+- the bare `cr` launch path, which may show the console first before entering
+  the REPL.
 
 Both entries must reuse the same project configuration, host role, permission
 mode, and room/session model as `cr start`. Exiting the console must restore a

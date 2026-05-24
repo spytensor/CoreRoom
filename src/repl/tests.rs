@@ -636,17 +636,17 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.9.0 ────────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.9.1 ────────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
 │ ● @backend   cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
 │ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
 │ ● @security  codex  · default · bypass                                       │
-│                                         what's new in 0.9.0                  │
-│  3.3k  base tokens loaded               • full-screen CoreRoom Console rend… │
-│ /repo/CoreRoom                          • conversation stays user-to-host w… │
-│                                         • real local user-case dogfood now … │
+│                                         what's new in 0.9.1                  │
+│  3.3k  base tokens loaded               • bare `cr` opens the full-screen c… │
+│ /repo/CoreRoom                          • `cr console` now works from live … │
+│                                         • real PTY dogfood covers the defau… │
 │                                                                              │
 │                                         /help for commands                   │
 │                                                                              │

@@ -6,7 +6,7 @@ Run CoreRoom in a project directory:
 
 ```bash
 cr init -y
-cr start
+cr
 ```
 
 `cr init` seeds `.coreroom/` with starter roles:
