@@ -159,9 +159,9 @@ python3 scripts/dogfood-v09-user-cases.py
 
 This is intentionally not a syntax-level check. It builds the real local
 binary, initializes a temporary user project, inspects the generated team
-roles and host prompt, verifies priors, enters `cr console` through a PTY,
-enters `cr console --live-room` through a PTY with typed user input and
-explicit `@role` routing, regenerates README images, and fails if those
+roles and host prompt, verifies priors, enters plain `cr` through a PTY with
+typed user input and explicit `@role` routing, checks the explicit
+`cr console --live-room` alias, regenerates README images, and fails if those
 user-visible paths regress.
 Release evidence must include this command when console, setup/init, host
 control, role prompt composition, or README visual behavior changed.
