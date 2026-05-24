@@ -29,7 +29,8 @@ use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, HealthSeverity, StatusState, WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationActivity,
+    InternalDelegationState, StatusState, WorkLifecycle,
 };
 
 /// Load and validate a TOML-encoded CoreRoom console snapshot.
@@ -189,7 +190,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot)
                 project
                     .head_sha
                     .clone()
-                    .unwrap_or_else(|| "unknown".to_owned()),
+                    .unwrap_or_else(|| "not observed".to_owned()),
             ),
             Span::raw("  "),
             dirty_span(project.dirty_state),
@@ -392,54 +393,109 @@ fn render_overview(frame: &mut Frame<'_>, area: Rect, overview: &ConsoleOverview
 }
 
 fn pulse_line(pulse: &OverviewPulse) -> Line<'_> {
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!("{:<10}", pulse.label),
             Style::default().fg(Color::Cyan),
         ),
         Span::raw(format!("total {:>2}  ", pulse.total)),
-        Span::styled(
+    ];
+    if pulse.ok > 0 {
+        spans.push(Span::styled(
             format!("ok {:>2}  ", pulse.ok),
             Style::default().fg(Color::Green),
-        ),
-        Span::styled(
+        ));
+    }
+    if pulse.warn > 0 {
+        spans.push(Span::styled(
             format!("warn {:>2}  ", pulse.warn),
             Style::default().fg(Color::Yellow),
-        ),
-        Span::styled(
+        ));
+    }
+    if pulse.blocking > 0 {
+        spans.push(Span::styled(
             format!("block {:>2}  ", pulse.blocking),
             Style::default().fg(Color::Red),
-        ),
-        Span::styled(
-            format!("unknown {:>2}", pulse.unknown),
+        ));
+    }
+    if pulse.unknown > 0 {
+        spans.push(Span::styled(
+            format!("not observed {:>2}", pulse.unknown),
             Style::default().fg(Color::Gray),
-        ),
-    ])
+        ));
+    }
+    Line::from(spans)
 }
 
 fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
     let panel = build_public_conversation(snapshot);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("Public session: ", label_style()),
-        Span::raw("user <-> @"),
+        Span::styled("Public conversation: ", label_style()),
+        Span::raw("@user <-> @"),
         Span::raw(snapshot.runtime.host_role.clone()),
-        Span::styled(
-            format!(
-                "  hidden delegation: {} internal / {} side-rail",
-                panel.hidden_internal_count, panel.side_rail_turn_count
-            ),
-            Style::default().fg(Color::DarkGray),
-        ),
     ]));
-    lines.push(Line::raw(""));
-    for turn in &panel.turns {
+    if panel.hidden_internal_count > 0 || !panel.internal_activity.is_empty() {
         lines.push(Line::from(vec![
-            speaker_span(&turn.speaker),
+            Span::styled("Internal work: ", label_style()),
+            Span::raw(format!(
+                "{} hidden turns · {} task cards",
+                panel.hidden_internal_count,
+                panel.internal_activity.len()
+            )),
+            Span::styled(
+                "  surfaced only when user @mentions a role, or @host summarizes risk/evidence",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    if panel.turns.is_empty() {
+        lines.push(Line::from(vec![
+            speaker_span("user", &snapshot.runtime.host_role),
             Span::raw(" "),
         ]));
-        lines.extend(wrap_body(&turn.body));
+        lines.push(Line::from(vec![Span::styled(
+            "  No public request in this room yet.",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        lines.push(Line::from(vec![
+            speaker_span(&snapshot.runtime.host_role, &snapshot.runtime.host_role),
+            Span::raw(" "),
+        ]));
+        lines.push(Line::from(vec![Span::raw(
+            "  Press q to enter the REPL and type your request. This pane is reserved for user-facing input/output.",
+        )]));
         lines.push(Line::raw(""));
+    } else {
+        for turn in &panel.turns {
+            lines.push(Line::from(vec![
+                speaker_span(&turn.speaker, &snapshot.runtime.host_role),
+                if is_public_specialist(&turn.speaker, &snapshot.runtime.host_role) {
+                    Span::styled(" direct", Style::default().fg(Color::DarkGray))
+                } else {
+                    Span::raw("")
+                },
+            ]));
+            lines.extend(wrap_body(&turn.body));
+            lines.push(Line::raw(""));
+        }
+    }
+    if !panel.internal_activity.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "Host-managed task cards",
+            label_style(),
+        )]));
+        for activity in panel.internal_activity.iter().take(3) {
+            lines.extend(delegation_card_lines(activity));
+        }
+        let remaining = panel.internal_activity.len().saturating_sub(3);
+        if remaining > 0 {
+            lines.push(Line::from(vec![Span::styled(
+                format!("  +{remaining} more in Xray/log views"),
+                Style::default().fg(Color::DarkGray),
+            )]));
+        }
     }
 
     frame.render_widget(
@@ -556,16 +612,18 @@ fn dirty_span(state: DirtyState) -> Span<'static> {
     match state {
         DirtyState::Clean => Span::styled("clean", Style::default().fg(Color::Green)),
         DirtyState::Dirty => Span::styled("dirty", Style::default().fg(Color::Yellow)),
-        DirtyState::Unknown => Span::styled("dirty unknown", Style::default().fg(Color::Gray)),
+        DirtyState::Unknown => {
+            Span::styled("changes not observed", Style::default().fg(Color::Gray))
+        }
     }
 }
 
-fn speaker_span(speaker: &str) -> Span<'_> {
+fn speaker_span<'a>(speaker: &'a str, host_role: &str) -> Span<'a> {
     let style = if speaker == "user" {
         Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD)
-    } else if speaker == "host" {
+    } else if speaker == host_role || speaker == "host" {
         Style::default()
             .fg(Color::Magenta)
             .add_modifier(Modifier::BOLD)
@@ -573,6 +631,50 @@ fn speaker_span(speaker: &str) -> Span<'_> {
         Style::default().fg(Color::Gray)
     };
     Span::styled(format!("@{speaker}"), style)
+}
+
+fn is_public_specialist(speaker: &str, host_role: &str) -> bool {
+    speaker != "user" && speaker != host_role && speaker != "host"
+}
+
+fn delegation_card_lines(activity: &InternalDelegationActivity) -> Vec<Line<'_>> {
+    let state_style = match activity.state {
+        InternalDelegationState::Blocked => Style::default().fg(Color::Red),
+        InternalDelegationState::Completed => Style::default().fg(Color::Green),
+        InternalDelegationState::Dispatched
+        | InternalDelegationState::Working
+        | InternalDelegationState::Reviewing => Style::default().fg(Color::Yellow),
+    };
+    let mut header = vec![
+        Span::styled("  [", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("@{}", activity.role),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::styled("] ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:?}", activity.state).to_lowercase(),
+            state_style.add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if let Some(work_order) = &activity.work_order {
+        header.push(Span::styled(
+            format!(" · {work_order}"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(header),
+        Line::from(vec![Span::raw(format!("    {}", activity.summary))]),
+    ];
+    if let Some(xray_ref) = &activity.xray_ref {
+        lines.push(Line::from(vec![Span::styled(
+            format!("    detail: {xray_ref}"),
+            Style::default().fg(Color::DarkGray),
+        )]));
+    }
+    lines
 }
 
 fn wrap_body(body: &str) -> Vec<Line<'_>> {

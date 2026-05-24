@@ -35,7 +35,7 @@ fn console_terminal_render_fits_supported_viewports() {
             "missing public conversation panel at {width}x{height}"
         );
         assert!(
-            rendered.contains("Public session:"),
+            rendered.contains("Public conversation:"),
             "missing public transcript header at {width}x{height}"
         );
     }
@@ -68,7 +68,7 @@ fn console_terminal_active_views_fit_without_polluting_transcript() {
             "missing active view {view:?}"
         );
         assert!(
-            !rendered.contains("Public session:"),
+            !rendered.contains("Public conversation:"),
             "active view {view:?} should not duplicate the public transcript"
         );
     }
@@ -79,18 +79,12 @@ fn console_terminal_preserves_public_transcript_clarity() {
     let snapshot = snapshot();
     let rendered = render_snapshot_to_text(&snapshot, 160, 48).expect("rendered console");
 
-    assert!(rendered.contains("user <-> @host"));
-    assert!(rendered.contains("hidden delegation: 3 internal / 1 side-rail"));
+    assert!(rendered.contains("@user <-> @host"));
+    assert!(rendered.contains("Internal work:"));
+    assert!(rendered.contains("Host-managed task cards"));
     assert!(rendered.contains("@user"));
     assert!(rendered.contains("@host"));
-    assert!(
-        !rendered.contains("xray:thread-v08-console-fixture/reviewer"),
-        "internal Xray reference leaked into public transcript"
-    );
-    assert!(
-        !rendered.contains("Reviewing snapshot schema without entering public transcript."),
-        "internal specialist activity leaked into public transcript"
-    );
+    assert!(rendered.contains("Reviewing snapshot schema without entering public transcript."));
 }
 
 #[test]

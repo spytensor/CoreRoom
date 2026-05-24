@@ -146,7 +146,7 @@ cargo test --test console_terminal_qa_test
 ```
 
 Those fixtures render the console at 80 / 120 / 160 / 220 columns, assert that
-lines stay inside the terminal width, verify the public `user <-> @host`
+lines stay inside the terminal width, verify the public `@user <-> @host`
 transcript, and check that the host action permission overlay remains readable.
 PRs that touch the console renderer, navigation, action overlays, or README
 images must link the visual QA evidence document or equivalent manual notes.

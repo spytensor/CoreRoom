@@ -29,7 +29,7 @@ fn console_shell_renders_core_snapshot_facts() {
     assert!(rendered.contains("Sources"));
     assert!(rendered.contains("Conversation"));
     assert!(rendered.contains("Control Rail"));
-    assert!(rendered.contains("user <-> @host"));
+    assert!(rendered.contains("@user <-> @host"));
     assert!(rendered.contains("WO-0242"));
     assert!(rendered.contains("Define CoreRoomSnapshot schema"));
 }
@@ -39,10 +39,12 @@ fn console_shell_keeps_internal_delegation_out_of_public_transcript() {
     let snapshot = snapshot();
     let rendered = render_snapshot_to_text(&snapshot, 180, 48).expect("rendered console");
 
-    assert!(rendered.contains("hidden delegation: 3 internal / 1 side-rail"));
-    assert!(rendered.contains("user <-> @host"));
+    assert!(rendered.contains("Internal work:"));
+    assert!(rendered.contains("3 hidden turns"));
+    assert!(rendered.contains("@user <-> @host"));
+    assert!(rendered.contains("Host-managed task cards"));
     assert!(!rendered.contains("Side rail: active tracker #238"));
-    assert!(!rendered.contains("xray:thread-v08-console-fixture/reviewer"));
+    assert!(rendered.contains("detail: xray:thread-v08-console-fixture/reviewer"));
 }
 
 #[test]
@@ -73,7 +75,7 @@ fn console_shell_renders_active_navigation_view_and_detail_source() {
     assert!(rendered.contains("workorders detail"));
     assert!(rendered.contains("> WO-0242"));
     assert!(rendered.contains("tracker:#238"));
-    assert!(!rendered.contains("Public session:"));
+    assert!(!rendered.contains("Public conversation:"));
 }
 
 #[test]

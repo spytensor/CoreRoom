@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.1 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.2 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -37,7 +37,10 @@
 > QA fixtures for the release path. **v0.9.1** makes that console the real
 > default entrypoint: plain `cr` opens the full-screen console first for an
 > initialized project, then hands off to the REPL; `cr start` skips the console,
-> and `cr console` opens the live local console directly.
+> and `cr console` opens the live local console directly. **v0.9.2** makes the
+> console conversation user-first: public input/output stays in the center pane,
+> host-managed specialist work appears as compact task cards, and meaningless
+> unknown/placeholder state is hidden from the primary room view.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -142,7 +145,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.1
+TAG=v0.9.2
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \

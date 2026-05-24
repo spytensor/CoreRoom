@@ -105,6 +105,12 @@ hand off to the REPL after the user exits the console. This preserves `cr start`
 as the explicit REPL-only path while making the advertised console visible in
 the real default user path.
 
+v0.9.2 clarifies the console surface contract: the center conversation pane is
+reserved for public `@user <-> @host` input/output and direct user-addressed
+specialist replies. Host-managed role-to-role delegation must render as compact
+task cards, side rails, Xray, or logs instead of appending internal work to the
+public conversation.
+
 The full-screen console may be entered explicitly through:
 
 - a REPL command such as `/console`; and/or

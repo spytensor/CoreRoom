@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.2"
+items = [
+  "console conversation is now the public user-to-host surface",
+  "host delegated role work appears as task cards instead of chat noise",
+  "live console hides meaningless unknown counters and placeholder warnings",
+]
+
+[[whats_new]]
 version = "0.9.1"
 items = [
   "bare `cr` opens the full-screen console first, then hands off to the REPL",

@@ -230,7 +230,7 @@ pub fn pane_priorities() -> Vec<PanePriority> {
             ConsolePaneId::PublicConversation,
             0,
             0,
-            "Primary user <-> @host transcript.",
+            "Primary @user <-> @host transcript.",
         ),
         priority(
             ConsolePaneId::ProjectHeader,
@@ -427,7 +427,7 @@ fn decision_for(
             PanePlacement::Center,
             true,
             Some(conversation_columns),
-            "Highest-priority center panel for user <-> @host.".to_owned(),
+            "Highest-priority center panel for @user <-> @host.".to_owned(),
         ),
         ConsolePaneId::Tabs => (
             PanePlacement::Footer,
@@ -643,7 +643,7 @@ fn changes_section(snapshot: &CoreRoomSnapshot) -> RightRailSection {
                 "failing checks",
                 github.failing_checks.to_string(),
                 state_from_count(github.failing_checks as usize),
-                Some("inspect checks before merge".to_owned()),
+                (github.failing_checks > 0).then(|| "inspect checks before merge".to_owned()),
                 None,
             ),
             row(
@@ -721,7 +721,8 @@ fn evidence_section(
         "open evidence",
         incomplete.to_string(),
         state_from_count(incomplete),
-        Some("complete Evidence Packet and tracker row before closure".to_owned()),
+        (incomplete > 0)
+            .then(|| "complete Evidence Packet and tracker row before closure".to_owned()),
         None,
     )];
     rows.extend(
@@ -759,7 +760,7 @@ fn sources_section(snapshot: &CoreRoomSnapshot, breakpoint: ConsoleBreakpoint) -
         "unhealthy",
         unhealthy.to_string(),
         state_from_count(unhealthy),
-        Some("ask before refresh or trust/visibility changes".to_owned()),
+        (unhealthy > 0).then(|| "ask before refresh or trust/visibility changes".to_owned()),
         None,
     )];
     rows.extend(
@@ -855,7 +856,7 @@ fn dirty_state_label(state: DirtyState) -> &'static str {
     match state {
         DirtyState::Clean => "clean",
         DirtyState::Dirty => "dirty",
-        DirtyState::Unknown => "unknown",
+        DirtyState::Unknown => "not observed",
     }
 }
 
