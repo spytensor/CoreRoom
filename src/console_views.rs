@@ -5,7 +5,8 @@
 //! or inventing ownership.
 
 use crate::console_snapshot::{
-    CoreRoomSnapshot, EvidenceClosureState, RoleLaneState, StatusState, WorkLifecycle,
+    CoreRoomSnapshot, EvidenceClosureState, RoleLaneState, SourceHealthState, StatusState,
+    WorkLifecycle,
 };
 
 /// One role row in the Roles view.
@@ -71,6 +72,104 @@ pub struct WorkOrderDetail {
     pub next_action: Option<String>,
     /// Whether the row is ready for closure.
     pub closure_ready: bool,
+}
+
+/// One row in the Gates view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateProgressView {
+    /// WorkOrder id.
+    pub work_order: String,
+    /// Current gate phase.
+    pub current_phase: String,
+    /// Blocked reason when present.
+    pub blocked_reason: Option<String>,
+    /// Required reviews that are still missing.
+    pub missing_reviews: Vec<String>,
+    /// Stale plan hash when detected.
+    pub stale_plan_sha: Option<String>,
+    /// Whether the gate can proceed to signoff.
+    pub signoff_ready: bool,
+    /// Compact health status for table styling.
+    pub status: StatusState,
+    /// Source citations inherited from the bound WorkOrder.
+    pub citations: Vec<String>,
+    /// Detail panel text.
+    pub detail: GateDetailView,
+}
+
+/// Detail panel for a gate row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateDetailView {
+    /// Human-readable freshness marker.
+    pub freshness: String,
+    /// Recommended next action.
+    pub next_action: Option<String>,
+}
+
+/// One row in the Evidence view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceClosureView {
+    /// WorkOrder id.
+    pub work_order: String,
+    /// Evidence packet status.
+    pub status: EvidenceClosureState,
+    /// Missing evidence fields.
+    pub missing_fields: Vec<String>,
+    /// Explicitly unverified items.
+    pub unverified_items: Vec<String>,
+    /// Rollback plan.
+    pub rollback: Option<String>,
+    /// Whether the tracker row/evidence ledger is updated.
+    pub tracker_updated: bool,
+    /// Compact health status for table styling.
+    pub health: StatusState,
+    /// Source citations inherited from the bound WorkOrder.
+    pub citations: Vec<String>,
+    /// Detail panel text.
+    pub detail: EvidenceDetailView,
+}
+
+/// Detail panel for an evidence row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceDetailView {
+    /// Human-readable freshness marker.
+    pub freshness: String,
+    /// Recommended next action.
+    pub next_action: Option<String>,
+    /// Whether evidence can support a completion claim.
+    pub closure_ready: bool,
+}
+
+/// One row in the Sources view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceHealthView {
+    /// Source Registry id.
+    pub source_id: String,
+    /// Source health status.
+    pub status: SourceHealthState,
+    /// Pinned source version when observed.
+    pub pin: Option<String>,
+    /// Trust level label.
+    pub trust_level: String,
+    /// Roles that may see this source.
+    pub visible_roles: Vec<String>,
+    /// Source findings.
+    pub findings: Vec<String>,
+    /// Related WorkOrders.
+    pub related_work_orders: Vec<String>,
+    /// Compact health status for table styling.
+    pub health: StatusState,
+    /// Detail panel text.
+    pub detail: SourceDetailView,
+}
+
+/// Detail panel for a source row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceDetailView {
+    /// Human-readable freshness marker.
+    pub freshness: String,
+    /// Recommended next action.
+    pub next_action: Option<String>,
 }
 
 /// Build the Roles view from snapshot role lanes.
@@ -147,6 +246,96 @@ pub fn build_workorders_view(snapshot: &CoreRoomSnapshot) -> Vec<WorkOrderView> 
                 citations: work.source_citations.clone(),
                 detail,
             }
+        })
+        .collect()
+}
+
+/// Build the Gates view from snapshot gate facts.
+#[must_use]
+pub fn build_gates_view(snapshot: &CoreRoomSnapshot) -> Vec<GateProgressView> {
+    snapshot
+        .gates
+        .iter()
+        .map(|gate| {
+            let citations = work_citations(snapshot, &gate.work_order);
+            let status = gate_status(
+                gate.blocked_reason.as_deref(),
+                &gate.missing_reviews,
+                gate.stale_plan_sha.as_deref(),
+                gate.signoff_ready,
+            );
+            GateProgressView {
+                work_order: gate.work_order.clone(),
+                current_phase: gate.current_phase.clone(),
+                blocked_reason: gate.blocked_reason.clone(),
+                missing_reviews: gate.missing_reviews.clone(),
+                stale_plan_sha: gate.stale_plan_sha.clone(),
+                signoff_ready: gate.signoff_ready,
+                status,
+                citations,
+                detail: GateDetailView {
+                    freshness: gate_freshness(gate.stale_plan_sha.as_deref()).to_owned(),
+                    next_action: gate_next_action(
+                        gate.blocked_reason.as_deref(),
+                        &gate.missing_reviews,
+                        gate.stale_plan_sha.as_deref(),
+                        gate.signoff_ready,
+                    ),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Build the Evidence view from snapshot evidence facts.
+#[must_use]
+pub fn build_evidence_view(snapshot: &CoreRoomSnapshot) -> Vec<EvidenceClosureView> {
+    snapshot
+        .evidence
+        .iter()
+        .map(|evidence| {
+            let health = evidence_health(evidence.status, evidence.tracker_updated);
+            let closure_ready =
+                evidence.status == EvidenceClosureState::Complete && evidence.tracker_updated;
+            EvidenceClosureView {
+                work_order: evidence.work_order.clone(),
+                status: evidence.status,
+                missing_fields: evidence.missing_fields.clone(),
+                unverified_items: evidence.unverified_items.clone(),
+                rollback: evidence.rollback.clone(),
+                tracker_updated: evidence.tracker_updated,
+                health,
+                citations: work_citations(snapshot, &evidence.work_order),
+                detail: EvidenceDetailView {
+                    freshness: evidence_freshness(evidence.status, evidence.tracker_updated)
+                        .to_owned(),
+                    next_action: evidence_next_action(evidence),
+                    closure_ready,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Build the Sources view from snapshot source health facts.
+#[must_use]
+pub fn build_sources_view(snapshot: &CoreRoomSnapshot) -> Vec<SourceHealthView> {
+    snapshot
+        .sources
+        .iter()
+        .map(|source| SourceHealthView {
+            source_id: source.source_id.clone(),
+            status: source.status,
+            pin: source.pin.clone(),
+            trust_level: source.trust_level.clone(),
+            visible_roles: source.visible_roles.clone(),
+            findings: source.findings.clone(),
+            related_work_orders: source.related_work_orders.clone(),
+            health: source_status(source.status),
+            detail: SourceDetailView {
+                freshness: source_freshness(source.status).to_owned(),
+                next_action: source_next_action(source.status, source.pin.as_deref()),
+            },
         })
         .collect()
 }
@@ -236,5 +425,129 @@ fn lifecycle_blocker(lifecycle: WorkLifecycle, ci_state: StatusState) -> Option<
         }
         _ if ci_state == StatusState::Blocking => Some("CI state is blocking".to_owned()),
         _ => None,
+    }
+}
+
+fn work_citations(snapshot: &CoreRoomSnapshot, work_order: &str) -> Vec<String> {
+    snapshot
+        .work
+        .iter()
+        .find(|work| work.id == work_order)
+        .map_or_else(Vec::new, |work| work.source_citations.clone())
+}
+
+fn gate_status(
+    blocked_reason: Option<&str>,
+    missing_reviews: &[String],
+    stale_plan_sha: Option<&str>,
+    signoff_ready: bool,
+) -> StatusState {
+    if blocked_reason.is_some() {
+        StatusState::Blocking
+    } else if !missing_reviews.is_empty() || stale_plan_sha.is_some() || !signoff_ready {
+        StatusState::Warn
+    } else {
+        StatusState::Ok
+    }
+}
+
+fn gate_freshness(stale_plan_sha: Option<&str>) -> &'static str {
+    if stale_plan_sha.is_some() {
+        "stale-plan"
+    } else {
+        "fresh"
+    }
+}
+
+fn gate_next_action(
+    blocked_reason: Option<&str>,
+    missing_reviews: &[String],
+    stale_plan_sha: Option<&str>,
+    signoff_ready: bool,
+) -> Option<String> {
+    if let Some(reason) = blocked_reason {
+        Some(format!("resolve blocked gate: {reason}"))
+    } else if !missing_reviews.is_empty() {
+        Some(format!("collect reviews: {}", missing_reviews.join(", ")))
+    } else if let Some(plan_sha) = stale_plan_sha {
+        Some(format!("refresh stale plan before signoff: {plan_sha}"))
+    } else if !signoff_ready {
+        Some("finish review/signoff evidence before implementation".to_owned())
+    } else {
+        None
+    }
+}
+
+fn evidence_health(status: EvidenceClosureState, tracker_updated: bool) -> StatusState {
+    if !tracker_updated {
+        return StatusState::Blocking;
+    }
+    match status {
+        EvidenceClosureState::Complete => StatusState::Ok,
+        EvidenceClosureState::Incomplete | EvidenceClosureState::Unverified => StatusState::Warn,
+        EvidenceClosureState::Missing => StatusState::Blocking,
+    }
+}
+
+fn evidence_freshness(status: EvidenceClosureState, tracker_updated: bool) -> &'static str {
+    match (status, tracker_updated) {
+        (EvidenceClosureState::Complete, true) => "complete",
+        (EvidenceClosureState::Complete, false) => "tracker-stale",
+        (EvidenceClosureState::Incomplete, _) => "incomplete",
+        (EvidenceClosureState::Missing, _) => "missing",
+        (EvidenceClosureState::Unverified, _) => "unverified",
+    }
+}
+
+fn evidence_next_action(evidence: &crate::console_snapshot::EvidenceSnapshot) -> Option<String> {
+    if evidence.status == EvidenceClosureState::Complete && evidence.tracker_updated {
+        None
+    } else if !evidence.missing_fields.is_empty() {
+        Some(format!(
+            "fill evidence: {}",
+            evidence.missing_fields.join(", ")
+        ))
+    } else if !evidence.unverified_items.is_empty() {
+        Some(format!(
+            "verify items: {}",
+            evidence.unverified_items.join(", ")
+        ))
+    } else if !evidence.tracker_updated {
+        Some("update tracker checkbox and Evidence Ledger".to_owned())
+    } else {
+        Some("complete Evidence Packet before claiming done".to_owned())
+    }
+}
+
+fn source_status(status: SourceHealthState) -> StatusState {
+    match status {
+        SourceHealthState::Pinned => StatusState::Ok,
+        SourceHealthState::Stale => StatusState::Warn,
+        SourceHealthState::Missing
+        | SourceHealthState::TrustChanged
+        | SourceHealthState::VisibilityDenied => StatusState::Blocking,
+    }
+}
+
+fn source_freshness(status: SourceHealthState) -> &'static str {
+    match status {
+        SourceHealthState::Pinned => "pinned",
+        SourceHealthState::Stale => "stale",
+        SourceHealthState::Missing => "missing",
+        SourceHealthState::TrustChanged => "trust-changed",
+        SourceHealthState::VisibilityDenied => "visibility-denied",
+    }
+}
+
+fn source_next_action(status: SourceHealthState, pin: Option<&str>) -> Option<String> {
+    match status {
+        SourceHealthState::Pinned if pin.is_none() => Some("record source pin".to_owned()),
+        SourceHealthState::Pinned => None,
+        SourceHealthState::Stale => Some("ask user before refreshing source pin".to_owned()),
+        SourceHealthState::Missing => Some("restore or remove missing source".to_owned()),
+        SourceHealthState::TrustChanged => Some("confirm trust-level change with user".to_owned()),
+        SourceHealthState::VisibilityDenied => {
+            Some("fix role visibility before using this source".to_owned())
+        }
     }
 }

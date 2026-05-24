@@ -552,6 +552,9 @@ pub struct SourceHealthSnapshot {
     pub source_id: String,
     /// Source health.
     pub status: SourceHealthState,
+    /// Pinned source version when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
     /// Trust level label.
     pub trust_level: String,
     /// Roles that may see this source.
