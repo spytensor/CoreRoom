@@ -5,9 +5,10 @@
 //! or inventing ownership.
 
 use crate::console_snapshot::{
-    CoreRoomSnapshot, EvidenceClosureState, RoleLaneState, SourceHealthState, StatusState,
-    WorkLifecycle,
+    CoreRoomSnapshot, EvidenceClosureState, InternalDelegationState, RoleLaneState,
+    SourceHealthSnapshot, SourceHealthState, StatusState, WorkLifecycle,
 };
+use crate::crep::CrepEvent;
 
 /// One role row in the Roles view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +171,87 @@ pub struct SourceDetailView {
     pub freshness: String,
     /// Recommended next action.
     pub next_action: Option<String>,
+}
+
+/// Filter for the CREP logs view.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CrepLogFilter {
+    /// Restrict to one role.
+    pub role: Option<String>,
+    /// Restrict to one thread id.
+    pub thread_id: Option<String>,
+    /// Restrict to one turn id.
+    pub turn_id: Option<String>,
+    /// Restrict to event type labels such as `role_spoke`.
+    pub event_types: Vec<String>,
+}
+
+/// One row in the CREP logs view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrepLogRow {
+    /// Event type label.
+    pub event_type: String,
+    /// Role if the event is role-scoped.
+    pub role: Option<String>,
+    /// Turn id if present.
+    pub turn_id: Option<String>,
+    /// Thread id if present.
+    pub thread_id: Option<String>,
+    /// Compact event summary.
+    pub summary: String,
+    /// Whether this belongs to internal/delegation/audit context.
+    pub internal: bool,
+    /// Compact health status for table styling.
+    pub status: StatusState,
+}
+
+/// One internal delegation row for Xray views.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InternalDelegationView {
+    /// Delegated role.
+    pub role: String,
+    /// Related WorkOrder.
+    pub work_order: Option<String>,
+    /// Delegation state.
+    pub state: InternalDelegationState,
+    /// Compact summary.
+    pub summary: String,
+    /// Xray/log reference.
+    pub xray_ref: Option<String>,
+}
+
+/// WorkOrder Xray row showing the engineering evidence chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkOrderXrayView {
+    /// WorkOrder id.
+    pub work_order: String,
+    /// WorkOrder title.
+    pub title: String,
+    /// Xray chain steps.
+    pub steps: Vec<XrayStep>,
+    /// Source/citation labels from the WorkOrder and related sources.
+    pub citations: Vec<String>,
+    /// Internal delegations related to this WorkOrder.
+    pub internal_delegations: Vec<InternalDelegationView>,
+    /// Human-readable freshness marker.
+    pub freshness: String,
+    /// Whether the WorkOrder chain supports closure.
+    pub closure_ready: bool,
+}
+
+/// One step in the WorkOrder Xray chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XrayStep {
+    /// Step name such as `issue`, `branch`, or `evidence`.
+    pub name: String,
+    /// Display value.
+    pub value: String,
+    /// Compact status.
+    pub status: StatusState,
+    /// Freshness marker for this step.
+    pub freshness: String,
+    /// Citations proving this step.
+    pub citations: Vec<String>,
 }
 
 /// Build the Roles view from snapshot role lanes.
@@ -338,6 +420,146 @@ pub fn build_sources_view(snapshot: &CoreRoomSnapshot) -> Vec<SourceHealthView> 
             },
         })
         .collect()
+}
+
+/// Build a filtered CREP logs view.
+#[must_use]
+pub fn build_crep_logs_view(events: &[CrepEvent], filter: &CrepLogFilter) -> Vec<CrepLogRow> {
+    events
+        .iter()
+        .map(crep_log_row)
+        .filter(|row| crep_log_matches(row, filter))
+        .collect()
+}
+
+/// Build one WorkOrder Xray view.
+#[must_use]
+pub fn build_workorder_xray_view(
+    snapshot: &CoreRoomSnapshot,
+    work_order: &str,
+) -> Option<WorkOrderXrayView> {
+    let work = snapshot.work.iter().find(|work| work.id == work_order)?;
+    let evidence = snapshot
+        .evidence
+        .iter()
+        .find(|evidence| evidence.work_order == work.id);
+    let related_sources = snapshot
+        .sources
+        .iter()
+        .filter(|source| source.related_work_orders.iter().any(|id| id == &work.id))
+        .collect::<Vec<_>>();
+    let source_status = related_source_status(&related_sources);
+    let source_citations = related_sources
+        .iter()
+        .map(|source| {
+            let pin = source.pin.as_deref().unwrap_or("pin:not-observed");
+            format!("source:{}@{pin}", source.source_id)
+        })
+        .collect::<Vec<_>>();
+    let citations = work
+        .source_citations
+        .iter()
+        .cloned()
+        .chain(source_citations)
+        .collect::<Vec<_>>();
+    let internal_delegations = snapshot
+        .conversation
+        .internal_activity
+        .iter()
+        .filter(|activity| activity.work_order.as_deref() == Some(work.id.as_str()))
+        .map(|activity| InternalDelegationView {
+            role: activity.role.clone(),
+            work_order: activity.work_order.clone(),
+            state: activity.state,
+            summary: activity.summary.clone(),
+            xray_ref: activity.xray_ref.clone(),
+        })
+        .collect::<Vec<_>>();
+    let closure_ready = work.lifecycle == WorkLifecycle::Closed
+        && work.ci_state == StatusState::Ok
+        && work.evidence_state == StatusState::Ok
+        && work.tracker_state == StatusState::Ok
+        && evidence.is_none_or(|evidence| {
+            evidence.status == EvidenceClosureState::Complete && evidence.tracker_updated
+        });
+    Some(WorkOrderXrayView {
+        work_order: work.id.clone(),
+        title: work.title.clone(),
+        steps: vec![
+            xray_step(
+                "workorder",
+                work.id.clone(),
+                status_for_lifecycle(work.lifecycle),
+                lifecycle_freshness(work.lifecycle),
+                vec![format!("work:{}", work.id)],
+            ),
+            xray_step(
+                "issue",
+                work.github_issue
+                    .map_or_else(|| "missing".to_owned(), |issue| format!("#{issue}")),
+                presence_status(work.github_issue.is_some()),
+                presence_freshness(work.github_issue.is_some()),
+                work.github_issue
+                    .map_or_else(Vec::new, |issue| vec![format!("issue:#{issue}")]),
+            ),
+            xray_step(
+                "branch",
+                work.branch.clone().unwrap_or_else(|| "missing".to_owned()),
+                presence_status(work.branch.is_some()),
+                presence_freshness(work.branch.is_some()),
+                work.branch
+                    .as_ref()
+                    .map_or_else(Vec::new, |branch| vec![format!("branch:{branch}")]),
+            ),
+            xray_step(
+                "pr",
+                work.pull_request
+                    .map_or_else(|| "missing".to_owned(), |pr| format!("#{pr}")),
+                presence_status(work.pull_request.is_some()),
+                presence_freshness(work.pull_request.is_some()),
+                work.pull_request
+                    .map_or_else(Vec::new, |pr| vec![format!("pr:#{pr}")]),
+            ),
+            xray_step(
+                "ci",
+                status_label(work.ci_state).to_owned(),
+                work.ci_state,
+                status_freshness(work.ci_state),
+                Vec::new(),
+            ),
+            xray_step(
+                "evidence",
+                evidence.map_or_else(
+                    || status_label(work.evidence_state).to_owned(),
+                    |evidence| evidence_status_label(evidence.status).to_owned(),
+                ),
+                work.evidence_state,
+                evidence.map_or_else(
+                    || status_freshness(work.evidence_state),
+                    |evidence| evidence_freshness(evidence.status, evidence.tracker_updated),
+                ),
+                vec![format!("evidence:{}", work.id)],
+            ),
+            xray_step(
+                "tracker",
+                status_label(work.tracker_state).to_owned(),
+                work.tracker_state,
+                status_freshness(work.tracker_state),
+                vec![format!("tracker:#{}", snapshot.project.tracker_issue)],
+            ),
+            xray_step(
+                "sources",
+                source_count_label(related_sources.len()),
+                source_status,
+                status_freshness(source_status),
+                citations.clone(),
+            ),
+        ],
+        citations,
+        internal_delegations,
+        freshness: xray_freshness(work.lifecycle, work.tracker_state, source_status).to_owned(),
+        closure_ready,
+    })
 }
 
 fn role_status(
@@ -549,5 +771,355 @@ fn source_next_action(status: SourceHealthState, pin: Option<&str>) -> Option<St
         SourceHealthState::VisibilityDenied => {
             Some("fix role visibility before using this source".to_owned())
         }
+    }
+}
+
+fn crep_log_row(event: &CrepEvent) -> CrepLogRow {
+    let event_type = crep_event_type(event).to_owned();
+    let role = crep_event_role(event).map(str::to_owned);
+    let turn_id = crep_event_turn(event).map(str::to_owned);
+    let thread_id = crep_event_thread(event).map(str::to_owned);
+    CrepLogRow {
+        event_type,
+        role,
+        turn_id,
+        thread_id,
+        summary: crep_event_summary(event),
+        internal: crep_event_internal(event),
+        status: crep_event_status(event),
+    }
+}
+
+fn crep_log_matches(row: &CrepLogRow, filter: &CrepLogFilter) -> bool {
+    filter
+        .role
+        .as_ref()
+        .is_none_or(|role| row.role.as_ref() == Some(role))
+        && filter
+            .thread_id
+            .as_ref()
+            .is_none_or(|thread_id| row.thread_id.as_ref() == Some(thread_id))
+        && filter
+            .turn_id
+            .as_ref()
+            .is_none_or(|turn_id| row.turn_id.as_ref() == Some(turn_id))
+        && (filter.event_types.is_empty()
+            || filter
+                .event_types
+                .iter()
+                .any(|event_type| event_type == &row.event_type))
+}
+
+fn crep_event_type(event: &CrepEvent) -> &'static str {
+    match event {
+        CrepEvent::RoleStarted { .. } => "role_started",
+        CrepEvent::RoleSessionUpdated { .. } => "role_session_updated",
+        CrepEvent::TurnDispatched { .. } => "turn_dispatched",
+        CrepEvent::WorkTitle { .. } => "work_title",
+        CrepEvent::RoleSpoke { .. } => "role_spoke",
+        CrepEvent::PhaseAdvanced { .. } => "phase_advanced",
+        CrepEvent::PhaseBlocked { .. } => "phase_blocked",
+        CrepEvent::PlanReviewed { .. } => "plan_reviewed",
+        CrepEvent::PlanOverridden { .. } => "plan_overridden",
+        CrepEvent::RoleOutputDelta { .. } => "role_output_delta",
+        CrepEvent::TurnInterrupted { .. } => "turn_interrupted",
+        CrepEvent::ToolCallProposed { .. } => "tool_call_proposed",
+        CrepEvent::ToolCallExecuted { .. } => "tool_call_executed",
+        CrepEvent::PermissionDenied { .. } => "permission_denied",
+        CrepEvent::RoleStopped { .. } => "role_stopped",
+    }
+}
+
+fn crep_event_role(event: &CrepEvent) -> Option<&str> {
+    match event {
+        CrepEvent::RoleStarted { role, .. }
+        | CrepEvent::RoleSessionUpdated { role, .. }
+        | CrepEvent::TurnDispatched { role, .. }
+        | CrepEvent::WorkTitle { role, .. }
+        | CrepEvent::RoleSpoke { role, .. }
+        | CrepEvent::PhaseBlocked { role, .. }
+        | CrepEvent::PlanReviewed { role, .. }
+        | CrepEvent::PlanOverridden { role, .. }
+        | CrepEvent::RoleOutputDelta { role, .. }
+        | CrepEvent::TurnInterrupted { role, .. }
+        | CrepEvent::ToolCallProposed { role, .. }
+        | CrepEvent::ToolCallExecuted { role, .. }
+        | CrepEvent::PermissionDenied { role, .. }
+        | CrepEvent::RoleStopped { role, .. } => Some(role),
+        CrepEvent::PhaseAdvanced { .. } => None,
+    }
+}
+
+fn crep_event_turn(event: &CrepEvent) -> Option<&str> {
+    match event {
+        CrepEvent::TurnDispatched { turn_id, .. }
+        | CrepEvent::WorkTitle { turn_id, .. }
+        | CrepEvent::RoleSpoke { turn_id, .. }
+        | CrepEvent::RoleOutputDelta { turn_id, .. }
+        | CrepEvent::TurnInterrupted { turn_id, .. }
+        | CrepEvent::ToolCallProposed { turn_id, .. }
+        | CrepEvent::ToolCallExecuted { turn_id, .. }
+        | CrepEvent::PermissionDenied { turn_id, .. } => nonempty_str(turn_id),
+        CrepEvent::RoleStopped { turn_id, .. } => turn_id.as_deref().and_then(nonempty_str),
+        CrepEvent::RoleStarted { .. }
+        | CrepEvent::RoleSessionUpdated { .. }
+        | CrepEvent::PhaseAdvanced { .. }
+        | CrepEvent::PhaseBlocked { .. }
+        | CrepEvent::PlanReviewed { .. }
+        | CrepEvent::PlanOverridden { .. } => None,
+    }
+}
+
+fn crep_event_thread(event: &CrepEvent) -> Option<&str> {
+    match event {
+        CrepEvent::TurnDispatched { thread_id, .. }
+        | CrepEvent::WorkTitle { thread_id, .. }
+        | CrepEvent::RoleSpoke { thread_id, .. }
+        | CrepEvent::RoleOutputDelta { thread_id, .. }
+        | CrepEvent::TurnInterrupted { thread_id, .. }
+        | CrepEvent::ToolCallProposed { thread_id, .. }
+        | CrepEvent::ToolCallExecuted { thread_id, .. }
+        | CrepEvent::PermissionDenied { thread_id, .. } => nonempty_str(thread_id),
+        CrepEvent::RoleStarted { .. }
+        | CrepEvent::RoleSessionUpdated { .. }
+        | CrepEvent::PhaseAdvanced { .. }
+        | CrepEvent::PhaseBlocked { .. }
+        | CrepEvent::PlanReviewed { .. }
+        | CrepEvent::PlanOverridden { .. }
+        | CrepEvent::RoleStopped { .. } => None,
+    }
+}
+
+fn crep_event_summary(event: &CrepEvent) -> String {
+    match event {
+        CrepEvent::RoleStarted {
+            engine,
+            model,
+            session_id,
+            ..
+        } => format!("started {engine}/{model} session {session_id}"),
+        CrepEvent::RoleSessionUpdated { session_id, .. } => {
+            format!("session updated to {session_id}")
+        }
+        CrepEvent::TurnDispatched { queue_position, .. } => {
+            format!("turn dispatched at queue position {queue_position}")
+        }
+        CrepEvent::WorkTitle { title, .. } => title.clone(),
+        CrepEvent::RoleSpoke {
+            text,
+            mentions,
+            outcome,
+            ..
+        } => format!(
+            "{}; mentions: {}; outcome: {}",
+            compact_text(text),
+            mentions.join(", "),
+            outcome.label()
+        ),
+        CrepEvent::PhaseAdvanced {
+            from, to, actor, ..
+        } => {
+            format!("phase advanced {from:?} -> {to:?} by {actor}")
+        }
+        CrepEvent::PhaseBlocked { phase, reason, .. } => {
+            format!("{phase:?} blocked: {reason}")
+        }
+        CrepEvent::PlanReviewed {
+            decision, plan_sha, ..
+        } => format!("plan {plan_sha} reviewed as {decision:?}"),
+        CrepEvent::PlanOverridden { reason, .. } => format!("plan override: {reason}"),
+        CrepEvent::RoleOutputDelta {
+            sequence,
+            text_delta,
+            ..
+        } => {
+            format!("delta #{sequence}: {}", compact_text(text_delta))
+        }
+        CrepEvent::TurnInterrupted { source, .. } => format!("turn interrupted by {source:?}"),
+        CrepEvent::ToolCallProposed {
+            tool_name,
+            tool_use_id,
+            ..
+        } => {
+            format!("proposed {tool_name} ({tool_use_id})")
+        }
+        CrepEvent::ToolCallExecuted {
+            tool_use_id,
+            ok,
+            output_summary,
+            ..
+        } => format!("{tool_use_id} ok={ok}: {output_summary}"),
+        CrepEvent::PermissionDenied {
+            tool_name, reason, ..
+        } => {
+            format!("denied {tool_name}: {reason}")
+        }
+        CrepEvent::RoleStopped { reason, .. } => format!("role stopped: {reason:?}"),
+    }
+}
+
+fn crep_event_internal(event: &CrepEvent) -> bool {
+    !matches!(event, CrepEvent::RoleSpoke { .. })
+}
+
+fn crep_event_status(event: &CrepEvent) -> StatusState {
+    match event {
+        CrepEvent::PhaseBlocked { .. } | CrepEvent::PermissionDenied { .. } => {
+            StatusState::Blocking
+        }
+        CrepEvent::TurnInterrupted { .. } => StatusState::Warn,
+        CrepEvent::ToolCallExecuted { ok, .. } if !ok => StatusState::Blocking,
+        CrepEvent::RoleStopped {
+            reason: crate::crep::StopReason::Crashed | crate::crep::StopReason::TimedOut,
+            ..
+        } => StatusState::Blocking,
+        _ => StatusState::Ok,
+    }
+}
+
+fn nonempty_str(value: &str) -> Option<&str> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn compact_text(text: &str) -> String {
+    const LIMIT: usize = 96;
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.len() <= LIMIT {
+        compact
+    } else {
+        format!("{}...", &compact[..LIMIT])
+    }
+}
+
+fn xray_step(
+    name: impl Into<String>,
+    value: impl Into<String>,
+    status: StatusState,
+    freshness: impl Into<String>,
+    citations: Vec<String>,
+) -> XrayStep {
+    XrayStep {
+        name: name.into(),
+        value: value.into(),
+        status,
+        freshness: freshness.into(),
+        citations,
+    }
+}
+
+fn related_source_status(sources: &[&SourceHealthSnapshot]) -> StatusState {
+    if sources.iter().any(|source| {
+        matches!(
+            source.status,
+            SourceHealthState::Missing
+                | SourceHealthState::TrustChanged
+                | SourceHealthState::VisibilityDenied
+        )
+    }) {
+        StatusState::Blocking
+    } else if sources
+        .iter()
+        .any(|source| source.status == SourceHealthState::Stale)
+    {
+        StatusState::Warn
+    } else if sources.is_empty() {
+        StatusState::Unknown
+    } else {
+        StatusState::Ok
+    }
+}
+
+fn status_for_lifecycle(lifecycle: WorkLifecycle) -> StatusState {
+    match lifecycle {
+        WorkLifecycle::FailedCi | WorkLifecycle::Blocked | WorkLifecycle::MergedTrackerStale => {
+            StatusState::Blocking
+        }
+        WorkLifecycle::InReview | WorkLifecycle::InProgress | WorkLifecycle::Ready => {
+            StatusState::Warn
+        }
+        WorkLifecycle::Closed => StatusState::Ok,
+        WorkLifecycle::NotStarted => StatusState::Unknown,
+    }
+}
+
+fn lifecycle_freshness(lifecycle: WorkLifecycle) -> &'static str {
+    match lifecycle {
+        WorkLifecycle::MergedTrackerStale => "tracker-stale",
+        WorkLifecycle::Closed => "closed",
+        WorkLifecycle::FailedCi => "failed-ci",
+        WorkLifecycle::Blocked => "blocked",
+        WorkLifecycle::InReview => "in-review",
+        WorkLifecycle::InProgress => "in-progress",
+        WorkLifecycle::Ready => "ready",
+        WorkLifecycle::NotStarted => "not-started",
+    }
+}
+
+fn presence_status(present: bool) -> StatusState {
+    if present {
+        StatusState::Ok
+    } else {
+        StatusState::Warn
+    }
+}
+
+fn presence_freshness(present: bool) -> &'static str {
+    if present {
+        "present"
+    } else {
+        "missing"
+    }
+}
+
+fn status_label(status: StatusState) -> &'static str {
+    match status {
+        StatusState::Ok => "ok",
+        StatusState::Warn => "warn",
+        StatusState::Blocking => "blocking",
+        StatusState::Unknown => "unknown",
+    }
+}
+
+fn status_freshness(status: StatusState) -> &'static str {
+    match status {
+        StatusState::Ok => "fresh",
+        StatusState::Warn => "attention",
+        StatusState::Blocking => "blocking",
+        StatusState::Unknown => "not-observed",
+    }
+}
+
+fn evidence_status_label(status: EvidenceClosureState) -> &'static str {
+    match status {
+        EvidenceClosureState::Complete => "complete",
+        EvidenceClosureState::Incomplete => "incomplete",
+        EvidenceClosureState::Missing => "missing",
+        EvidenceClosureState::Unverified => "unverified",
+    }
+}
+
+fn source_count_label(count: usize) -> String {
+    match count {
+        0 => "none".to_owned(),
+        1 => "1 source".to_owned(),
+        count => format!("{count} sources"),
+    }
+}
+
+fn xray_freshness(
+    lifecycle: WorkLifecycle,
+    tracker_state: StatusState,
+    source_status: StatusState,
+) -> &'static str {
+    if lifecycle == WorkLifecycle::MergedTrackerStale || tracker_state == StatusState::Blocking {
+        "tracker-stale"
+    } else if source_status == StatusState::Blocking {
+        "source-blocking"
+    } else if source_status == StatusState::Warn {
+        "source-stale"
+    } else if lifecycle == WorkLifecycle::Closed {
+        "complete"
+    } else {
+        "in-progress"
     }
 }
