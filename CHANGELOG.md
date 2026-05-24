@@ -12,6 +12,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.0] - 2026-05-24
+
+### Added
+
+- **Console data plane foundation (#238, #240-#251).** Added the
+  renderer-independent `CoreRoomSnapshot`, observation/freshness model,
+  conversation visibility model, CREP reducer, role lane snapshots, projection
+  helpers, health selectors, responsive layout decisions, right-rail view
+  model, deterministic README console image generation, and an end-to-end
+  v0.8 dogfood packet proving that console facts remain structural instead of
+  scraped from model prose.
+- **Full-screen CoreRoom Console (#239, #252-#261).** Added the optional
+  K9s-style `cr console --snapshot <PATH>` entry over validated
+  `CoreRoomSnapshot` data. The console opens and exits through a real terminal
+  shell without replacing `cr start`.
+- **Snapshot-backed overview (#254).** The console overview renders project,
+  repository, branch, phase, tracker, host, actionable pulses, and alerts from
+  snapshot facts.
+- **Host-led public conversation panel (#255).** Public transcript rendering
+  keeps the center panel focused on `user <-> @host`, while internal
+  delegation, side-rail notes, and specialist Xray details stay out of the
+  chat unless explicitly surfaced.
+- **Right rail and detailed views (#255-#257).** Added status surfaces for
+  environment, changes, active roles, WorkOrders, gates, evidence closure,
+  sources, freshness, citations, blockers, missing reviews, rollback, and
+  tracker state.
+- **CREP logs and WorkOrder Xray (#258).** Added log filtering by role, thread,
+  turn, and event type plus an Xray chain from WorkOrder through issue, branch,
+  PR, CI, evidence, tracker, sources, and stale tracker paths.
+- **Keyboard navigation and responsive behavior (#259).** Added tab/backtab
+  view switching, row selection, detail open/close, filter/search state, active
+  view rendering, and responsive width coverage for 80 / 120 / 160 / 220
+  column terminals.
+- **Host action overlay (#260).** Added a host-action-backed permission
+  overlay for allowed, denied, blocked, and confirmation-required paths. The
+  console can display proposed actions but does not mutate project state
+  directly.
+- **Terminal QA and README visuals (#261).** Added ratatui TestBackend terminal
+  QA fixtures for supported widths, public transcript clarity checks,
+  permission overlay checks, regenerated README visuals, and a manual visual QA
+  evidence document.
+- **Real local user-case dogfood gate (#291).** Added
+  `scripts/dogfood-v09-user-cases.py`, a release-blocking dogfood harness that
+  builds the real local binary, initializes a temporary user project, checks the
+  generated team roles and host prompt, verifies priors, enters/exits
+  `cr console` through a Unix PTY, and regenerates README images before release
+  readiness can be claimed.
+
+### Changed
+
+- Updated the README, generated screenshots, splash copy, and development
+  guide to describe v0.9 as the first full-screen console release.
+- Tightened release evidence expectations so console/setup/host/visual changes
+  require realistic local dogfood evidence in addition to fmt, tests, clippy,
+  CI, and static render checks.
+
 ## [0.7.0] - 2026-05-23
 
 ### Changed
@@ -1161,7 +1217,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...v0.9.0
 [0.7.0]: https://github.com/spytensor/CoreRoom/compare/v0.5.0...v0.7.0
 [0.5.0]: https://github.com/spytensor/CoreRoom/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/spytensor/CoreRoom/compare/v0.4.3...v0.4.4
