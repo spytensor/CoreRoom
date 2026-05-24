@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.2] - 2026-05-24
+
+### Fixed
+
+- **User-first console conversation (#297).** Reworked the full-screen console
+  conversation pane so it reads as the public `@user <-> @host` surface. Direct
+  user-addressed specialist replies can still appear in the public transcript,
+  but host-managed specialist work now renders as compact task cards.
+- **Noisy live console placeholders (#297).** Removed misleading live-console
+  placeholder warnings: the local room no longer invents a stale WorkOrder or
+  incomplete evidence packet when there is no real WorkOrder, and zero-value
+  unknown counters are hidden from the overview.
+- **Live transcript projection (#297).** `cr console` now replays
+  `.coreroom/messages.jsonl` into the console conversation model so existing
+  public role output and internal delegation activity are projected from real
+  CREP events instead of static placeholder turns.
+
 ## [0.9.1] - 2026-05-24
 
 ### Fixed
@@ -1234,7 +1251,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...v0.9.0
 [0.7.0]: https://github.com/spytensor/CoreRoom/compare/v0.5.0...v0.7.0

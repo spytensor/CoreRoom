@@ -133,7 +133,7 @@ def dogfood_snapshot_console_pty(width: int, height: int) -> None:
         raise DogfoodFailure(f"console PTY exited with {code}\n{output}")
     for token in ["CoreRoom", "Project", "Conversation", "Environment", "Roles", "Evidence", "@host"]:
         require(token, output, "console PTY render")
-    if "user <-> @host" not in output and "user<->@host" not in output:
+    if "@user <-> @host" not in output and "@user<->@host" not in output:
         raise DogfoodFailure("missing public user/host transcript marker in console PTY render")
     print(f"PTY console entered and exited cleanly at {width}x{height}")
 
@@ -151,7 +151,8 @@ def dogfood_live_console_pty(project: Path) -> None:
     )
     if live_code != 0:
         raise DogfoodFailure(f"live console PTY exited with {live_code}\n{live_output}")
-    require("Live CoreRoom session", live_output, "live console PTY render")
+    require("Public conversation", live_output, "live console PTY render")
+    require("open evidence:0", live_output, "live console PTY render")
     print("live PTY console entered without --snapshot at 120x40")
 
 

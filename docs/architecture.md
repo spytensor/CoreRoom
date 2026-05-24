@@ -37,7 +37,10 @@ projection over structural facts such as `CoreRoomSnapshot`, CREP replay,
 WorkOrders, gates, Evidence Packets, source health, and GitHub lifecycle. It
 does not replace `cr start`, the REPL, `@host`, or the engine subprocesses.
 The default console mode is read-only; mutating actions must route through
-`@host` and the existing confirmation/evidence path.
+`@host` and the existing confirmation/evidence path. Starting with v0.9.2, the
+center console pane is the public `@user <-> @host` conversation surface;
+host-managed specialist delegation is rendered as task cards, side-rail state,
+Xray, or logs instead of normal public chat.
 
 ## Role Invariance Principle
 

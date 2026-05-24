@@ -222,8 +222,8 @@ def readme_console_snapshot() -> dict:
     project = snapshot["project"]
     project["branch"] = "main"
     project["dirtyState"] = "dirty"
-    project["version"] = "0.9.1"
-    project["activePhase"] = "v0.9.1 - Console-first Entrypoint"
+    project["version"] = "0.9.2"
+    project["activePhase"] = "v0.9.2 - User-first Console"
     project["trackerIssue"] = 239
 
     runtime = snapshot["runtime"]
@@ -896,7 +896,7 @@ def render_control_room_console() -> None:
 
     box(
         (24, 274, 2376, 1266),
-        "CoreRoom Console · v0.9 full-screen control surface",
+        "CoreRoom Console · v0.9.2 user-first control surface",
         CYAN,
     )
 
