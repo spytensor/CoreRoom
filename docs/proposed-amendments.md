@@ -132,10 +132,10 @@ validated snapshot.
 `cr console` may remain a live read-only dashboard while the unified room is
 under construction.
 
-The unified room must land first behind a non-default entrypoint or explicit
-flag. Bare `cr` must not default to it until real PTY dogfood proves that the
-user can type into the composer, dispatch through the existing routing
-semantics, see responses/status in the same room, and exit safely.
+The unified room landed first behind an explicit flag in v0.9.4. After the
+default dashboard-to-REPL split failed real user expectations, #313 / v0.9.5
+made bare `cr` open the unified room directly. `cr start` remains the
+legacy/direct REPL escape hatch while deeper runtime parity continues.
 
 ### Migration impact
 
@@ -149,6 +149,8 @@ The implementation is staged:
 - #304 adds the live room conversation/task-card model.
 - #305 integrates a live room bridge behind a non-default entrypoint.
 - #306 adds real PTY dogfood before any default-entrypoint decision.
+- #313 makes the unified room the default plain-`cr` entrypoint after real
+  user testing rejected the dashboard-to-REPL split.
 
 ### Decision
 

@@ -308,7 +308,7 @@ pub fn run(project_root: &Path, options: InitOptions) -> Result<()> {
     }
     println!(
         "  {}",
-        "next: cr   ·   use cr start to skip the console   ·   edit .coreroom/roles/<role>/priors.md for deeper priors"
+        "next: cr   ·   use cr start for the legacy REPL   ·   edit .coreroom/roles/<role>/priors.md for deeper priors"
             .dim()
     );
     Ok(())

@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.4 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.5 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -43,11 +43,11 @@
 > unknown/placeholder state is hidden from the primary room view. **v0.9.3**
 > adds role avatars for rails and delegation cards, with safe terminal glyphs
 > by default and optional Nerd Font glyphs through `COREROOM_AVATAR_PACK=nerd-font`.
-> **v0.9.4** adds the staged unified live room path behind
-> `cr console --live-room`: conversation and composer render in the same
-> full-screen terminal surface, bare text routes to `@host`, explicit `@role`
-> tasks route without exiting to the old REPL, and real PTY dogfood now gates
-> the path before it can become the default.
+> **v0.9.4** added the staged unified live room path behind
+> `cr console --live-room`. **v0.9.5** makes that path the default: plain `cr`
+> opens the unified full-screen room, conversation and composer stay in the
+> main surface, dashboard rails update around them, and `cr start` is the
+> explicit legacy/direct REPL escape hatch.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -126,9 +126,9 @@ which CoreRoom drives.
 Default entrypoints:
 
 ```bash
-cr          # console-first room, then REPL after you exit the console
-cr start    # direct REPL, skipping the console
-cr console  # full-screen console only, derived from local project state
+cr          # unified full-screen room: conversation/composer plus dashboard facts
+cr start    # direct legacy REPL escape hatch
+cr console  # read-only dashboard/snapshot inspection surface
 ```
 
 If `cr` conflicts with an existing command in your environment, npm also
@@ -155,7 +155,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.4
+TAG=v0.9.5
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -222,10 +222,12 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr` enters the console-first room, then hands off to the REPL after you
-  exit the console. If `.coreroom/` is missing, an interactive terminal gets
-  the guided setup first.
-- `cr start` enters the REPL directly when you want to skip the console.
+- `cr` enters the unified full-screen room. The center conversation/composer is
+  the primary user surface; project, gate, evidence, source, and role facts are
+  dashboard rails around it. If `.coreroom/` is missing, an interactive
+  terminal gets the guided setup first.
+- `cr start` enters the legacy/direct REPL when you need the old line-oriented
+  escape hatch.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
 - `cr start --fresh` starts clean instead of resuming saved engine sessions.

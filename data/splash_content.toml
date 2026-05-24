@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.5"
+items = [
+  "plain cr now opens the unified live room instead of dashboard-to-REPL",
+  "conversation and composer stay inside the main room surface",
+  "real PTY dogfood types user input through the default cr path",
+]
+
+[[whats_new]]
 version = "0.9.4"
 items = [
   "unified live room path adds a composer inside the full-screen console",

@@ -1,8 +1,8 @@
 //! Full-screen terminal console shell for CoreRoom snapshots.
 //!
-//! v0.9 starts with an explicit, read-only shell. It renders an already-built
-//! [`CoreRoomSnapshot`](crate::console_snapshot::CoreRoomSnapshot) and does not
-//! derive state from chat prose or mutate project files.
+//! v0.9 started with an explicit, read-only shell. The default room now keeps
+//! conversation and composer in the same terminal surface while dashboard facts
+//! remain derived from [`CoreRoomSnapshot`](crate::console_snapshot::CoreRoomSnapshot).
 
 use std::fs;
 use std::io::{self, IsTerminal as _, Write};
@@ -62,7 +62,7 @@ pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
     run_console(&snapshot)
 }
 
-/// Run the non-default live room bridge console for a local project.
+/// Run the unified live room console for a local project.
 pub fn run_live_room_console(project_root: &Path) -> Result<()> {
     let snapshot = crate::console_live::snapshot_from_project(project_root)?;
     run_live_room_console_with_snapshot(snapshot)
@@ -110,7 +110,7 @@ pub fn run_console(snapshot: &CoreRoomSnapshot) -> Result<()> {
 
 fn run_live_room_console_with_snapshot(mut snapshot: CoreRoomSnapshot) -> Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        anyhow::bail!("cr console --live-room requires an interactive TTY");
+        anyhow::bail!("CoreRoom live room requires an interactive TTY");
     }
     let _guard = ConsoleTerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -301,7 +301,7 @@ pub fn render_snapshot_to_text_with_action_overlay(
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
 
-/// Render the non-default live room frame into plain text for tests.
+/// Render the unified live room frame into plain text for tests.
 pub fn render_live_room_to_text(
     snapshot: &CoreRoomSnapshot,
     width: u16,
@@ -351,6 +351,7 @@ fn render_console_frame_with_nav_and_avatar(
         navigator,
         layout_model.right_rail.as_ref(),
         avatar_pack,
+        false,
     );
     render_footer(frame, root[2], snapshot, navigator);
 }
@@ -383,6 +384,7 @@ fn render_live_room_frame_with_nav_and_avatar(
         navigator,
         layout_model.right_rail.as_ref(),
         avatar_pack,
+        true,
     );
     render_composer(frame, root[2], snapshot, composer, bridge);
     render_footer(frame, root[3], snapshot, navigator);
@@ -449,6 +451,7 @@ fn render_body(
     navigator: &ConsoleNavigator,
     right_rail: Option<&crate::console_layout::RightRailViewModel>,
     avatar_pack: RoleAvatarPack,
+    composer_visible: bool,
 ) {
     let has_rail = right_rail.is_some() && area.width >= 120;
     let chunks = if has_rail {
@@ -463,7 +466,14 @@ fn render_body(
             .split(area)
     };
 
-    render_center(frame, chunks[0], snapshot, navigator, avatar_pack);
+    render_center(
+        frame,
+        chunks[0],
+        snapshot,
+        navigator,
+        avatar_pack,
+        composer_visible,
+    );
     if let Some(rail) = right_rail.filter(|_| has_rail) {
         render_right_rail(
             frame,
@@ -481,6 +491,7 @@ fn render_center(
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
     avatar_pack: RoleAvatarPack,
+    composer_visible: bool,
 ) {
     if navigator.active_view != ConsoleView::Overview {
         render_active_view(frame, area, snapshot, navigator, avatar_pack);
@@ -492,7 +503,7 @@ fn render_center(
         .split(area);
     let overview = build_console_overview(snapshot);
     render_overview(frame, chunks[0], &overview);
-    render_conversation(frame, chunks[1], snapshot, avatar_pack);
+    render_conversation(frame, chunks[1], snapshot, avatar_pack, composer_visible);
 }
 
 fn render_active_view(
@@ -682,6 +693,7 @@ fn render_conversation(
     area: Rect,
     snapshot: &CoreRoomSnapshot,
     avatar_pack: RoleAvatarPack,
+    composer_visible: bool,
 ) {
     let panel = build_live_room_conversation(snapshot);
     let mut lines = Vec::new();
@@ -718,9 +730,12 @@ fn render_conversation(
             speaker_span(&snapshot.runtime.host_role, &snapshot.runtime.host_role),
             Span::raw(" "),
         ]));
-        lines.push(Line::from(vec![Span::raw(
-            "  Press q to enter the REPL and type your request. This pane is reserved for user-facing input/output.",
-        )]));
+        let hint = if composer_visible {
+            "  Type in the composer below. Dashboard panes stay derived; this pane is user-facing input/output."
+        } else {
+            "  Open plain `cr` for the composer. This read-only view only shows derived dashboard facts."
+        };
+        lines.push(Line::from(vec![Span::raw(hint)]));
         lines.push(Line::raw(""));
     } else {
         for turn in &panel.public_turns {
@@ -873,7 +888,7 @@ fn render_composer(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Composer · live room bridge"),
+                    .title("Composer · unified live room"),
             )
             .wrap(Wrap { trim: true }),
         area,

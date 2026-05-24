@@ -1,4 +1,4 @@
-//! Non-default live room bridge fixtures.
+//! Unified live room bridge fixtures.
 
 use coreroom::console_actions::route_console_action;
 use coreroom::console_composer::ComposerState;
@@ -79,7 +79,7 @@ fn live_room_blocks_runtime_only_slash_commands_with_clear_message() {
     match action {
         LiveRoomAction::UnsupportedSlash { command, message } => {
             assert_eq!(command, "journal");
-            assert!(message.contains("cr console --live-room"));
+            assert!(message.contains("unified room"));
             assert!(message.contains("cr start"));
         }
         other => panic!("unexpected action: {other:?}"),

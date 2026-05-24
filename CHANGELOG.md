@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.5] - 2026-05-24
+
+### Fixed
+
+- **Default unified room entrypoint (#313).** Fixed the v0.9.4 release
+  mismatch where plain `cr` still opened the read-only dashboard first and
+  then fell through to the old REPL. Plain `cr` now opens the unified live
+  room directly for initialized interactive projects.
+- **No old-REPL fallthrough (#313).** Normal live-room exit now returns to the
+  shell instead of printing `CoreRoom console closed; starting REPL` and
+  showing the legacy splash. `cr start` remains the explicit direct REPL
+  escape hatch.
+- **Default-path PTY dogfood (#313).** The release dogfood now types bare user
+  text and explicit `@role` text through plain `cr`, and fails if the old
+  dashboard-to-REPL path reappears.
+
 ## [0.9.4] - 2026-05-24
 
 ### Added
@@ -1294,7 +1310,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...v0.9.2

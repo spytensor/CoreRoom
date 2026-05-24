@@ -1,4 +1,4 @@
-//! Non-default live room bridge for the unified console path.
+//! Live room bridge for the unified console path.
 //!
 //! This module owns the bridge between the renderer-independent composer and
 //! existing REPL routing semantics. It does not spawn role engines itself and
@@ -13,7 +13,7 @@ use crate::console_snapshot::{
 };
 use crate::repl::{parse_line, Command, PermissionCommand};
 
-/// Stable composer command specs for the non-default live room path.
+/// Stable composer command specs for the live room path.
 #[must_use]
 pub fn live_room_command_specs() -> Vec<ComposerCommandSpec> {
     vec![
@@ -30,7 +30,7 @@ pub fn live_room_command_specs() -> Vec<ComposerCommandSpec> {
     ]
 }
 
-/// State for one non-default live room bridge session.
+/// State for one live room bridge session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveRoomBridge {
     host_role: String,
@@ -171,7 +171,7 @@ impl LiveRoomBridge {
             | Command::Journal(_)
             | Command::Welcome => LiveRoomAction::UnsupportedSlash {
                 command: slash_name(input),
-                message: "not yet available in `cr console --live-room`; use `cr start` until the v0.9.4 dogfood bridge closes parity gaps".to_owned(),
+                message: "not yet available in the unified room; use `cr start` for this legacy REPL command while runtime parity closes".to_owned(),
             },
         }
     }
@@ -306,7 +306,7 @@ fn apply_action_to_snapshot(snapshot: &mut CoreRoomSnapshot, action: &LiveRoomAc
 }
 
 fn live_room_help_message() -> String {
-    "live room bridge supports bare text, explicit @role tasks, @all, /help, /exit, /halt, /fresh, /refresh, /permissions, /allow, /deny, and /host; runtime-only commands still use `cr start` until dogfood closes parity gaps".to_owned()
+    "live room supports bare text, explicit @role tasks, @all, /help, /exit, /halt, /fresh, /refresh, /permissions, /allow, /deny, and /host; legacy-only commands still use `cr start` until runtime parity closes".to_owned()
 }
 
 fn slash_name(input: &str) -> String {

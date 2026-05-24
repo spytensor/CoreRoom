@@ -11,8 +11,8 @@
 //! - `cr role set-owner <name> <owner>` — set role owner
 //! - `cr role set-authority <name> <scope...>` — set role authority
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
-//! - `cr` — enter the console-first room, then continue into the REPL
-//! - `cr start [--project PATH] [--allow-large-priors]` — enter the REPL directly
+//! - `cr` — enter the unified live room for conversation plus dashboard facts
+//! - `cr start [--project PATH] [--allow-large-priors]` — enter the legacy REPL directly
 //! - `cr console [--project PATH] [--snapshot PATH] [--live-room]` — enter the v0.9 full-screen console
 //! - `cr prompt show <role>`     — print a role's effective prompt
 //! - `cr lock`                   — regenerate `.coreroom/priors.lock`
@@ -120,8 +120,8 @@ enum Cmd {
         /// derives a live local snapshot from project config and git state.
         #[arg(long, conflicts_with = "live_room")]
         snapshot: Option<PathBuf>,
-        /// Experimental non-default unified room path with a live composer
-        /// bridge. Keeps `cr console --snapshot` read-only.
+        /// Open the same unified live room used by plain `cr`. Keeps
+        /// `cr console --snapshot` read-only.
         #[arg(long)]
         live_room: bool,
     },
@@ -1363,14 +1363,10 @@ fn run_console_first_default() -> Result<()> {
             .join(coreroom::config::CONFIG_FILE)
             .is_file()
     {
-        match coreroom::console_tui::run_live_console(&project_root) {
-            Ok(()) => {
-                eprintln!(
-                    "CoreRoom console closed; starting REPL. Use `cr start` to skip the console."
-                );
-            }
+        match coreroom::console_tui::run_live_room_console(&project_root) {
+            Ok(()) => return Ok(()),
             Err(error) => {
-                eprintln!("CoreRoom console unavailable ({error:#}); starting REPL.");
+                eprintln!("CoreRoom live room unavailable ({error:#}); starting `cr start`.");
             }
         }
     }
