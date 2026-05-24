@@ -58,7 +58,7 @@ fn live_room_routes_explicit_role_mentions_with_existing_repl_semantics() {
     assert!(snapshot.runtime.roles.iter().any(|role| {
         role.role == "reviewer"
             && role.state == RoleLaneState::Working
-            && role.last_activity.as_deref() == Some("received from room input")
+            && role.last_activity.as_deref() == Some("staged preview route")
     }));
     assert!(snapshot
         .conversation
@@ -131,10 +131,34 @@ fn live_room_frame_renders_room_workspace_and_user_input_together() {
         render_live_room_to_text(&snapshot, 180, 52, &composer, &bridge).expect("render");
 
     assert!(rendered.contains("CoreRoom Workspace"));
+    assert_eq!(rendered.matches("CoreRoom Workspace").count(), 1);
     assert!(rendered.contains("Host-managed task cards"));
-    assert!(rendered.contains("Ask @host"));
-    assert!(rendered.contains("@reviewer received the request"));
+    assert!(rendered.contains("Input @host"));
+    assert!(rendered.contains("@reviewer staged preview route"));
+    assert!(rendered.contains("Not executing a role turn here"));
     assert!(!rendered.contains("Composer"));
     assert!(!rendered.contains("bridge queued"));
     assert!(rendered.contains("@reviewer check the bridge"));
+}
+
+#[test]
+fn live_room_composer_renders_visible_cursor_from_state() {
+    let snapshot = snapshot();
+    let bridge = LiveRoomBridge::from_snapshot(&snapshot);
+    let mut composer = ComposerState::new(
+        bridge.roles().to_vec(),
+        live_room_command_specs(),
+        "Ask @host what to build, review, or fix",
+    );
+
+    let empty =
+        render_live_room_to_text(&snapshot, 180, 52, &composer, &bridge).expect("empty render");
+    assert!(empty.contains("cr > | Ask @host what to build, review, or fix"));
+
+    composer.paste_str("abcd");
+    assert!(composer.move_left());
+    assert!(composer.move_left());
+    let moved =
+        render_live_room_to_text(&snapshot, 180, 52, &composer, &bridge).expect("moved render");
+    assert!(moved.contains("cr > ab|cd"));
 }

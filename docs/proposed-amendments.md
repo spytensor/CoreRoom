@@ -137,6 +137,11 @@ default dashboard-to-REPL split failed real user expectations, #313 / v0.9.5
 made bare `cr` open the unified room directly. `cr start` remains the
 legacy/direct REPL escape hatch while deeper runtime parity continues.
 
+v0.9.7 restores bare `cr` to the executable runtime because the staged
+full-screen bridge did not yet spawn role engines, stream runtime status,
+persist real turns, or surface the mature permission prompt path. The unified
+room can become the default again only after the runtime-parity tracker closes.
+
 ### Migration impact
 
 No project state migration is required. Existing `.coreroom/` state, CREP

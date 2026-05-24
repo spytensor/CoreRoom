@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.6 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.7 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -44,13 +44,12 @@
 > adds role avatars for rails and delegation cards, with safe terminal glyphs
 > by default and optional Nerd Font glyphs through `COREROOM_AVATAR_PACK=nerd-font`.
 > **v0.9.4** added the staged unified live room path behind
-> `cr console --live-room`. **v0.9.5** makes that path the default: plain `cr`
-> opens the unified full-screen room, conversation and composer stay in the
-> main surface, dashboard rails update around them, and `cr start` is the
-> explicit legacy/direct REPL escape hatch. **v0.9.6** corrects the product
-> shape: the default room starts as a current-session CoreRoom Workspace,
-> not a historical transcript; submitted user text appears in the center with
-> `@host` / explicit `@role` routing while dashboard facts stay auxiliary.
+> `cr console --live-room`; **v0.9.5** and **v0.9.6** tested making that
+> staged surface the default. **v0.9.7** restores the truthful default:
+> plain `cr` enters the mature executable runtime, while
+> `cr console --live-room` remains an explicit preview until it owns real
+> role-engine execution, permission prompts, streaming status, and durable
+> turn state.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -129,9 +128,10 @@ which CoreRoom drives.
 Default entrypoints:
 
 ```bash
-cr          # live CoreRoom Workspace: user <-> @host work plus dashboard facts
-cr start    # direct legacy REPL escape hatch
-cr console  # read-only dashboard/snapshot inspection surface
+cr                         # executable CoreRoom runtime
+cr start                   # explicit direct runtime entrypoint
+cr console                 # read-only dashboard/snapshot inspection surface
+cr console --live-room     # staged full-screen room preview
 ```
 
 If `cr` conflicts with an existing command in your environment, npm also
@@ -158,7 +158,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.6
+TAG=v0.9.7
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -225,12 +225,13 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr` enters the unified full-screen room. The center conversation/composer is
-  the primary user surface; project, gate, evidence, source, and role facts are
-  dashboard rails around it. If `.coreroom/` is missing, an interactive
-  terminal gets the guided setup first.
-- `cr start` enters the legacy/direct REPL when you need the old line-oriented
-  escape hatch.
+- `cr` enters the executable CoreRoom runtime. If `.coreroom/` is missing, an
+  interactive terminal gets the guided setup first.
+- `cr start` is the explicit direct-runtime spelling for scripts or muscle
+  memory.
+- `cr console --live-room` opens the staged full-screen room preview. It can
+  render room input and dashboard facts together, but it is not the default
+  until full role-engine execution and permission prompt parity land.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
 - `cr start --fresh` starts clean instead of resuming saved engine sessions.

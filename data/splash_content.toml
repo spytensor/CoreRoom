@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.7"
+items = [
+  "plain cr is back on the executable runtime path",
+  "live-room preview is explicit and no longer claims real execution",
+  "preview composer shows a visible cursor and cleaner workspace labels",
+]
+
+[[whats_new]]
 version = "0.9.6"
 items = [
   "plain cr now opens a current-session CoreRoom workspace, not old transcript history",

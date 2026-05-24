@@ -188,7 +188,7 @@ impl LiveRoomBridge {
                 RoleLaneState::Idle
             };
             if role.role == *target_role {
-                role.last_activity = Some("received from room input".to_owned());
+                role.last_activity = Some("staged preview route".to_owned());
             }
         }
     }
@@ -241,8 +241,8 @@ impl LiveRoomAction {
                 target_role,
                 origin,
                 ..
-            } => format!("queued for @{target_role} via {}", origin.label()),
-            Self::Broadcast { .. } => "broadcast queued for all roles".to_owned(),
+            } => format!("preview-staged for @{target_role} via {}", origin.label()),
+            Self::Broadcast { .. } => "broadcast preview-staged for all roles".to_owned(),
             Self::SupportedSlash { message, .. } | Self::UnsupportedSlash { message, .. } => {
                 message.clone()
             }
@@ -306,7 +306,7 @@ fn apply_action_to_snapshot(snapshot: &mut CoreRoomSnapshot, action: &LiveRoomAc
 }
 
 fn live_room_help_message() -> String {
-    "live room supports bare text, explicit @role tasks, @all, /help, /exit, /halt, /fresh, /refresh, /permissions, /allow, /deny, and /host; legacy-only commands still use `cr start` until runtime parity closes".to_owned()
+    "live room preview supports bare text, explicit @role tasks, @all, /help, and /exit as staged routing; use plain `cr` or `cr start` for real role-engine execution until runtime parity closes".to_owned()
 }
 
 fn slash_name(input: &str) -> String {
