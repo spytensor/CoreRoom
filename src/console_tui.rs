@@ -32,6 +32,7 @@ use crate::console_snapshot::{
     CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationActivity,
     InternalDelegationState, StatusState, WorkLifecycle,
 };
+use crate::role_avatar::{role_label, RoleAvatarPack};
 
 /// Load and validate a TOML-encoded CoreRoom console snapshot.
 pub fn load_snapshot(path: &Path) -> Result<CoreRoomSnapshot> {
@@ -71,7 +72,14 @@ pub fn run_console(snapshot: &CoreRoomSnapshot) -> Result<()> {
 
     loop {
         terminal
-            .draw(|frame| render_console_frame_with_nav(frame, snapshot, &navigator))
+            .draw(|frame| {
+                render_console_frame_with_nav_and_avatar(
+                    frame,
+                    snapshot,
+                    &navigator,
+                    RoleAvatarPack::from_env(),
+                );
+            })
             .context("render console frame")?;
         if event::poll(Duration::from_millis(200)).context("poll console input")? {
             match event::read().context("read console input")? {
@@ -99,6 +107,22 @@ pub fn render_snapshot_to_text(
     render_snapshot_to_text_with_nav(snapshot, width, height, &ConsoleNavigator::default())
 }
 
+/// Render a snapshot into plain text with an explicit role avatar pack.
+pub fn render_snapshot_to_text_with_avatar_pack(
+    snapshot: &CoreRoomSnapshot,
+    width: u16,
+    height: u16,
+    avatar_pack: RoleAvatarPack,
+) -> Result<String> {
+    render_snapshot_to_text_with_nav_and_avatar_pack(
+        snapshot,
+        width,
+        height,
+        &ConsoleNavigator::default(),
+        avatar_pack,
+    )
+}
+
 /// Render a snapshot with an explicit navigation state into plain text.
 pub fn render_snapshot_to_text_with_nav(
     snapshot: &CoreRoomSnapshot,
@@ -106,10 +130,29 @@ pub fn render_snapshot_to_text_with_nav(
     height: u16,
     navigator: &ConsoleNavigator,
 ) -> Result<String> {
+    render_snapshot_to_text_with_nav_and_avatar_pack(
+        snapshot,
+        width,
+        height,
+        navigator,
+        RoleAvatarPack::from_env(),
+    )
+}
+
+/// Render a snapshot with explicit navigation and role avatar state.
+pub fn render_snapshot_to_text_with_nav_and_avatar_pack(
+    snapshot: &CoreRoomSnapshot,
+    width: u16,
+    height: u16,
+    navigator: &ConsoleNavigator,
+    avatar_pack: RoleAvatarPack,
+) -> Result<String> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).context("create test console terminal")?;
     terminal
-        .draw(|frame| render_console_frame_with_nav(frame, snapshot, navigator))
+        .draw(|frame| {
+            render_console_frame_with_nav_and_avatar(frame, snapshot, navigator, avatar_pack);
+        })
         .context("draw test console frame")?;
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
@@ -126,17 +169,23 @@ pub fn render_snapshot_to_text_with_action_overlay(
     let mut terminal = Terminal::new(backend).context("create test console terminal")?;
     terminal
         .draw(|frame| {
-            render_console_frame_with_nav(frame, snapshot, navigator);
+            render_console_frame_with_nav_and_avatar(
+                frame,
+                snapshot,
+                navigator,
+                RoleAvatarPack::from_env(),
+            );
             render_action_overlay(frame, frame.size(), overlay);
         })
         .context("draw test console frame")?;
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
 
-fn render_console_frame_with_nav(
+fn render_console_frame_with_nav_and_avatar(
     frame: &mut Frame<'_>,
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
+    avatar_pack: RoleAvatarPack,
 ) {
     let area = frame.size();
     let layout_model = compute_console_layout(snapshot, area.width);
@@ -156,6 +205,7 @@ fn render_console_frame_with_nav(
         snapshot,
         navigator,
         layout_model.right_rail.as_ref(),
+        avatar_pack,
     );
     render_footer(frame, root[2], snapshot, navigator);
 }
@@ -220,6 +270,7 @@ fn render_body(
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
     right_rail: Option<&crate::console_layout::RightRailViewModel>,
+    avatar_pack: RoleAvatarPack,
 ) {
     let has_rail = right_rail.is_some() && area.width >= 120;
     let chunks = if has_rail {
@@ -234,9 +285,15 @@ fn render_body(
             .split(area)
     };
 
-    render_center(frame, chunks[0], snapshot, navigator);
+    render_center(frame, chunks[0], snapshot, navigator, avatar_pack);
     if let Some(rail) = right_rail.filter(|_| has_rail) {
-        render_right_rail(frame, chunks[1], rail);
+        render_right_rail(
+            frame,
+            chunks[1],
+            rail,
+            &snapshot.runtime.host_role,
+            avatar_pack,
+        );
     }
 }
 
@@ -245,9 +302,10 @@ fn render_center(
     area: Rect,
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
+    avatar_pack: RoleAvatarPack,
 ) {
     if navigator.active_view != ConsoleView::Overview {
-        render_active_view(frame, area, snapshot, navigator);
+        render_active_view(frame, area, snapshot, navigator, avatar_pack);
         return;
     }
     let chunks = Layout::default()
@@ -256,7 +314,7 @@ fn render_center(
         .split(area);
     let overview = build_console_overview(snapshot);
     render_overview(frame, chunks[0], &overview);
-    render_conversation(frame, chunks[1], snapshot);
+    render_conversation(frame, chunks[1], snapshot, avatar_pack);
 }
 
 fn render_active_view(
@@ -264,6 +322,7 @@ fn render_active_view(
     area: Rect,
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
+    avatar_pack: RoleAvatarPack,
 ) {
     let rows = visible_rows(snapshot, &[], navigator);
     let items = if rows.is_empty() {
@@ -274,7 +333,15 @@ fn render_active_view(
     } else {
         rows.iter()
             .enumerate()
-            .map(|(index, row)| active_view_item(index, row, navigator))
+            .map(|(index, row)| {
+                active_view_item(
+                    index,
+                    row,
+                    navigator,
+                    &snapshot.runtime.host_role,
+                    avatar_pack,
+                )
+            })
             .collect::<Vec<_>>()
     };
     let title = format!(
@@ -320,6 +387,8 @@ fn active_view_item<'a>(
     index: usize,
     row: &'a ConsoleVisibleRow,
     navigator: &ConsoleNavigator,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
 ) -> ListItem<'a> {
     let marker = if index == navigator.selected {
         ">"
@@ -329,7 +398,10 @@ fn active_view_item<'a>(
     let mut spans = vec![
         Span::styled(marker, Style::default().fg(Color::Cyan)),
         Span::raw(" "),
-        Span::styled(row.primary.clone(), status_style(row.status)),
+        Span::styled(
+            row_primary_with_avatar(row, host_role, avatar_pack),
+            status_style(row.status),
+        ),
         Span::raw("  "),
         Span::raw(row.secondary.clone()),
     ];
@@ -427,7 +499,12 @@ fn pulse_line(pulse: &OverviewPulse) -> Line<'_> {
     Line::from(spans)
 }
 
-fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
+fn render_conversation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    avatar_pack: RoleAvatarPack,
+) {
     let panel = build_public_conversation(snapshot);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
@@ -487,7 +564,11 @@ fn render_conversation(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSna
             label_style(),
         )]));
         for activity in panel.internal_activity.iter().take(3) {
-            lines.extend(delegation_card_lines(activity));
+            lines.extend(delegation_card_lines(
+                activity,
+                &snapshot.runtime.host_role,
+                avatar_pack,
+            ));
         }
         let remaining = panel.internal_activity.len().saturating_sub(3);
         if remaining > 0 {
@@ -510,11 +591,13 @@ fn render_right_rail(
     frame: &mut Frame<'_>,
     area: Rect,
     rail: &crate::console_layout::RightRailViewModel,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
 ) {
     let items = rail
         .sections
         .iter()
-        .flat_map(section_to_items)
+        .flat_map(|section| section_to_items(section, host_role, avatar_pack))
         .collect::<Vec<_>>();
     frame.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title("Control Rail")),
@@ -522,7 +605,11 @@ fn render_right_rail(
     );
 }
 
-fn section_to_items(section: &RightRailSection) -> Vec<ListItem<'_>> {
+fn section_to_items(
+    section: &RightRailSection,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
+) -> Vec<ListItem<'static>> {
     let mut items = vec![ListItem::new(Line::from(vec![Span::styled(
         section.title.clone(),
         Style::default()
@@ -530,11 +617,9 @@ fn section_to_items(section: &RightRailSection) -> Vec<ListItem<'_>> {
             .add_modifier(Modifier::BOLD),
     )]))];
     for row in &section.rows {
+        let label = row_label_with_avatar(section, &row.label, host_role, avatar_pack);
         let mut spans = vec![
-            Span::styled(
-                format!("  {}", row.label),
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(format!("  {label}"), Style::default().fg(Color::White)),
             Span::raw(": "),
             status_value_span(&row.value, row.status),
         ];
@@ -592,7 +677,7 @@ fn render_footer(
     frame.render_widget(Paragraph::new(vec![footer]), area);
 }
 
-fn status_value_span(value: &str, status: Option<StatusState>) -> Span<'_> {
+fn status_value_span(value: &str, status: Option<StatusState>) -> Span<'static> {
     Span::styled(
         value.to_owned(),
         status_style(status.unwrap_or(StatusState::Unknown)),
@@ -637,7 +722,11 @@ fn is_public_specialist(speaker: &str, host_role: &str) -> bool {
     speaker != "user" && speaker != host_role && speaker != "host"
 }
 
-fn delegation_card_lines(activity: &InternalDelegationActivity) -> Vec<Line<'_>> {
+fn delegation_card_lines(
+    activity: &InternalDelegationActivity,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
+) -> Vec<Line<'static>> {
     let state_style = match activity.state {
         InternalDelegationState::Blocked => Style::default().fg(Color::Red),
         InternalDelegationState::Completed => Style::default().fg(Color::Green),
@@ -648,7 +737,7 @@ fn delegation_card_lines(activity: &InternalDelegationActivity) -> Vec<Line<'_>>
     let mut header = vec![
         Span::styled("  [", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!("@{}", activity.role),
+            role_label(&activity.role, host_role, avatar_pack),
             Style::default().fg(Color::Cyan),
         ),
         Span::styled("] ", Style::default().fg(Color::DarkGray)),
@@ -675,6 +764,32 @@ fn delegation_card_lines(activity: &InternalDelegationActivity) -> Vec<Line<'_>>
         )]));
     }
     lines
+}
+
+fn row_primary_with_avatar(
+    row: &ConsoleVisibleRow,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
+) -> String {
+    if let Some(role) = row.id.strip_prefix("role:") {
+        role_label(role, host_role, avatar_pack)
+    } else {
+        row.primary.clone()
+    }
+}
+
+fn row_label_with_avatar(
+    section: &RightRailSection,
+    label: &str,
+    host_role: &str,
+    avatar_pack: RoleAvatarPack,
+) -> String {
+    if section.kind == crate::console_layout::RightRailSectionKind::ActiveRoles {
+        if let Some(role) = label.strip_prefix('@') {
+            return role_label(role, host_role, avatar_pack);
+        }
+    }
+    label.to_owned()
 }
 
 fn wrap_body(body: &str) -> Vec<Line<'_>> {

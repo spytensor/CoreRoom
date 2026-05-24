@@ -57,6 +57,7 @@ def main() -> int:
         dogfood_live_console_pty(project)
 
     dogfood_snapshot_console_pty(width=120, height=40)
+    dogfood_nerd_font_avatar_pack()
     dogfood_readme_images()
 
     print("\nDOGFOOD PASS: v0.9 local user-case gate completed")
@@ -131,7 +132,16 @@ def dogfood_snapshot_console_pty(width: int, height: int) -> None:
     )
     if code != 0:
         raise DogfoodFailure(f"console PTY exited with {code}\n{output}")
-    for token in ["CoreRoom", "Project", "Conversation", "Environment", "Roles", "Evidence", "@host"]:
+    for token in [
+        "CoreRoom",
+        "Project",
+        "Conversation",
+        "Environment",
+        "Roles",
+        "Evidence",
+        "@host",
+        "◉",
+    ]:
         require(token, output, "console PTY render")
     if "@user <-> @host" not in output and "@user<->@host" not in output:
         raise DogfoodFailure("missing public user/host transcript marker in console PTY render")
@@ -154,6 +164,27 @@ def dogfood_live_console_pty(project: Path) -> None:
     require("Public conversation", live_output, "live console PTY render")
     require("open evidence:0", live_output, "live console PTY render")
     print("live PTY console entered without --snapshot at 120x40")
+
+
+def dogfood_nerd_font_avatar_pack() -> None:
+    print("\n== Scenario: opt-in Nerd Font role avatar pack")
+    output, code = run_pty(
+        [str(BIN), "console", "--snapshot", str(SNAPSHOT)],
+        cwd=ROOT,
+        width=120,
+        height=40,
+        send_when_seen=b"CoreRoom",
+        send_bytes=b"q",
+        timeout=12,
+        env_extra={"COREROOM_AVATAR_PACK": "nerd-font"},
+    )
+    if code != 0:
+        raise DogfoodFailure(f"Nerd Font console PTY exited with {code}\n{output}")
+    require("@host", output, "Nerd Font console PTY keeps role name")
+    require("\U000f09d1", output, "Nerd Font console PTY host avatar")
+    if "@user <-> @host" not in output and "@user<->@host" not in output:
+        raise DogfoodFailure("Nerd Font mode polluted or removed the public conversation marker")
+    print("Nerd Font avatar pack rendered through real PTY while keeping @role text")
 
 
 def dogfood_readme_images() -> None:
@@ -213,12 +244,15 @@ def run_pty(
     send_when_seen: bytes,
     send_bytes: bytes,
     timeout: int,
+    env_extra: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     print(f"$ {shell_join(cmd)}  # PTY {width}x{height}, send {send_bytes!r}")
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
     env = os.environ.copy()
     env.update({"TERM": "xterm-256color", "COLUMNS": str(width), "LINES": str(height)})
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
