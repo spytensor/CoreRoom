@@ -14,6 +14,7 @@ pub mod config;
 pub mod config_cmd;
 pub mod config_layered;
 pub mod console_actions;
+pub mod console_composer;
 pub mod console_conversation;
 pub mod console_health;
 pub mod console_layout;
