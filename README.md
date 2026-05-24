@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.0 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.1 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -32,9 +32,12 @@
 > **v0.8.0** built the console data plane: snapshots, responsive layout,
 > public transcript visibility, role/work/gate/evidence/source views,
 > observation-backed freshness, and dogfood evidence. **v0.9.0** adds the
-> optional K9s-style full-screen console: read-only ratatui rendering,
+> first K9s-style full-screen console: read-only ratatui rendering,
 > navigation/detail panes, Xray/log views, host action overlays, and terminal
-> QA fixtures for the release path.
+> QA fixtures for the release path. **v0.9.1** makes that console the real
+> default entrypoint: plain `cr` opens the full-screen console first for an
+> initialized project, then hands off to the REPL; `cr start` skips the console,
+> and `cr console` opens the live local console directly.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -107,6 +110,14 @@ That's it. `cr` is now on your PATH. Same install story as
 `@anthropic-ai/claude-code`, `@openai/codex`, and `@google/gemini-cli` —
 which CoreRoom drives.
 
+Default entrypoints:
+
+```bash
+cr          # console-first room, then REPL after you exit the console
+cr start    # direct REPL, skipping the console
+cr console  # full-screen console only, derived from local project state
+```
+
 If `cr` conflicts with an existing command in your environment, npm also
 installs `coreroom` as a long-form alias for the same binary.
 
@@ -131,7 +142,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.0
+TAG=v0.9.1
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -167,7 +178,7 @@ CoreRoom never ships credentials and never calls the Anthropic / OpenAI /
 Google APIs directly. It drives whatever `claude`, `codex`, and `gemini`
 binaries are already on your `PATH`, using whichever auth (subscription,
 Console, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) you've configured
-for them. If `cr start` says it can't find an engine, install / log into
+for them. If `cr` or `cr start` says it can't find an engine, install / log into
 that engine's own CLI and try again.
 
 > **Heads-up — Anthropic billing change effective 2026-06-15.** Anthropic
@@ -198,8 +209,10 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr` and `cr start` both enter the room; if `.coreroom/` is missing, an
-  interactive terminal gets the guided setup first.
+- `cr` enters the console-first room, then hands off to the REPL after you
+  exit the console. If `.coreroom/` is missing, an interactive terminal gets
+  the guided setup first.
+- `cr start` enters the REPL directly when you want to skip the console.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
 - `cr start --fresh` starts clean instead of resuming saved engine sessions.

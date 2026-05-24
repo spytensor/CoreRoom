@@ -222,8 +222,8 @@ def readme_console_snapshot() -> dict:
     project = snapshot["project"]
     project["branch"] = "main"
     project["dirtyState"] = "dirty"
-    project["version"] = "0.9.0"
-    project["activePhase"] = "v0.9.0 - Full-screen Console"
+    project["version"] = "0.9.1"
+    project["activePhase"] = "v0.9.1 - Console-first Entrypoint"
     project["trackerIssue"] = 239
 
     runtime = snapshot["runtime"]

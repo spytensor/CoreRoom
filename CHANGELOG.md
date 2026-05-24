@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.1] - 2026-05-24
+
+### Fixed
+
+- **Console-first user entrypoint (#295).** Fixed the v0.9 release mismatch
+  where the full-screen console existed only behind
+  `cr console --snapshot <PATH>` while plain `cr` still opened the legacy REPL
+  directly. Plain `cr` now opens the full-screen console first for initialized
+  projects, then hands off to the REPL after the user exits the console.
+- **Live local console snapshots (#295).** `cr console` now works without a
+  fixture path by deriving a conservative snapshot from `.coreroom/config.toml`,
+  git branch/head/dirty state, and configured roles. `cr console --snapshot`
+  remains supported for fixture, debug, and recovery use.
+- **Real default-path dogfood (#295).** Extended the v0.9 dogfood script to run
+  the actual user path through a PTY: plain `cr` renders the console, exits the
+  console, reaches the REPL, and exits cleanly.
+
 ## [0.9.0] - 2026-05-24
 
 ### Added
@@ -1217,7 +1234,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...v0.9.0
 [0.7.0]: https://github.com/spytensor/CoreRoom/compare/v0.5.0...v0.7.0
 [0.5.0]: https://github.com/spytensor/CoreRoom/compare/v0.4.4...v0.5.0

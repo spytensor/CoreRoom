@@ -44,9 +44,20 @@ pub fn load_snapshot(path: &Path) -> Result<CoreRoomSnapshot> {
     Ok(snapshot)
 }
 
+/// Run the interactive read-only full-screen console for a live local project.
+pub fn run_live_console(project_root: &Path) -> Result<()> {
+    let snapshot = crate::console_live::snapshot_from_project(project_root)?;
+    run_console(&snapshot)
+}
+
 /// Run the interactive read-only full-screen console for a snapshot file.
 pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
     let snapshot = load_snapshot(snapshot_path)?;
+    run_console(&snapshot)
+}
+
+/// Run the interactive read-only full-screen console for a validated snapshot.
+pub fn run_console(snapshot: &CoreRoomSnapshot) -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         anyhow::bail!("cr console requires an interactive TTY");
     }
@@ -59,7 +70,7 @@ pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
 
     loop {
         terminal
-            .draw(|frame| render_console_frame_with_nav(frame, &snapshot, &navigator))
+            .draw(|frame| render_console_frame_with_nav(frame, snapshot, &navigator))
             .context("render console frame")?;
         if event::poll(Duration::from_millis(200)).context("poll console input")? {
             match event::read().context("read console input")? {
@@ -67,7 +78,7 @@ pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
                     break;
                 }
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    let row_count = visible_rows(&snapshot, &[], &navigator).len();
+                    let row_count = visible_rows(snapshot, &[], &navigator).len();
                     navigator.apply_key(key.code, key.modifiers, row_count);
                 }
                 _ => {}
