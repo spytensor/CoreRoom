@@ -151,6 +151,19 @@ transcript, and check that the host action permission overlay remains readable.
 PRs that touch the console renderer, navigation, action overlays, or README
 images must link the visual QA evidence document or equivalent manual notes.
 
+Before a console release, run the real local user-case dogfood gate:
+
+```bash
+python3 scripts/dogfood-v09-user-cases.py
+```
+
+This is intentionally not a syntax-level check. It builds the real local
+binary, initializes a temporary user project, inspects the generated team
+roles and host prompt, verifies priors, enters `cr console` through a PTY,
+regenerates README images, and fails if those user-visible paths regress.
+Release evidence must include this command when console, setup/init, host
+control, role prompt composition, or README visual behavior changed.
+
 For the role expansion picker specifically, run:
 
 ```bash
