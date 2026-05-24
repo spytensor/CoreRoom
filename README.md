@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.3 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.4 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -43,6 +43,11 @@
 > unknown/placeholder state is hidden from the primary room view. **v0.9.3**
 > adds role avatars for rails and delegation cards, with safe terminal glyphs
 > by default and optional Nerd Font glyphs through `COREROOM_AVATAR_PACK=nerd-font`.
+> **v0.9.4** adds the staged unified live room path behind
+> `cr console --live-room`: conversation and composer render in the same
+> full-screen terminal surface, bare text routes to `@host`, explicit `@role`
+> tasks route without exiting to the old REPL, and real PTY dogfood now gates
+> the path before it can become the default.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -150,7 +155,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.3
+TAG=v0.9.4
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
