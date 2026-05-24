@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.4"
+items = [
+  "unified live room path adds a composer inside the full-screen console",
+  "bare text and explicit @role tasks route without leaving the room",
+  "real PTY dogfood now proves live-room input before defaulting it",
+]
+
+[[whats_new]]
 version = "0.9.3"
 items = [
   "role avatars now identify specialists in rails and task cards",

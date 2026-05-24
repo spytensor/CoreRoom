@@ -12,6 +12,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.4] - 2026-05-24
+
+### Added
+
+- **Unified full-screen room architecture (#301, #302).** Accepted A-021,
+  making conversation and composer the primary CoreRoom surface while dashboard
+  panels remain derived protocol-backed facts.
+- **Renderer-independent composer (#303).** Added a reusable console composer
+  state model for text input, cursor movement, paste, multiline buffers,
+  completions, and submission state.
+- **Live room conversation model (#304).** Added public user/host turns,
+  user-addressed specialist turns, and host-managed internal task cards so
+  specialist work does not pollute the main conversation.
+- **Non-default live room bridge (#305).** Added `cr console --live-room` as a
+  staged unified room path that routes bare text to `@host`, explicit `@role`
+  messages to that role, and clear fallback messages for runtime-only slash
+  commands.
+- **Real live-room PTY dogfood (#306).** Extended the release dogfood script to
+  open `cr console --live-room` in a real PTY from an initialized project, type
+  user input, route `@reviewer`, verify unsupported `/journal` guidance, and
+  exit without falling through to the old REPL.
+
+### Changed
+
+- `cr console --snapshot` remains the read-only debug/recovery renderer, while
+  the unified room path stays non-default until role execution and permission
+  prompt parity are proven in the same full-screen surface.
+- Release evidence now requires the v0.9.4 live-room PTY scenario for console
+  changes that affect user input, routing, or dashboard/conversation coupling.
+
 ## [0.9.3] - 2026-05-24
 
 ### Added
@@ -1264,7 +1294,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...v0.9.1
