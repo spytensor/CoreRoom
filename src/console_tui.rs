@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::{CrosstermBackend, TestBackend};
@@ -23,6 +23,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::console_actions::ConsolePermissionOverlay;
+use crate::console_composer::{ComposerState, ComposerSubmitOutcome};
 use crate::console_conversation::{
     build_live_room_conversation, InternalTaskCard, LiveRoomTurnKind,
 };
@@ -30,6 +31,7 @@ use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
+use crate::console_room::{live_room_command_specs, LiveRoomAction, LiveRoomBridge};
 use crate::console_snapshot::{
     CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, StatusState,
     WorkLifecycle,
@@ -58,6 +60,12 @@ pub fn run_live_console(project_root: &Path) -> Result<()> {
 pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
     let snapshot = load_snapshot(snapshot_path)?;
     run_console(&snapshot)
+}
+
+/// Run the non-default live room bridge console for a local project.
+pub fn run_live_room_console(project_root: &Path) -> Result<()> {
+    let snapshot = crate::console_live::snapshot_from_project(project_root)?;
+    run_live_room_console_with_snapshot(snapshot)
 }
 
 /// Run the interactive read-only full-screen console for a validated snapshot.
@@ -97,6 +105,116 @@ pub fn run_console(snapshot: &CoreRoomSnapshot) -> Result<()> {
         }
     }
     terminal.show_cursor().context("restore console cursor")?;
+    Ok(())
+}
+
+fn run_live_room_console_with_snapshot(mut snapshot: CoreRoomSnapshot) -> Result<()> {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        anyhow::bail!("cr console --live-room requires an interactive TTY");
+    }
+    let _guard = ConsoleTerminalGuard::enter()?;
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend).context("create live room terminal")?;
+    terminal.clear().context("clear live room terminal")?;
+    let navigator = ConsoleNavigator::default();
+    let mut bridge = LiveRoomBridge::from_snapshot(&snapshot);
+    let mut composer = ComposerState::new(
+        bridge.roles().to_vec(),
+        live_room_command_specs(),
+        "type a task - @role - /help - /exit",
+    );
+    loop {
+        terminal
+            .draw(|frame| {
+                render_live_room_frame_with_nav_and_avatar(
+                    frame,
+                    &snapshot,
+                    &navigator,
+                    RoleAvatarPack::from_env(),
+                    &composer,
+                    &bridge,
+                );
+            })
+            .context("render live room frame")?;
+        if event::poll(Duration::from_millis(120)).context("poll live room input")? {
+            match event::read().context("read live room input")? {
+                Event::Paste(text) => composer.paste_str(&text),
+                Event::Key(key)
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+                {
+                    match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            break;
+                        }
+                        KeyCode::Char('d')
+                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                                && composer.input().is_empty() =>
+                        {
+                            break;
+                        }
+                        KeyCode::Enter
+                            if key
+                                .modifiers
+                                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+                        {
+                            composer.insert_newline();
+                        }
+                        KeyCode::Enter => match composer.submit() {
+                            ComposerSubmitOutcome::Submitted(input) => {
+                                let action = bridge.submit(&mut snapshot, &input)?;
+                                composer.set_submission_state(
+                                    crate::console_composer::ComposerSubmissionState::Idle,
+                                );
+                                if action == LiveRoomAction::Exit {
+                                    break;
+                                }
+                            }
+                            ComposerSubmitOutcome::CompletionAccepted
+                            | ComposerSubmitOutcome::Noop => {}
+                        },
+                        KeyCode::Tab | KeyCode::Down if composer.cycle_completion() => {}
+                        KeyCode::BackTab | KeyCode::Up if composer.cycle_completion_back() => {}
+                        KeyCode::Esc if composer.dismiss_completion() => {}
+                        KeyCode::Esc if composer.input().is_empty() => break,
+                        KeyCode::Backspace => {
+                            let _ = composer.backspace();
+                        }
+                        KeyCode::Delete => {
+                            let _ = composer.delete();
+                        }
+                        KeyCode::Left => {
+                            let _ = composer.move_left();
+                        }
+                        KeyCode::Right if composer.view_model().ghost_suffix.is_some() => {
+                            let _ = composer.accept_completion();
+                        }
+                        KeyCode::Right => {
+                            let _ = composer.move_right();
+                        }
+                        KeyCode::Home => {
+                            let _ = composer.move_home();
+                        }
+                        KeyCode::End => {
+                            let _ = composer.move_end();
+                        }
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            composer.clear();
+                        }
+                        KeyCode::Char(ch)
+                            if !key
+                                .modifiers
+                                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                        {
+                            composer.insert_char(ch);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    terminal.show_cursor().context("restore live room cursor")?;
     Ok(())
 }
 
@@ -183,6 +301,31 @@ pub fn render_snapshot_to_text_with_action_overlay(
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
 
+/// Render the non-default live room frame into plain text for tests.
+pub fn render_live_room_to_text(
+    snapshot: &CoreRoomSnapshot,
+    width: u16,
+    height: u16,
+    composer: &ComposerState,
+    bridge: &LiveRoomBridge,
+) -> Result<String> {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).context("create test live room terminal")?;
+    terminal
+        .draw(|frame| {
+            render_live_room_frame_with_nav_and_avatar(
+                frame,
+                snapshot,
+                &ConsoleNavigator::default(),
+                RoleAvatarPack::from_env(),
+                composer,
+                bridge,
+            );
+        })
+        .context("draw test live room frame")?;
+    Ok(buffer_to_string(terminal.backend().buffer()))
+}
+
 fn render_console_frame_with_nav_and_avatar(
     frame: &mut Frame<'_>,
     snapshot: &CoreRoomSnapshot,
@@ -210,6 +353,39 @@ fn render_console_frame_with_nav_and_avatar(
         avatar_pack,
     );
     render_footer(frame, root[2], snapshot, navigator);
+}
+
+fn render_live_room_frame_with_nav_and_avatar(
+    frame: &mut Frame<'_>,
+    snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
+    avatar_pack: RoleAvatarPack,
+    composer: &ComposerState,
+    bridge: &LiveRoomBridge,
+) {
+    let area = frame.size();
+    let layout_model = compute_console_layout(snapshot, area.width);
+    let root = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(8),
+            Constraint::Length(4),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    render_header(frame, root[0], snapshot);
+    render_body(
+        frame,
+        root[1],
+        snapshot,
+        navigator,
+        layout_model.right_rail.as_ref(),
+        avatar_pack,
+    );
+    render_composer(frame, root[2], snapshot, composer, bridge);
+    render_footer(frame, root[3], snapshot, navigator);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
@@ -635,6 +811,73 @@ fn section_to_items(
     }
     items.push(ListItem::new(Line::raw("")));
     items
+}
+
+fn render_composer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    composer: &ComposerState,
+    bridge: &LiveRoomBridge,
+) {
+    let view = composer.view_model();
+    let input = if view.input.is_empty() {
+        Span::styled(view.prompt_hint, Style::default().fg(Color::DarkGray))
+    } else {
+        Span::raw(view.input)
+    };
+    let mut lines = vec![Line::from(vec![
+        Span::styled("target ", label_style()),
+        Span::raw(format!("@{}  ", snapshot.runtime.host_role)),
+        Span::styled("state ", label_style()),
+        status_value_span(&format!("{:?}", view.submission_state).to_lowercase(), None),
+        Span::raw("  "),
+        Span::styled("cursor ", label_style()),
+        Span::raw(view.cursor.to_string()),
+    ])];
+    if let Some(action) = bridge.last_action() {
+        lines.push(Line::from(vec![
+            Span::styled("bridge ", label_style()),
+            Span::raw(action.status_line()),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("cr > ", Style::default().fg(Color::Green)),
+        input,
+        view.ghost_suffix.map_or_else(
+            || Span::raw(""),
+            |suffix| Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+        ),
+    ]));
+    if !view.candidates.is_empty() {
+        let labels = view
+            .candidates
+            .iter()
+            .take(4)
+            .map(|candidate| {
+                if candidate.selected {
+                    format!(">{}", candidate.label)
+                } else {
+                    candidate.label.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        lines.push(Line::from(vec![
+            Span::styled("complete ", label_style()),
+            Span::raw(labels),
+        ]));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Composer · live room bridge"),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
 }
 
 fn render_footer(
