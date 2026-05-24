@@ -1,8 +1,13 @@
 //! Ratatui console shell fixtures.
 
+use coreroom::console_actions::route_console_action;
 use coreroom::console_navigation::{ConsoleNavigator, ConsoleView};
 use coreroom::console_snapshot::{ConversationTurn, ConversationVisibility, CoreRoomSnapshot};
-use coreroom::console_tui::{render_snapshot_to_text, render_snapshot_to_text_with_nav};
+use coreroom::console_tui::{
+    render_snapshot_to_text, render_snapshot_to_text_with_action_overlay,
+    render_snapshot_to_text_with_nav,
+};
+use coreroom::host_action::{ActionIntent, HostActionKind, HostActionRequest};
 
 fn snapshot() -> CoreRoomSnapshot {
     toml::from_str(include_str!("fixtures/console_snapshot_v08.toml")).expect("snapshot")
@@ -69,4 +74,32 @@ fn console_shell_renders_active_navigation_view_and_detail_source() {
     assert!(rendered.contains("> WO-0242"));
     assert!(rendered.contains("tracker:#238"));
     assert!(!rendered.contains("Public session:"));
+}
+
+#[test]
+fn console_shell_renders_permission_overlay_as_center_modal() {
+    let snapshot = snapshot();
+    let overlay = route_console_action(HostActionRequest::new(
+        "HA-260",
+        "host",
+        "host",
+        ActionIntent::Execute,
+        HostActionKind::UpdateTracker,
+        "WO-0260",
+        "Console requests tracker update.",
+    ))
+    .expect("overlay");
+    let rendered = render_snapshot_to_text_with_action_overlay(
+        &snapshot,
+        180,
+        48,
+        &ConsoleNavigator::default(),
+        &overlay,
+    )
+    .expect("rendered console");
+
+    assert!(rendered.contains("Host Action"));
+    assert!(rendered.contains("CONFIRMATION REQUIRED"));
+    assert!(rendered.contains("Action: update-tracker"));
+    assert!(rendered.contains("Can execute: false"));
 }
