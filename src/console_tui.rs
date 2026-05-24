@@ -19,9 +19,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
+use crate::console_actions::ConsolePermissionOverlay;
 use crate::console_conversation::build_public_conversation;
 use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
@@ -97,6 +98,25 @@ pub fn render_snapshot_to_text_with_nav(
     let mut terminal = Terminal::new(backend).context("create test console terminal")?;
     terminal
         .draw(|frame| render_console_frame_with_nav(frame, snapshot, navigator))
+        .context("draw test console frame")?;
+    Ok(buffer_to_string(terminal.backend().buffer()))
+}
+
+/// Render a snapshot with an explicit action overlay into plain text.
+pub fn render_snapshot_to_text_with_action_overlay(
+    snapshot: &CoreRoomSnapshot,
+    width: u16,
+    height: u16,
+    navigator: &ConsoleNavigator,
+    overlay: &ConsolePermissionOverlay,
+) -> Result<String> {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).context("create test console terminal")?;
+    terminal
+        .draw(|frame| {
+            render_console_frame_with_nav(frame, snapshot, navigator);
+            render_action_overlay(frame, frame.size(), overlay);
+        })
         .context("draw test console frame")?;
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
@@ -253,6 +273,34 @@ fn render_active_view(
     frame.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title(title)),
         area,
+    );
+}
+
+fn render_action_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &ConsolePermissionOverlay) {
+    let width = area.width.saturating_sub(8).clamp(40, 92);
+    let height = area.height.saturating_sub(6).clamp(8, 13);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let rect = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+    let mut lines = vec![
+        Line::from(vec![Span::styled(
+            overlay.title.clone(),
+            status_style(overlay.status).add_modifier(Modifier::BOLD),
+        )]),
+        Line::raw(""),
+    ];
+    lines.extend(overlay.lines.iter().map(|line| Line::raw(line.clone())));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Host Action"))
+            .wrap(Wrap { trim: true }),
+        rect,
     );
 }
 
