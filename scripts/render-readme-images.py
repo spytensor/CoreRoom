@@ -222,9 +222,9 @@ def readme_console_snapshot() -> dict:
     project = snapshot["project"]
     project["branch"] = "main"
     project["dirtyState"] = "dirty"
-    project["version"] = "0.9.2"
-    project["activePhase"] = "v0.9.2 - User-first Console"
-    project["trackerIssue"] = 239
+    project["version"] = "0.9.3"
+    project["activePhase"] = "v0.9.3 - Role Avatar System"
+    project["trackerIssue"] = 299
 
     runtime = snapshot["runtime"]
     runtime["activeRole"] = "host"
@@ -233,33 +233,33 @@ def readme_console_snapshot() -> dict:
         role_name = role.get("role")
         if role_name == "host":
             role["state"] = "working"
-            role["currentWorkOrder"] = "WO-0261"
+            role["currentWorkOrder"] = "WO-0299"
             role["currentGatePhase"] = "qa"
-            role["lastActivity"] = "Collecting terminal QA evidence"
+            role["lastActivity"] = "Wiring role avatar evidence"
         elif role_name == "qa":
             role["state"] = "reviewing"
-            role["currentWorkOrder"] = "WO-0261"
+            role["currentWorkOrder"] = "WO-0299"
             role["currentGatePhase"] = "qa"
-            role["lastActivity"] = "Checking render widths and overlays"
+            role["lastActivity"] = "Checking safe and Nerd Font avatar modes"
         elif role_name == "reviewer":
             role["state"] = "idle"
-            role["currentWorkOrder"] = "WO-0261"
+            role["currentWorkOrder"] = "WO-0299"
             role["currentGatePhase"] = "review"
-            role["lastActivity"] = "Available for README visual review"
+            role["lastActivity"] = "Available for avatar visibility review"
 
     snapshot["work"] = [
         {
-            "id": "WO-0261",
-            "title": "Terminal QA and README visuals",
+            "id": "WO-0299",
+            "title": "Role Avatar System",
             "phase": "v0.9",
             "epic": "fullscreen-console",
-            "githubIssue": 261,
-            "branch": "feat/v0.9-261-terminal-qa-readme-visuals",
+            "githubIssue": 299,
+            "branch": "feat/v0.9.3-role-avatars",
             "ciState": "unknown",
             "evidenceState": "warn",
             "trackerState": "warn",
             "lifecycle": "in-progress",
-            "sourceCitations": ["tracker:#239", "issue:#261", "amendment:A-020"],
+            "sourceCitations": ["tracker:#239", "issue:#299", "amendment:A-020"],
         },
         {
             "id": "WO-0260",
@@ -306,7 +306,7 @@ def readme_console_snapshot() -> dict:
     ]
     snapshot["gates"] = [
         {
-            "workOrder": "WO-0261",
+            "workOrder": "WO-0299",
             "currentPhase": "qa",
             "missingReviews": [],
             "signoffReady": True,
@@ -320,11 +320,11 @@ def readme_console_snapshot() -> dict:
     ]
     snapshot["evidence"] = [
         {
-            "workOrder": "WO-0261",
+            "workOrder": "WO-0299",
             "status": "incomplete",
             "missingFields": ["PR", "CI", "tracker update"],
-            "unverifiedItems": ["Manual visual QA evidence is still being collected."],
-            "rollback": "Revert the terminal QA and README visual refresh PR.",
+            "unverifiedItems": ["Nerd Font mode still needs release evidence."],
+            "rollback": "Revert the role avatar rendering PR.",
             "trackerUpdated": False,
         },
         {
@@ -341,8 +341,8 @@ def readme_console_snapshot() -> dict:
             "pin": "commit:v0.9-console-head",
             "trustLevel": "project-source",
             "visibleRoles": ["host", "engineer", "reviewer", "qa"],
-            "findings": ["Console renderer, navigation, action overlay, and tests are local facts."],
-            "relatedWorkOrders": ["WO-0261"],
+            "findings": ["Console renderer, navigation, avatar helpers, and tests are local facts."],
+            "relatedWorkOrders": ["WO-0299"],
         },
         {
             "sourceId": "readme-images",
@@ -351,15 +351,15 @@ def readme_console_snapshot() -> dict:
             "trustLevel": "generated",
             "visibleRoles": ["host", "qa"],
             "findings": ["README images are regenerated from this deterministic renderer."],
-            "relatedWorkOrders": ["WO-0261"],
+            "relatedWorkOrders": ["WO-0299"],
         },
     ]
     snapshot["alerts"] = [
         {
             "id": "qa:visual",
-            "title": "Terminal QA evidence required",
+            "title": "Avatar QA evidence required",
             "severity": "warn",
-            "source": "issue:#261",
+            "source": "issue:#299",
         },
         {
             "id": "evidence:tracker",
@@ -400,6 +400,24 @@ def role_color(role: str, state: str) -> tuple[int, int, int]:
     if state == "working":
         return GREEN
     return BLUE
+
+
+def role_avatar(role: str) -> str:
+    return {
+        "host": "◉",
+        "engineer": "◇",
+        "backend": "◇",
+        "reviewer": "◎",
+        "security": "◆",
+        "qa": "△",
+        "sre": "▣",
+        "frontend": "▱",
+        "product": "◌",
+    }.get(role, "○")
+
+
+def role_label(role: str) -> str:
+    return f"{role_avatar(role)} @{role}"
 
 
 def source_color(status: str) -> tuple[int, int, int]:
@@ -465,15 +483,15 @@ def render_boot_dashboard() -> None:
 
     draw_text(draw, (136, 178), "welcome back, Ada", WHITE, FONT)
     roles = [
-        ("@host", "cc", "1M", PURPLE),
-        ("@backend", "cc", "1M", BLUE),
-        ("@security", "codex", "default", SECURITY),
-        ("@ci", "cc", "default", CI),
+        ("host", "cc", "1M", PURPLE),
+        ("backend", "cc", "1M", BLUE),
+        ("security", "codex", "default", SECURITY),
+        ("ci", "cc", "default", CI),
     ]
     y = 243
     for role, engine, model, color in roles:
         bullet(draw, 137, y + 6, color)
-        draw_text(draw, (163, y), role, color, FONT)
+        draw_text(draw, (163, y), role_label(role), color, FONT)
         draw_text(draw, (338, y), engine, MUTED, FONT)
         draw_text(draw, (447, y), "·", DIM, FONT)
         draw_text(draw, (479, y), model, MUTED, FONT)
@@ -889,14 +907,14 @@ def render_control_room_console() -> None:
     draw_text(
         draw,
         (1928, 190),
-        fit_text(draw, f"v{project['version']} · terminal QA snapshot", 385, SMALL_BOLD),
+        fit_text(draw, f"v{project['version']} · role avatar snapshot", 385, SMALL_BOLD),
         GREEN,
         SMALL_BOLD,
     )
 
     box(
         (24, 274, 2376, 1266),
-        "CoreRoom Console · v0.9.2 user-first control surface",
+        "CoreRoom Console · v0.9.3 role identity surface",
         CYAN,
     )
 
@@ -956,7 +974,7 @@ def render_control_room_console() -> None:
         state = role["state"]
         color = role_color(role_name, state)
         bullet(draw, 92, y + 9, color)
-        draw_text(draw, (120, y), f"@{role_name}", color, SMALL_BOLD)
+        draw_text(draw, (120, y), role_label(role_name), color, SMALL_BOLD)
         draw_text(draw, (276, y), engine, MUTED, SMALL)
         draw_text(draw, (352, y), fit_text(draw, state, 160, SMALL), WHITE, SMALL)
         y += 38
@@ -967,7 +985,7 @@ def render_control_room_console() -> None:
     host_turn = public_turns[1] if len(public_turns) > 1 else {"body": "I will preserve a clean public transcript."}
     user_body = ascii_or(
         user_turn.get("body", ""),
-        "@host validate the v0.9 console terminal QA and README visuals",
+        "@host validate the v0.9.3 role avatar system",
     )
     host_body = ascii_or(
         host_turn.get("body", ""),
@@ -998,7 +1016,7 @@ def render_control_room_console() -> None:
     y += 146
     card_left, card_right, card_top, card_bottom = 622, 1614, y, y + 174
     draw.rectangle((card_left, card_top, card_right, card_bottom), outline=PURPLE, width=2)
-    label = " @host working · delegate design review "
+    label = f" {role_label('host')} working · delegate design review "
     draw.rectangle(
         (card_left + 24, card_top - 16, card_left + 24 + text_width(draw, label, FONT), card_top + 15),
         fill=BG,
@@ -1174,7 +1192,7 @@ def render_work_cards() -> None:
         draw,
         732,
         "@ci",
-        "Evidence packet tracks issue #261, PR validation, images, and tracker closure.",
+        "Evidence packet tracks issue #299, avatar QA, images, and tracker closure.",
         CI,
     )
 

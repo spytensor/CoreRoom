@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.3] - 2026-05-24
+
+### Added
+
+- **Role avatars (#299).** Added terminal-safe role avatars for console role
+  rails, role views, and host-managed delegation cards while keeping `@role`
+  names visible as the authoritative identity.
+- **Optional Nerd Font pack (#299).** `COREROOM_AVATAR_PACK=nerd-font` enables
+  a richer avatar pack for users with Nerd Fonts installed; the default remains
+  terminal-safe and does not require custom fonts.
+- **README avatar visuals (#299).** Regenerated the README console imagery to
+  show the v0.9.3 role identity surface.
+
 ## [0.9.2] - 2026-05-24
 
 ### Fixed
@@ -1251,7 +1264,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/spytensor/CoreRoom/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/spytensor/CoreRoom/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/spytensor/CoreRoom/compare/v0.7.0...v0.9.0

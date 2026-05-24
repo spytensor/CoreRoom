@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.3"
+items = [
+  "role avatars now identify specialists in rails and task cards",
+  "Nerd Font avatars are opt-in via COREROOM_AVATAR_PACK=nerd-font",
+  "safe terminal avatars remain the default so role names never disappear",
+]
+
+[[whats_new]]
 version = "0.9.2"
 items = [
   "console conversation is now the public user-to-host surface",

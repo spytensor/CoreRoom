@@ -52,6 +52,7 @@ pub mod prompt_cmd;
 pub mod rename;
 pub mod repl;
 pub mod role;
+pub mod role_avatar;
 pub mod source_graph;
 pub mod source_registry;
 pub mod tracker;

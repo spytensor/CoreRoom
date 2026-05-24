@@ -8,9 +8,10 @@ use coreroom::console_navigation::{ConsoleNavigator, ConsoleView};
 use coreroom::console_snapshot::CoreRoomSnapshot;
 use coreroom::console_tui::{
     render_snapshot_to_text, render_snapshot_to_text_with_action_overlay,
-    render_snapshot_to_text_with_nav,
+    render_snapshot_to_text_with_avatar_pack, render_snapshot_to_text_with_nav,
 };
 use coreroom::host_action::{ActionIntent, HostActionKind, HostActionRequest};
+use coreroom::role_avatar::RoleAvatarPack;
 
 const SUPPORTED_VIEWPORTS: &[(u16, u16)] = &[(80, 30), (120, 40), (160, 48), (220, 54)];
 
@@ -85,6 +86,26 @@ fn console_terminal_preserves_public_transcript_clarity() {
     assert!(rendered.contains("@user"));
     assert!(rendered.contains("@host"));
     assert!(rendered.contains("Reviewing snapshot schema without entering public transcript."));
+}
+
+#[test]
+fn console_terminal_role_avatars_fit_in_safe_and_nerd_font_modes() {
+    let snapshot = snapshot();
+
+    for pack in [RoleAvatarPack::Safe, RoleAvatarPack::NerdFont] {
+        for &(width, height) in SUPPORTED_VIEWPORTS {
+            let rendered = render_snapshot_to_text_with_avatar_pack(&snapshot, width, height, pack)
+                .expect("rendered console");
+
+            assert_terminal_fits(&rendered, width);
+            assert!(rendered.contains("@host"));
+            assert!(rendered.contains("@user <-> @host"));
+            assert!(
+                rendered.contains("@reviewer") || width < 120,
+                "wide console should keep specialist role names visible"
+            );
+        }
+    }
 }
 
 #[test]
