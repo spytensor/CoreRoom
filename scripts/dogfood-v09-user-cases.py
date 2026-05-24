@@ -3,8 +3,9 @@
 
 This script is intentionally heavier than unit tests. It builds the local
 binary, creates a temporary user project, runs real `cr` commands against that
-project, enters the full-screen console through a PTY, and regenerates README
-visual assets. It is meant for release gating, not fast inner-loop testing.
+project, enters the full-screen console through a PTY, exercises the
+non-default unified live-room composer, and regenerates README visual assets.
+It is meant for release gating, not fast inner-loop testing.
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ def main() -> int:
         dogfood_fresh_project(project)
         dogfood_default_cr_entrypoint(project)
         dogfood_live_console_pty(project)
+        dogfood_live_room_composer_pty(project)
 
     dogfood_snapshot_console_pty(width=120, height=40)
     dogfood_nerd_font_avatar_pack()
@@ -164,6 +166,116 @@ def dogfood_live_console_pty(project: Path) -> None:
     require("Public conversation", live_output, "live console PTY render")
     require("open evidence:0", live_output, "live console PTY render")
     print("live PTY console entered without --snapshot at 120x40")
+
+
+def dogfood_live_room_composer_pty(project: Path) -> None:
+    print("\n== Scenario: real PTY unified live room composer")
+    output, code = run_pty_scripted_inputs(
+        [str(BIN), "console", "--live-room"],
+        cwd=project,
+        width=160,
+        height=48,
+        wait_for=b"Composer",
+        inputs=[
+            b"validate unified room from real pty\r",
+            b"@reviewer check explicit routing\r",
+            b"/journal reviewer\r",
+            b"/exit\r",
+        ],
+        timeout=24,
+    )
+    if code != 0:
+        raise DogfoodFailure(f"live-room PTY exited with {code}\n{output}")
+    for token in [
+        "CoreRoom",
+        "Project",
+        "Conversation",
+        "Composer",
+    ]:
+        require(token, output, "live-room PTY composer flow")
+    for token in [
+        "Control Rail",
+        "validate unified room from real pty",
+        "queued for @host",
+        "@reviewer check explicit routing",
+        "explicit @role mention",
+        "not yet available in `cr console --live-room`",
+        "cr start",
+    ]:
+        require_compact(token, output, "live-room PTY composer flow")
+    if "CoreRoom console closed; starting REPL" in output:
+        raise DogfoodFailure("live-room PTY unexpectedly fell through to the old REPL")
+    print("live-room PTY accepted user input, routed @host/@reviewer, and exited in-room")
+
+
+def run_pty_scripted_inputs(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    width: int,
+    height: int,
+    wait_for: bytes,
+    inputs: list[bytes],
+    timeout: int,
+) -> tuple[str, int]:
+    print(f"$ {shell_join(cmd)}  # PTY {width}x{height}, typed composer inputs")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
+    env = os.environ.copy()
+    env.update({"TERM": "xterm-256color", "COLUMNS": str(width), "LINES": str(height)})
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+    )
+    os.close(slave)
+    output = bytearray()
+    deadline = time.time() + timeout
+    try:
+        wait_until_seen(master, output, wait_for, deadline)
+        for payload in inputs:
+            os.write(master, payload)
+            collect_for(master, output, seconds=0.55)
+        while time.time() < deadline and proc.poll() is None:
+            collect_for(master, output, seconds=0.1)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=2)
+    finally:
+        os.close(master)
+    text = output.decode("utf-8", errors="replace")
+    cleaned = clean_terminal_text(text)
+    print(indent_output(cleaned[-2400:]))
+    return cleaned, proc.returncode if proc.returncode is not None else -1
+
+
+def wait_until_seen(
+    master: int, output: bytearray, needle: bytes, deadline: float
+) -> None:
+    while time.time() < deadline:
+        collect_for(master, output, seconds=0.1)
+        if needle in output:
+            return
+    raise DogfoodFailure(f"PTY did not render expected token {needle!r}")
+
+
+def collect_for(master: int, output: bytearray, *, seconds: float) -> None:
+    end = time.time() + seconds
+    while time.time() < end:
+        readable, _, _ = select.select([master], [], [], min(0.05, max(end - time.time(), 0)))
+        if not readable:
+            continue
+        try:
+            chunk = os.read(master, 4096)
+        except OSError:
+            return
+        if not chunk:
+            return
+        output.extend(chunk)
 
 
 def dogfood_nerd_font_avatar_pack() -> None:
@@ -370,6 +482,14 @@ def assert_png(path: Path) -> None:
 
 def require(needle: str, haystack: str, context: str) -> None:
     if needle not in haystack:
+        raise DogfoodFailure(f"missing `{needle}` in {context}")
+
+
+def require_compact(needle: str, haystack: str, context: str) -> None:
+    """Require text while tolerating terminal cursor/layout whitespace loss."""
+    compact_needle = re.sub(r"\s+", "", needle)
+    compact_haystack = re.sub(r"\s+", "", haystack)
+    if compact_needle not in compact_haystack:
         raise DogfoodFailure(f"missing `{needle}` in {context}")
 
 
