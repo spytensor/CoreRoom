@@ -1,7 +1,8 @@
 //! Ratatui console shell fixtures.
 
+use coreroom::console_navigation::{ConsoleNavigator, ConsoleView};
 use coreroom::console_snapshot::{ConversationTurn, ConversationVisibility, CoreRoomSnapshot};
-use coreroom::console_tui::render_snapshot_to_text;
+use coreroom::console_tui::{render_snapshot_to_text, render_snapshot_to_text_with_nav};
 
 fn snapshot() -> CoreRoomSnapshot {
     toml::from_str(include_str!("fixtures/console_snapshot_v08.toml")).expect("snapshot")
@@ -51,4 +52,21 @@ fn console_shell_can_show_user_addressed_specialist_turns() {
 
     assert!(rendered.contains("@security"));
     assert!(rendered.contains("User-addressed security answer."));
+}
+
+#[test]
+fn console_shell_renders_active_navigation_view_and_detail_source() {
+    let snapshot = snapshot();
+    let nav = ConsoleNavigator {
+        active_view: ConsoleView::WorkOrders,
+        detail_open: true,
+        ..ConsoleNavigator::default()
+    };
+    let rendered =
+        render_snapshot_to_text_with_nav(&snapshot, 180, 48, &nav).expect("rendered console");
+
+    assert!(rendered.contains("workorders detail"));
+    assert!(rendered.contains("> WO-0242"));
+    assert!(rendered.contains("tracker:#238"));
+    assert!(!rendered.contains("Public session:"));
 }

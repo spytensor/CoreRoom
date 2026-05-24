@@ -25,6 +25,7 @@ use ratatui::{Frame, Terminal};
 use crate::console_conversation::build_public_conversation;
 use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
+use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
     CoreRoomSnapshot, DirtyState, HealthSeverity, StatusState, WorkLifecycle,
@@ -52,16 +53,21 @@ pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
     let _guard = ConsoleTerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend).context("create console terminal")?;
+    let mut navigator = ConsoleNavigator::default();
     terminal.clear().context("clear console terminal")?;
 
     loop {
         terminal
-            .draw(|frame| render_console_frame(frame, &snapshot))
+            .draw(|frame| render_console_frame_with_nav(frame, &snapshot, &navigator))
             .context("render console frame")?;
         if event::poll(Duration::from_millis(200)).context("poll console input")? {
             match event::read().context("read console input")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press && is_exit_key(key.code) => {
                     break;
+                }
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    let row_count = visible_rows(&snapshot, &[], &navigator).len();
+                    navigator.apply_key(key.code, key.modifiers, row_count);
                 }
                 _ => {}
             }
@@ -77,15 +83,29 @@ pub fn render_snapshot_to_text(
     width: u16,
     height: u16,
 ) -> Result<String> {
+    render_snapshot_to_text_with_nav(snapshot, width, height, &ConsoleNavigator::default())
+}
+
+/// Render a snapshot with an explicit navigation state into plain text.
+pub fn render_snapshot_to_text_with_nav(
+    snapshot: &CoreRoomSnapshot,
+    width: u16,
+    height: u16,
+    navigator: &ConsoleNavigator,
+) -> Result<String> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).context("create test console terminal")?;
     terminal
-        .draw(|frame| render_console_frame(frame, snapshot))
+        .draw(|frame| render_console_frame_with_nav(frame, snapshot, navigator))
         .context("draw test console frame")?;
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
 
-fn render_console_frame(frame: &mut Frame<'_>, snapshot: &CoreRoomSnapshot) {
+fn render_console_frame_with_nav(
+    frame: &mut Frame<'_>,
+    snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
+) {
     let area = frame.size();
     let layout_model = compute_console_layout(snapshot, area.width);
     let root = Layout::default()
@@ -98,8 +118,14 @@ fn render_console_frame(frame: &mut Frame<'_>, snapshot: &CoreRoomSnapshot) {
         .split(area);
 
     render_header(frame, root[0], snapshot);
-    render_body(frame, root[1], snapshot, layout_model.right_rail.as_ref());
-    render_footer(frame, root[2], snapshot);
+    render_body(
+        frame,
+        root[1],
+        snapshot,
+        navigator,
+        layout_model.right_rail.as_ref(),
+    );
+    render_footer(frame, root[2], snapshot, navigator);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
@@ -160,6 +186,7 @@ fn render_body(
     frame: &mut Frame<'_>,
     area: Rect,
     snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
     right_rail: Option<&crate::console_layout::RightRailViewModel>,
 ) {
     let has_rail = right_rail.is_some() && area.width >= 120;
@@ -175,13 +202,22 @@ fn render_body(
             .split(area)
     };
 
-    render_center(frame, chunks[0], snapshot);
+    render_center(frame, chunks[0], snapshot, navigator);
     if let Some(rail) = right_rail.filter(|_| has_rail) {
         render_right_rail(frame, chunks[1], rail);
     }
 }
 
-fn render_center(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
+fn render_center(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
+) {
+    if navigator.active_view != ConsoleView::Overview {
+        render_active_view(frame, area, snapshot, navigator);
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(11), Constraint::Min(8)])
@@ -189,6 +225,63 @@ fn render_center(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot)
     let overview = build_console_overview(snapshot);
     render_overview(frame, chunks[0], &overview);
     render_conversation(frame, chunks[1], snapshot);
+}
+
+fn render_active_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
+) {
+    let rows = visible_rows(snapshot, &[], navigator);
+    let items = if rows.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "No rows for this view",
+            Style::default().fg(Color::DarkGray),
+        )]))]
+    } else {
+        rows.iter()
+            .enumerate()
+            .map(|(index, row)| active_view_item(index, row, navigator))
+            .collect::<Vec<_>>()
+    };
+    let title = format!(
+        "{}{}",
+        navigator.active_view.label(),
+        if navigator.detail_open { " detail" } else { "" }
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().borders(Borders::ALL).title(title)),
+        area,
+    );
+}
+
+fn active_view_item<'a>(
+    index: usize,
+    row: &'a ConsoleVisibleRow,
+    navigator: &ConsoleNavigator,
+) -> ListItem<'a> {
+    let marker = if index == navigator.selected {
+        ">"
+    } else {
+        " "
+    };
+    let mut spans = vec![
+        Span::styled(marker, Style::default().fg(Color::Cyan)),
+        Span::raw(" "),
+        Span::styled(row.primary.clone(), status_style(row.status)),
+        Span::raw("  "),
+        Span::raw(row.secondary.clone()),
+    ];
+    if navigator.detail_open && index == navigator.selected {
+        if let Some(source) = &row.source {
+            spans.push(Span::styled(
+                format!("  [{source}]"),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+    ListItem::new(Line::from(spans))
 }
 
 fn render_overview(frame: &mut Frame<'_>, area: Rect, overview: &ConsoleOverview) {
@@ -342,7 +435,12 @@ fn section_to_items(section: &RightRailSection) -> Vec<ListItem<'_>> {
     items
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
+fn render_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &CoreRoomSnapshot,
+    navigator: &ConsoleNavigator,
+) {
     let blocking = overview_health_signals(snapshot)
         .iter()
         .filter(|signal| signal.severity == HealthSeverity::Blocking)
@@ -359,10 +457,16 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot)
         .count();
     let footer = Line::from(vec![
         Span::styled(
-            " esc/back/q ",
+            " tab/backtab ",
             Style::default().fg(Color::Black).bg(Color::Cyan),
         ),
-        Span::raw(" exit  "),
+        Span::raw(" switch  "),
+        Span::styled("enter/esc ", label_style()),
+        Span::raw("detail  "),
+        Span::styled("q ", label_style()),
+        Span::raw("exit  "),
+        Span::styled("view ", label_style()),
+        Span::raw(format!("{}  ", navigator.active_view.label())),
         Span::styled("snapshot ", label_style()),
         Span::raw(format!("schema {}  ", snapshot.schema_version)),
         Span::styled("active work ", label_style()),

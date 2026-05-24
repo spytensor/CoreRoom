@@ -16,6 +16,7 @@ pub mod config_layered;
 pub mod console_conversation;
 pub mod console_health;
 pub mod console_layout;
+pub mod console_navigation;
 pub mod console_overview;
 pub mod console_projection;
 pub mod console_snapshot;
