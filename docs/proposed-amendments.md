@@ -36,6 +36,125 @@ review, and *then* be implemented in a subsequent PR.
 
 ## Open / accepted amendments
 
+## A-021: Unified full-screen room with live conversation composer
+
+- **Status:** accepted for v0.9.4 design; implementation split across #303-#306
+- **Filed:** 2026-05-24
+- **Touches:** A-020 console entry and compatibility, architecture diagram,
+  CLI/REPL relationship, conversation visibility, and terminal QA gates.
+
+### Problem
+
+A-020 correctly protected the console as a derived view over structural facts,
+but v0.9.1 explored the wrong product shape for the default path:
+
+```text
+cr -> read-only dashboard -> user exits -> old REPL
+```
+
+That shape is not CoreRoom's target architecture. CoreRoom's primary surface is
+still user/agent conversation. The dashboard is valuable only as live
+engineering context around that conversation. If the two are separate modes,
+users must mentally join the room state and the conversation state themselves,
+and agents can continue treating dashboard updates as an afterthought.
+
+### Alternatives considered
+
+1. **Keep `cr console` permanently read-only and separate.** Rejected as the
+   final product shape. It remains useful for debug/recovery, but it cannot be
+   the normal room experience.
+2. **Make the dashboard default and keep handing off to the old REPL.** Rejected.
+   This is two products stitched together and hides the real input surface.
+3. **Replace the REPL loop in one large rewrite.** Rejected. The REPL owns too
+   many mature behaviours: routing, slash commands, completion, paste,
+   permission prompts, interruption, and role supervision.
+4. **Let dashboard panels own project truth.** Rejected. Panels are views over
+   CREP, WorkOrders, gates, evidence, source graph, GitHub state, and snapshots;
+   they do not decide completion, approval, or release readiness.
+5. **Stage a unified room: composer state, conversation model, live bridge,
+   PTY dogfood, then default entrypoint.** Accepted.
+
+### Accepted change
+
+CoreRoom's full-screen UI target is a **unified room**, not a dashboard mode:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ project / branch / phase / tracker / host facts              │
+├──────────────────────────────┬───────────────────────────────┤
+│ live public conversation     │ derived control rail           │
+│ user <-> @host first         │ roles/work/gates/evidence/...  │
+│ direct user-addressed roles  │                               │
+│ host-managed task cards      │                               │
+├──────────────────────────────┴───────────────────────────────┤
+│ composer: text, @role, slash commands, completion, prompts    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+The center conversation and bottom composer are the primary product surface.
+Dashboard panels are secondary situational awareness and must be derived from
+structural sources of truth.
+
+The unified room must preserve these REPL behaviours before it can become the
+default `cr` path:
+
+- bare user text routes to the configured host role;
+- explicit `@role` text routes to that role;
+- slash commands remain available or fail with a clear unsupported message;
+- role and slash completion remain available;
+- bracketed paste and multiline input remain usable;
+- permission prompts are visible and actionable without leaving the room;
+- Ctrl-C, `/halt`, `/stop`, `/fresh`, `/refresh`, and `/exit` semantics remain
+  coherent;
+- role output enters the public conversation only when visibility rules allow
+  it;
+- host-managed internal delegation renders as task cards, side rails, Xray, or
+  logs instead of noisy public transcript lines.
+
+Dashboard state remains protocol-backed. The UI renders from:
+
+- CREP/message logs;
+- `ConsoleState` and `CoreRoomSnapshot` projections;
+- WorkOrders and GitHub lifecycle;
+- gate ledgers;
+- Evidence Packets;
+- source graph and source freshness;
+- role runtime state and permission state.
+
+Rendered text is never the authority for completion, approval, evidence
+closure, or release readiness.
+
+### Entry and compatibility
+
+`cr console --snapshot` remains the read-only/debug/recovery renderer over a
+validated snapshot.
+
+`cr console` may remain a live read-only dashboard while the unified room is
+under construction.
+
+The unified room must land first behind a non-default entrypoint or explicit
+flag. Bare `cr` must not default to it until real PTY dogfood proves that the
+user can type into the composer, dispatch through the existing routing
+semantics, see responses/status in the same room, and exit safely.
+
+### Migration impact
+
+No project state migration is required. Existing `.coreroom/` state, CREP
+logs, snapshots, WorkOrders, gates, evidence, source graph, and role priors
+remain valid.
+
+The implementation is staged:
+
+- #303 adds the renderer-independent composer state model.
+- #304 adds the live room conversation/task-card model.
+- #305 integrates a live room bridge behind a non-default entrypoint.
+- #306 adds real PTY dogfood before any default-entrypoint decision.
+
+### Decision
+
+Accepted by the user for v0.9.4 planning on 2026-05-24. #302 locks the
+architecture before code changes proceed.
+
 ## A-020: Full-screen console architecture
 
 - **Status:** accepted for v0.9; implementation split across #253-#261
