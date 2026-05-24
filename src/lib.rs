@@ -22,6 +22,7 @@ pub mod console_live;
 pub mod console_navigation;
 pub mod console_overview;
 pub mod console_projection;
+pub mod console_room;
 pub mod console_snapshot;
 pub mod console_state;
 pub mod console_tui;

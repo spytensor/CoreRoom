@@ -13,7 +13,7 @@
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr` — enter the console-first room, then continue into the REPL
 //! - `cr start [--project PATH] [--allow-large-priors]` — enter the REPL directly
-//! - `cr console [--project PATH] [--snapshot PATH]` — enter the v0.9 read-only full-screen console
+//! - `cr console [--project PATH] [--snapshot PATH] [--live-room]` — enter the v0.9 full-screen console
 //! - `cr prompt show <role>`     — print a role's effective prompt
 //! - `cr lock`                   — regenerate `.coreroom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
@@ -110,7 +110,7 @@ enum Cmd {
         #[arg(long)]
         allow_large_priors: bool,
     },
-    /// Enter the v0.9 read-only full-screen console.
+    /// Enter the v0.9 full-screen console.
     Console {
         /// Project root containing `.coreroom/`. Defaults to the current
         /// working directory when `--snapshot` is not supplied.
@@ -118,8 +118,12 @@ enum Cmd {
         project: Option<PathBuf>,
         /// TOML CoreRoomSnapshot file to render. When omitted, CoreRoom
         /// derives a live local snapshot from project config and git state.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "live_room")]
         snapshot: Option<PathBuf>,
+        /// Experimental non-default unified room path with a live composer
+        /// bridge. Keeps `cr console --snapshot` read-only.
+        #[arg(long)]
+        live_room: bool,
     },
     /// Replay `.coreroom/messages.jsonl` through the live renderer.
     Show {
@@ -807,7 +811,11 @@ fn main() -> Result<()> {
             fresh,
             allow_large_priors,
         }) => run_start(project, yolo, fresh, allow_large_priors),
-        Some(Cmd::Console { project, snapshot }) => run_console(project, snapshot),
+        Some(Cmd::Console {
+            project,
+            snapshot,
+            live_room,
+        }) => run_console(project, snapshot, live_room),
         Some(Cmd::Show {
             project,
             role,
@@ -1369,12 +1377,16 @@ fn run_console_first_default() -> Result<()> {
     run_start(Some(project_root), false, false, false)
 }
 
-fn run_console(project: Option<PathBuf>, snapshot: Option<PathBuf>) -> Result<()> {
+fn run_console(project: Option<PathBuf>, snapshot: Option<PathBuf>, live_room: bool) -> Result<()> {
     if let Some(snapshot) = snapshot {
         return coreroom::console_tui::run_snapshot_console(&snapshot);
     }
     let root = project_root_or_cwd(project)?;
-    coreroom::console_tui::run_live_console(&root)
+    if live_room {
+        coreroom::console_tui::run_live_room_console(&root)
+    } else {
+        coreroom::console_tui::run_live_console(&root)
+    }
 }
 
 fn run_lock(project: Option<PathBuf>) -> Result<()> {
