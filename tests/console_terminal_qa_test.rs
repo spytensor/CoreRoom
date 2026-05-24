@@ -32,11 +32,11 @@ fn console_terminal_render_fits_supported_viewports() {
             "missing title at {width}x{height}"
         );
         assert!(
-            rendered.contains("Conversation"),
-            "missing public conversation panel at {width}x{height}"
+            rendered.contains("Transcript"),
+            "missing public transcript panel at {width}x{height}"
         );
         assert!(
-            rendered.contains("Public conversation:"),
+            rendered.contains("Public transcript:"),
             "missing public transcript header at {width}x{height}"
         );
     }
@@ -69,7 +69,7 @@ fn console_terminal_active_views_fit_without_polluting_transcript() {
             "missing active view {view:?}"
         );
         assert!(
-            !rendered.contains("Public conversation:"),
+            !rendered.contains("Public transcript:"),
             "active view {view:?} should not duplicate the public transcript"
         );
     }

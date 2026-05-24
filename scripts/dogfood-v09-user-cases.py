@@ -102,12 +102,18 @@ def dogfood_fresh_project(project: Path) -> None:
 
 def dogfood_default_cr_entrypoint(project: Path) -> None:
     print("\n== Scenario: plain `cr` opens the unified live room")
+    stale_history = "STALE HISTORY MUST NOT OCCUPY DEFAULT LIVE ROOM"
+    (project / ".coreroom" / "messages.jsonl").write_text(
+        '{"type":"turn_dispatched","role":"host","turn_id":"turn-old","thread_id":"thread-main","parent_turn_id":null,"queue_position":0}\n'
+        f'{{"type":"role_spoke","role":"host","text":"{stale_history}","mentions":[],"cost_usd":0.0,"cache_read":0,"turn_id":"turn-old","thread_id":"thread-main"}}\n',
+        encoding="utf-8",
+    )
     output, code = run_pty_scripted_inputs(
         [str(BIN)],
         cwd=project,
         width=160,
         height=48,
-        wait_for=b"Composer",
+        wait_for=b"Ask @host",
         inputs=[
             b"validate unified room from plain cr\r",
             b"@reviewer check explicit routing\r",
@@ -117,16 +123,20 @@ def dogfood_default_cr_entrypoint(project: Path) -> None:
     )
     if code != 0:
         raise DogfoodFailure(f"plain cr unified live room PTY exited with {code}\n{output}")
-    for token in ["CoreRoom", "Project", "Conversation", "Composer", "Environment", "Roles"]:
+    for token in ["CoreRoom", "Project", "CoreRoom Workspace", "Ask @host", "Environment", "Roles"]:
         require(token, output, "plain cr unified live room render")
     for token in [
         "validate unified room from plain cr",
-        "queued for @host",
+        "@host received the request",
         "@reviewer check explicit routing",
-        "explicit @role mention",
+        "@reviewer received the request",
     ]:
         require_compact(token, output, "plain cr unified live room composer flow")
     forbidden = [
+        stale_history,
+        "Conversation",
+        "Composer",
+        "No public request",
         "CoreRoom console closed; starting REPL",
         "type a task · @role · /help · /exit",
     ]
@@ -153,7 +163,7 @@ def dogfood_snapshot_console_pty(width: int, height: int) -> None:
     for token in [
         "CoreRoom",
         "Project",
-        "Conversation",
+        "Transcript",
         "Environment",
         "Roles",
         "Evidence",
@@ -179,7 +189,7 @@ def dogfood_live_console_pty(project: Path) -> None:
     )
     if live_code != 0:
         raise DogfoodFailure(f"live console PTY exited with {live_code}\n{live_output}")
-    require("Public conversation", live_output, "live console PTY render")
+    require("Public transcript", live_output, "live console PTY render")
     require("open evidence:0", live_output, "live console PTY render")
     print("live PTY console entered without --snapshot at 120x40")
 
@@ -191,7 +201,7 @@ def dogfood_live_room_composer_pty(project: Path) -> None:
         cwd=project,
         width=160,
         height=48,
-        wait_for=b"Composer",
+        wait_for=b"Ask @host",
         inputs=[
             b"validate unified room from real pty\r",
             b"@reviewer check explicit routing\r",
@@ -205,16 +215,16 @@ def dogfood_live_room_composer_pty(project: Path) -> None:
     for token in [
         "CoreRoom",
         "Project",
-        "Conversation",
-        "Composer",
+        "CoreRoom Workspace",
+        "Ask @host",
     ]:
         require(token, output, "live-room PTY composer flow")
     for token in [
         "Environment",
         "validate unified room from real pty",
-        "queued for @host",
+        "@host received the request",
         "@reviewer check explicit routing",
-        "explicit @role mention",
+        "@reviewer received the request",
         "not yet available in the unified room",
         "cr start",
     ]:

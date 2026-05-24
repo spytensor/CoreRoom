@@ -979,8 +979,8 @@ def render_control_room_console() -> None:
         draw_text(draw, (352, y), fit_text(draw, state, 160, SMALL), WHITE, SMALL)
         y += 38
 
-    # Center: the real CLI room. Conversation remains the primary surface.
-    box((586, 520, 1668, 1126), "Conversation · @host orchestration", PURPLE)
+    # Center: the real CLI room. The workspace is the primary surface.
+    box((586, 520, 1668, 1126), "CoreRoom Workspace · @host orchestration", PURPLE)
     user_turn = public_turns[0] if public_turns else {"body": "@host inspect the room"}
     host_turn = public_turns[1] if len(public_turns) > 1 else {"body": "I will preserve a clean public transcript."}
     user_body = ascii_or(
