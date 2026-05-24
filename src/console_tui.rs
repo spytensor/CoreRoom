@@ -23,14 +23,16 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::console_actions::ConsolePermissionOverlay;
-use crate::console_conversation::build_public_conversation;
+use crate::console_conversation::{
+    build_live_room_conversation, InternalTaskCard, LiveRoomTurnKind,
+};
 use crate::console_health::overview_health_signals;
 use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationActivity,
-    InternalDelegationState, StatusState, WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, StatusState,
+    WorkLifecycle,
 };
 use crate::role_avatar::{role_label, RoleAvatarPack};
 
@@ -505,20 +507,20 @@ fn render_conversation(
     snapshot: &CoreRoomSnapshot,
     avatar_pack: RoleAvatarPack,
 ) {
-    let panel = build_public_conversation(snapshot);
+    let panel = build_live_room_conversation(snapshot);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
         Span::styled("Public conversation: ", label_style()),
         Span::raw("@user <-> @"),
         Span::raw(snapshot.runtime.host_role.clone()),
     ]));
-    if panel.hidden_internal_count > 0 || !panel.internal_activity.is_empty() {
+    if panel.hidden_internal_count > 0 || !panel.task_cards.is_empty() {
         lines.push(Line::from(vec![
             Span::styled("Internal work: ", label_style()),
             Span::raw(format!(
                 "{} hidden turns · {} task cards",
                 panel.hidden_internal_count,
-                panel.internal_activity.len()
+                panel.task_cards.len()
             )),
             Span::styled(
                 "  surfaced only when user @mentions a role, or @host summarizes risk/evidence",
@@ -527,7 +529,7 @@ fn render_conversation(
         ]));
     }
     lines.push(Line::raw(""));
-    if panel.turns.is_empty() {
+    if panel.public_turns.is_empty() {
         lines.push(Line::from(vec![
             speaker_span("user", &snapshot.runtime.host_role),
             Span::raw(" "),
@@ -545,10 +547,10 @@ fn render_conversation(
         )]));
         lines.push(Line::raw(""));
     } else {
-        for turn in &panel.turns {
+        for turn in &panel.public_turns {
             lines.push(Line::from(vec![
                 speaker_span(&turn.speaker, &snapshot.runtime.host_role),
-                if is_public_specialist(&turn.speaker, &snapshot.runtime.host_role) {
+                if turn.kind == LiveRoomTurnKind::DirectSpecialist {
                     Span::styled(" direct", Style::default().fg(Color::DarkGray))
                 } else {
                     Span::raw("")
@@ -558,19 +560,19 @@ fn render_conversation(
             lines.push(Line::raw(""));
         }
     }
-    if !panel.internal_activity.is_empty() {
+    if !panel.task_cards.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "Host-managed task cards",
             label_style(),
         )]));
-        for activity in panel.internal_activity.iter().take(3) {
+        for activity in panel.task_cards.iter().take(3) {
             lines.extend(delegation_card_lines(
                 activity,
                 &snapshot.runtime.host_role,
                 avatar_pack,
             ));
         }
-        let remaining = panel.internal_activity.len().saturating_sub(3);
+        let remaining = panel.task_cards.len().saturating_sub(3);
         if remaining > 0 {
             lines.push(Line::from(vec![Span::styled(
                 format!("  +{remaining} more in Xray/log views"),
@@ -718,12 +720,8 @@ fn speaker_span<'a>(speaker: &'a str, host_role: &str) -> Span<'a> {
     Span::styled(format!("@{speaker}"), style)
 }
 
-fn is_public_specialist(speaker: &str, host_role: &str) -> bool {
-    speaker != "user" && speaker != host_role && speaker != "host"
-}
-
 fn delegation_card_lines(
-    activity: &InternalDelegationActivity,
+    activity: &InternalTaskCard,
     host_role: &str,
     avatar_pack: RoleAvatarPack,
 ) -> Vec<Line<'static>> {
