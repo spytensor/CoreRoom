@@ -245,6 +245,7 @@ trackerUpdated = true
 [[sources]]
 sourceId = "core-repo"
 status = "pinned"
+pin = "commit:fixture-head"
 trustLevel = "project-source"
 visibleRoles = ["host", "engineer", "reviewer"]
 findings = ["Current repo provides AGENTS.md, tracker, and v0.8 issues."]
@@ -253,6 +254,7 @@ relatedWorkOrders = ["WO-0242", "WO-0245"]
 [[sources]]
 sourceId = "readme-console-mock"
 status = "stale"
+pin = "sha256:old-readme-console-mock"
 trustLevel = "generated"
 visibleRoles = ["host", "frontend", "reviewer"]
 findings = ["Mock image exists in stash and must be regenerated after v0.8 view models settle."]

@@ -127,6 +127,7 @@ pub fn project_source_health_snapshot(
     SourceHealthSnapshot {
         source_id: finding.source_id.clone(),
         status: source_health_state(finding.kind),
+        pin: None,
         trust_level: trust_level.label().to_owned(),
         visible_roles,
         findings: vec![finding.message.clone()],
