@@ -166,12 +166,22 @@ architecture amendment before implementation.
     transcript must never delete durable CREP/log evidence or hide a critical
     veto, permission outcome, safety finding, or user-confirmation request.
 
-19. The full-screen console is read-only by default.
-    Starting with A-020, a v0.9 full-screen console may render project state,
-    but a rendered panel is not a permission grant or state mutation. Any
-    action that creates issues, updates trackers, refreshes sources, advances
-    gates, prepares PR evidence, overrides vetoes, or claims readiness must
-    route through `@host` and the existing confirmation/evidence path.
+19. Full-screen room rendering is not authority.
+    Starting with A-021, the target full-screen room may contain both the live
+    conversation/composer and dashboard panels. The conversation path remains
+    the user-facing control surface, while dashboard panels remain derived
+    views. A rendered panel is not a permission grant, state mutation,
+    completion proof, or release decision. Any action that creates issues,
+    updates trackers, refreshes sources, advances gates, prepares PR evidence,
+    overrides vetoes, or claims readiness must route through `@host` and the
+    existing confirmation/evidence path.
+
+20. Composer state is UI state, not project state.
+    The full-screen composer may track an input buffer, cursor, completion
+    candidates, multiline content, and submission status. None of that state is
+    evidence, approval, gate progress, or a WorkOrder update until it is
+    submitted through the room runtime and recorded through the normal CREP /
+    message / evidence paths.
 
 ## Decisions That Must Not Be Reconstructed
 

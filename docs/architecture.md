@@ -30,17 +30,18 @@ autonomous execution power.
 The CLI binary is `cr`.
 
 Starting with A-020, CoreRoom may also expose a full-screen terminal console
-over the same room. Starting with v0.9.1, bare `cr` opens this console first
-for initialized projects and then hands off to the REPL; `cr start` remains the
-direct REPL entry. The console is a derived
-projection over structural facts such as `CoreRoomSnapshot`, CREP replay,
-WorkOrders, gates, Evidence Packets, source health, and GitHub lifecycle. It
-does not replace `cr start`, the REPL, `@host`, or the engine subprocesses.
-The default console mode is read-only; mutating actions must route through
-`@host` and the existing confirmation/evidence path. Starting with v0.9.2, the
-center console pane is the public `@user <-> @host` conversation surface;
-host-managed specialist delegation is rendered as task cards, side-rail state,
-Xray, or logs instead of normal public chat.
+over the same room. Starting with A-021, the target product shape is a unified
+full-screen room, not a dashboard followed by the old REPL. The center of the
+room is the live `@user <-> @host` conversation and the bottom of the room is a
+real composer that preserves the REPL's routing, slash-command, completion,
+paste, permission, and interrupt semantics. Dashboard panels around that
+conversation are derived projections over structural facts such as
+`CoreRoomSnapshot`, `ConsoleState`, CREP replay, WorkOrders, gates, Evidence
+Packets, source health, and GitHub lifecycle. They are not independent
+authority for completion, approval, evidence closure, or release readiness.
+Host-managed specialist delegation is rendered as task cards, side-rail state,
+Xray, or logs instead of normal public chat unless the user directly addresses
+the specialist.
 
 ## Role Invariance Principle
 
@@ -127,10 +128,10 @@ violate the constitution.
 ┌──────────────────────────────────────────────────────────┐
 │                     cr (CLI binary)                       │
 ├──────────────────────────────────────────────────────────┤
-│  REPL                                                     │
-│    parses @mentions, /commands, free text                 │
-│  Console (v0.9 optional derived view)                     │
-│    renders CoreRoomSnapshot/ConsoleState; read-only first │
+│  Room UI                                                   │
+│    conversation/composer first; preserves REPL semantics   │
+│  Dashboard Panels                                          │
+│    derived CoreRoomSnapshot/ConsoleState protocol views    │
 ├──────────────────────────────────────────────────────────┤
 │  Message Bus                                              │
 │    central event log, append-only JSONL                   │
@@ -513,8 +514,8 @@ cr role add <name> [--engine cc|codex|gemini] [--model <model>] [--host]
 cr role list                     # marks the host with *
 cr role rm <name>
 cr role host <name>              # change which role is host
-cr                               # console-first room, then REPL after exit
-cr start                         # enter REPL directly; spawn configured roles
+cr                               # enter the CoreRoom conversation surface
+cr start                         # enter the same conversation path with flags
 cr console                       # enter the full-screen console only;
                                  #   read-only by default
 
