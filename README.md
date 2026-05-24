@@ -10,7 +10,7 @@
 
 ![CoreRoom role work cards](docs/images/work-cards.png)
 
-![CoreRoom console data-plane preview](docs/images/control-room-console.png)
+![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
 > **Status: v0.7.0 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
@@ -29,6 +29,12 @@
 > tracker closure. **v0.7.0** completes the CoreRoom rename across the repo,
 > Rust crate, npm package, release artifacts, state directory, and environment
 > variables while keeping the short `cr` command stable.
+> **v0.8.0** built the console data plane: snapshots, responsive layout,
+> public transcript visibility, role/work/gate/evidence/source views,
+> observation-backed freshness, and dogfood evidence. **v0.9.0** adds the
+> optional K9s-style full-screen console: read-only ratatui rendering,
+> navigation/detail panes, Xray/log views, host action overlays, and terminal
+> QA fixtures for the release path.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Iterable
 
@@ -210,6 +211,166 @@ def console_snapshot_fixture() -> dict:
         return tomllib.load(handle)
 
 
+def readme_console_snapshot() -> dict:
+    """Project the v0.8 fixture into the current v0.9 README story.
+
+    The fixture remains the structural test packet for v0.8 dogfood. README
+    images should show the current full-screen console surface, so this helper
+    updates the synthetic visible facts without mutating the fixture file.
+    """
+    snapshot = deepcopy(console_snapshot_fixture())
+    project = snapshot["project"]
+    project["branch"] = "feat/v0.9-261-terminal-qa-readme-visuals"
+    project["dirtyState"] = "dirty"
+    project["version"] = "0.9.0-dev"
+    project["activePhase"] = "v0.9.0 - Full-screen Console"
+    project["trackerIssue"] = 239
+
+    runtime = snapshot["runtime"]
+    runtime["activeRole"] = "host"
+    runtime["waitingApproval"] = True
+    for role in runtime.get("roles", []):
+        role_name = role.get("role")
+        if role_name == "host":
+            role["state"] = "working"
+            role["currentWorkOrder"] = "WO-0261"
+            role["currentGatePhase"] = "qa"
+            role["lastActivity"] = "Collecting terminal QA evidence"
+        elif role_name == "qa":
+            role["state"] = "reviewing"
+            role["currentWorkOrder"] = "WO-0261"
+            role["currentGatePhase"] = "qa"
+            role["lastActivity"] = "Checking render widths and overlays"
+        elif role_name == "reviewer":
+            role["state"] = "idle"
+            role["currentWorkOrder"] = "WO-0261"
+            role["currentGatePhase"] = "review"
+            role["lastActivity"] = "Available for README visual review"
+
+    snapshot["work"] = [
+        {
+            "id": "WO-0261",
+            "title": "Terminal QA and README visuals",
+            "phase": "v0.9",
+            "epic": "fullscreen-console",
+            "githubIssue": 261,
+            "branch": "feat/v0.9-261-terminal-qa-readme-visuals",
+            "ciState": "unknown",
+            "evidenceState": "warn",
+            "trackerState": "warn",
+            "lifecycle": "in-progress",
+            "sourceCitations": ["tracker:#239", "issue:#261", "amendment:A-020"],
+        },
+        {
+            "id": "WO-0260",
+            "title": "Host action overlay",
+            "phase": "v0.9",
+            "epic": "fullscreen-console",
+            "githubIssue": 260,
+            "branch": "feat/v0.9-260-console-actions",
+            "pullRequest": 289,
+            "ciState": "ok",
+            "evidenceState": "ok",
+            "trackerState": "ok",
+            "lifecycle": "closed",
+            "sourceCitations": ["pr:#289", "tracker:#239"],
+        },
+        {
+            "id": "WO-0259",
+            "title": "Navigation and detail panes",
+            "phase": "v0.9",
+            "epic": "fullscreen-console",
+            "githubIssue": 259,
+            "branch": "feat/v0.9-259-console-navigation",
+            "pullRequest": 288,
+            "ciState": "ok",
+            "evidenceState": "ok",
+            "trackerState": "ok",
+            "lifecycle": "closed",
+            "sourceCitations": ["pr:#288", "tracker:#239"],
+        },
+        {
+            "id": "WO-0258",
+            "title": "Xray and CREP logs",
+            "phase": "v0.9",
+            "epic": "fullscreen-console",
+            "githubIssue": 258,
+            "branch": "feat/v0.9-258-console-xray",
+            "pullRequest": 287,
+            "ciState": "ok",
+            "evidenceState": "ok",
+            "trackerState": "ok",
+            "lifecycle": "closed",
+            "sourceCitations": ["pr:#287", "tracker:#239"],
+        },
+    ]
+    snapshot["gates"] = [
+        {
+            "workOrder": "WO-0261",
+            "currentPhase": "qa",
+            "missingReviews": [],
+            "signoffReady": True,
+        },
+        {
+            "workOrder": "WO-0260",
+            "currentPhase": "closed",
+            "missingReviews": [],
+            "signoffReady": True,
+        },
+    ]
+    snapshot["evidence"] = [
+        {
+            "workOrder": "WO-0261",
+            "status": "incomplete",
+            "missingFields": ["PR", "CI", "tracker update"],
+            "unverifiedItems": ["Manual visual QA evidence is still being collected."],
+            "rollback": "Revert the terminal QA and README visual refresh PR.",
+            "trackerUpdated": False,
+        },
+        {
+            "workOrder": "WO-0260",
+            "status": "complete",
+            "rollback": "Revert PR #289; action overlay only.",
+            "trackerUpdated": True,
+        },
+    ]
+    snapshot["sources"] = [
+        {
+            "sourceId": "core-repo",
+            "status": "pinned",
+            "pin": "commit:v0.9-console-head",
+            "trustLevel": "project-source",
+            "visibleRoles": ["host", "engineer", "reviewer", "qa"],
+            "findings": ["Console renderer, navigation, action overlay, and tests are local facts."],
+            "relatedWorkOrders": ["WO-0261"],
+        },
+        {
+            "sourceId": "readme-images",
+            "status": "pinned",
+            "pin": "script:scripts/render-readme-images.py",
+            "trustLevel": "generated",
+            "visibleRoles": ["host", "qa"],
+            "findings": ["README images are regenerated from this deterministic renderer."],
+            "relatedWorkOrders": ["WO-0261"],
+        },
+    ]
+    snapshot["alerts"] = [
+        {
+            "id": "qa:visual",
+            "title": "Terminal QA evidence required",
+            "severity": "warn",
+            "source": "issue:#261",
+        },
+        {
+            "id": "evidence:tracker",
+            "title": "Tracker checkbox pending",
+            "severity": "blocking",
+            "source": "tracker:#239",
+        },
+    ]
+    return snapshot
+
+
 def first_active_work(snapshot: dict) -> dict:
     for work in snapshot.get("work", []):
         if work.get("lifecycle") != "closed":
@@ -341,7 +502,7 @@ def render_boot_dashboard() -> None:
 
     draw_text(draw, (right_x, 539), "/help for commands", MUTED, FONT)
     draw_text(draw, (132, 714), "type a task · @role · /help · /exit", MUTED, SMALL)
-    prompt(draw, 88, 754, "@host verify the CoreRoom v0.7.0 release")
+    prompt(draw, 88, 754, "@host validate the v0.9 console before release")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     image.save(OUT_DIR / "boot-dashboard.png")
@@ -398,8 +559,8 @@ def permission_card(
         title,
         "waiting for your approval",
         [
-            ("✓", GREEN, "read src/adapter/cc.rs"),
-            ("?", YELLOW, "wants Bash `cargo test --all-features --locked` — [a]llow · [s]ession · [d]eny"),
+            ("✓", GREEN, "read src/console_tui.rs and scripts/render-readme-images.py"),
+            ("?", YELLOW, "wants Bash `cargo test --test console_terminal_qa_test` — [a]llow · [s]ession · [d]eny"),
         ],
         color,
     )
@@ -475,23 +636,21 @@ def handoff_banner(
 def right_rail(draw: ScaledDraw) -> None:
     x = 1244
     draw.rectangle((1204, 128, 1726, 764), fill=RAIL_BG)
-    draw_text(draw, (x, 149), "gate surface", YELLOW, TITLE)
-    draw_text(draw, (x, 197), "cr gate init", WHITE, FONT)
-    draw_text(draw, (x + 26, 230), "one ledger per work thread", MUTED, SMALL)
-    draw_text(draw, (x + 26, 264), "host records tier + feature", MUTED, SMALL)
-    draw_text(draw, (x, 319), "evidence", WHITE, FONT)
-    draw_text(draw, (x + 26, 352), "research, plan, review", MUTED, SMALL)
-    draw_text(draw, (x + 26, 386), "sign-off and verification", MUTED, SMALL)
-    draw_text(draw, (x, 441), "close", WHITE, FONT)
-    draw_text(draw, (x + 26, 474), "blocks on missing proof", MUTED, SMALL)
-    draw_text(draw, (x + 26, 508), "bypass requires reason", MUTED, SMALL)
-    draw_text(draw, (x + 26, 542), "templates live in .coreroom", MUTED, SMALL)
-
-    draw_text(draw, (x, 586), "context tools", YELLOW, TITLE)
-    draw_text(draw, (x, 633), "/compact", WHITE, FONT)
-    draw_text(draw, (x + 26, 668), "shrink live role context", MUTED, FONT)
-    draw_text(draw, (x, 719), "cr compact", WHITE, FONT)
-    draw_text(draw, (x + 26, 754), "fold old history into priors", MUTED, FONT)
+    draw_text(draw, (x, 149), "v0.9 console rail", YELLOW, TITLE)
+    draw_text(draw, (x, 197), "Progress", WHITE, FONT)
+    draw_text(draw, (x + 26, 230), "WorkOrder, PR, CI, tracker", MUTED, SMALL)
+    draw_text(draw, (x + 26, 264), "from structural evidence", MUTED, SMALL)
+    draw_text(draw, (x, 319), "Environment", WHITE, FONT)
+    draw_text(draw, (x + 26, 352), "repo, branch, phase, host", MUTED, SMALL)
+    draw_text(draw, (x + 26, 386), "always visible, never chat-only", MUTED, SMALL)
+    draw_text(draw, (x, 441), "Subagents", WHITE, FONT)
+    draw_text(draw, (x + 26, 474), "internal unless user @mentions", MUTED, SMALL)
+    draw_text(draw, (x + 26, 508), "Xray holds delegation details", MUTED, SMALL)
+    draw_text(draw, (x, 563), "Host action", WHITE, FONT)
+    draw_text(draw, (x + 26, 596), "confirmation overlay first", MUTED, SMALL)
+    draw_text(draw, (x + 26, 630), "no direct console mutation", MUTED, SMALL)
+    draw_text(draw, (x, 690), "Visual QA", YELLOW, TITLE)
+    draw_text(draw, (x + 26, 735), "80 / 120 / 160 / 220 cols", MUTED, FONT)
 
 
 def console_box(
@@ -603,16 +762,20 @@ def status_table(draw: ScaledDraw) -> None:
 def gate_pipeline(draw: ScaledDraw) -> None:
     x, y = 90, 638
     draw_text(draw, (x, y), "gate pipeline", YELLOW, TITLE)
-    stages = [
-        ("intake", GREEN),
-        ("discovery", GREEN),
-        ("plan", CYAN),
-        ("review", ORANGE),
-        ("signoff", DIM),
-        ("implement", DIM),
-        ("qa", DIM),
-        ("closed", DIM),
-    ]
+    phase_order = ["intake", "discovery", "plan", "review", "signoff", "implement", "qa", "closed"]
+    current_phase = first_gate.get("currentPhase", "qa")
+    current_index = phase_order.index(current_phase) if current_phase in phase_order else 0
+    stages = []
+    for index, label in enumerate(phase_order):
+        if label == "closed" and current_phase != "closed":
+            color = DIM
+        elif index < current_index:
+            color = GREEN
+        elif index == current_index:
+            color = ORANGE
+        else:
+            color = DIM
+        stages.append((label, color))
     cursor = x
     y += 52
     stage_widths = {
@@ -669,7 +832,7 @@ def evidence_stack(draw: ScaledDraw) -> None:
 
 
 def render_control_room_console() -> None:
-    snapshot = console_snapshot_fixture()
+    snapshot = readme_console_snapshot()
     project = snapshot["project"]
     runtime = snapshot["runtime"]
     work_items = snapshot.get("work", [])
@@ -726,14 +889,14 @@ def render_control_room_console() -> None:
     draw_text(
         draw,
         (1928, 190),
-        fit_text(draw, f"v{project['version']} · snapshot fixture · TUI preview", 385, SMALL_BOLD),
+        fit_text(draw, f"v{project['version']} · terminal QA snapshot", 385, SMALL_BOLD),
         GREEN,
         SMALL_BOLD,
     )
 
     box(
         (24, 274, 2376, 1266),
-        "CoreRoom Console · v0.9 preview from v0.8 snapshot",
+        "CoreRoom Console · v0.9 full-screen control surface",
         CYAN,
     )
 
@@ -804,7 +967,7 @@ def render_control_room_console() -> None:
     host_turn = public_turns[1] if len(public_turns) > 1 else {"body": "I will preserve a clean public transcript."}
     user_body = ascii_or(
         user_turn.get("body", ""),
-        "@host design the CoreRoom console from the v0.8 snapshot",
+        "@host validate the v0.9 console terminal QA and README visuals",
     )
     host_body = ascii_or(
         host_turn.get("body", ""),
@@ -973,18 +1136,18 @@ def render_control_room_console() -> None:
 
 def render_work_cards() -> None:
     image, draw = new_canvas()
-    prompt(draw, 82, 84, "@host verify CoreRoom v0.7.0 release readiness")
+    prompt(draw, 82, 84, "@host finish v0.9 terminal QA and README visuals")
     status_line(draw, 134, "@host")
     active_card(
         draw,
         208,
         "@host",
-        "drive Tier 1 release gate",
-        "recording gate evidence",
+        "drive v0.9 console QA gate",
+        "collecting visual and tracker evidence",
         [
-            ("✓", GREEN, "bound WorkOrder #234 to PR #235 and tag v0.7.0"),
-            ("✓", GREEN, "recorded rename audit, tests, clippy, and npm dry-run"),
-            ("…", WHITE, "collecting publish evidence for @spytensor/coreroom"),
+            ("✓", GREEN, "rendered 80 / 120 / 160 / 220 column console fixtures"),
+            ("✓", GREEN, "checked public transcript and host action overlay clarity"),
+            ("…", WHITE, "refreshing deterministic README images before release"),
         ],
         PURPLE,
     )
@@ -992,18 +1155,18 @@ def render_work_cards() -> None:
     permission_card(
         draw,
         430,
-        "@security",
-        "cross-model review",
-        SECURITY,
+        "@qa",
+        "manual visual verification",
+        ORANGE,
     )
 
-    done_summary(draw, 636, "@ci", "verify release workflow", "1m12s", 4, CI)
+    done_summary(draw, 636, "@ci", "verify terminal fixtures", "1m12s", 4, CI)
     reply_quote(
         draw,
         684,
         "@ci",
         "@host",
-        "fmt, clippy, tests, release build, and GitHub Release assets are green",
+        "console terminal QA fixtures and README image regeneration are reproducible",
         CI,
         PURPLE,
     )
@@ -1011,11 +1174,11 @@ def render_work_cards() -> None:
         draw,
         732,
         "@ci",
-        "Evidence packet tracks tag, release assets, npm package, and tracker closure.",
+        "Evidence packet tracks issue #261, PR validation, images, and tracker closure.",
         CI,
     )
 
-    done_summary(draw, 830, "@host", "drive Tier 1 release gate", "2m41s", 9, PURPLE)
+    done_summary(draw, 830, "@host", "drive v0.9 console QA gate", "2m41s", 9, PURPLE)
     right_rail(draw)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
