@@ -20,6 +20,23 @@ use crate::console_snapshot::{
 
 /// Build a console snapshot from the current local project state.
 pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
+    snapshot_from_project_with_conversation(project_root, ConversationSource::MessagesHistory)
+}
+
+/// Build a live room snapshot from current local project state.
+///
+/// Unlike the read-only console snapshot, the default live room starts from an
+/// empty current-session workspace. Historical `.coreroom/messages.jsonl`
+/// projection remains available to `cr console` but must not occupy the
+/// primary user room when plain `cr` starts.
+pub fn live_room_snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
+    snapshot_from_project_with_conversation(project_root, ConversationSource::CurrentRoom)
+}
+
+fn snapshot_from_project_with_conversation(
+    project_root: &Path,
+    conversation_source: ConversationSource,
+) -> Result<CoreRoomSnapshot> {
     let cfg = Config::load(project_root)
         .with_context(|| format!("loading {}", project_root.join(COREROOM_DIR).display()))?;
     let git = GitFacts::observe(project_root);
@@ -59,7 +76,12 @@ pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
             active_role: Some(cfg.host_role.clone()),
             waiting_approval: false,
         },
-        conversation: conversation_from_messages(project_root, &cfg.host_role),
+        conversation: match conversation_source {
+            ConversationSource::MessagesHistory => {
+                conversation_from_messages(project_root, &cfg.host_role)
+            }
+            ConversationSource::CurrentRoom => empty_conversation(),
+        },
         work: vec![WorkSnapshot {
             id: "WO-0000".to_owned(),
             title: "Local CoreRoom room".to_owned(),
@@ -113,7 +135,10 @@ pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
         },
         alerts: Vec::new(),
         layout: LayoutHints {
-            primary_pane: "public-conversation".to_owned(),
+            primary_pane: match conversation_source {
+                ConversationSource::MessagesHistory => "public-conversation".to_owned(),
+                ConversationSource::CurrentRoom => "live-room-workspace".to_owned(),
+            },
             min_columns: 80,
             preferred_columns: 160,
             collapsed_panes: vec!["right-rail".to_owned()],
@@ -121,6 +146,12 @@ pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
     };
     snapshot.validate()?;
     Ok(snapshot)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConversationSource {
+    MessagesHistory,
+    CurrentRoom,
 }
 
 fn role_snapshots(project_root: &Path, cfg: &Config) -> Result<Vec<RoleRuntimeSnapshot>> {
@@ -178,6 +209,14 @@ fn conversation_from_messages(project_root: &Path, host_role: &str) -> Conversat
         };
     };
     report.state.conversation
+}
+
+fn empty_conversation() -> ConversationSnapshot {
+    ConversationSnapshot {
+        public_turns: Vec::new(),
+        internal_delegation_count: 0,
+        internal_activity: Vec::new(),
+    }
 }
 
 fn project_root_name(project_root: &Path) -> String {
@@ -353,6 +392,30 @@ mod tests {
         assert!(!public_text.contains("Internal reviewer finding"));
         assert_eq!(snapshot.conversation.internal_delegation_count, 1);
         assert_eq!(snapshot.conversation.internal_activity.len(), 2);
+    }
+
+    #[test]
+    fn live_room_snapshot_starts_from_current_room_not_message_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_project(tmp.path());
+        fs::write(
+            tmp.path().join(COREROOM_DIR).join("messages.jsonl"),
+            r#"{"type":"turn_dispatched","role":"host","turn_id":"turn-old","thread_id":"thread-main","parent_turn_id":null,"queue_position":0}
+{"type":"role_spoke","role":"host","text":"Old transcript that must not occupy the default room.","mentions":[],"cost_usd":0.0,"cache_read":0,"turn_id":"turn-old","thread_id":"thread-main"}
+"#,
+        )
+        .unwrap();
+
+        let read_only_snapshot = snapshot_from_project(tmp.path()).unwrap();
+        let live_snapshot = live_room_snapshot_from_project(tmp.path()).unwrap();
+
+        assert!(read_only_snapshot
+            .conversation
+            .public_turns
+            .iter()
+            .any(|turn| turn.body.contains("Old transcript")));
+        assert!(live_snapshot.conversation.public_turns.is_empty());
+        assert_eq!(live_snapshot.layout.primary_pane, "live-room-workspace");
     }
 
     #[test]

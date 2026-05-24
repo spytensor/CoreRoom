@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.6"
+items = [
+  "plain cr now opens a current-session CoreRoom workspace, not old transcript history",
+  "submitted room input appears in the center with @host or explicit @role routing",
+  "the input strip is user-facing Ask @host while dashboard facts stay auxiliary",
+]
+
+[[whats_new]]
 version = "0.9.5"
 items = [
   "plain cr now opens the unified live room instead of dashboard-to-REPL",

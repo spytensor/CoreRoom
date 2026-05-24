@@ -188,7 +188,7 @@ impl LiveRoomBridge {
                 RoleLaneState::Idle
             };
             if role.role == *target_role {
-                role.last_activity = Some("queued by live room composer".to_owned());
+                role.last_activity = Some("received from room input".to_owned());
             }
         }
     }

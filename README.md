@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.5 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.6 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -47,7 +47,10 @@
 > `cr console --live-room`. **v0.9.5** makes that path the default: plain `cr`
 > opens the unified full-screen room, conversation and composer stay in the
 > main surface, dashboard rails update around them, and `cr start` is the
-> explicit legacy/direct REPL escape hatch.
+> explicit legacy/direct REPL escape hatch. **v0.9.6** corrects the product
+> shape: the default room starts as a current-session CoreRoom Workspace,
+> not a historical transcript; submitted user text appears in the center with
+> `@host` / explicit `@role` routing while dashboard facts stay auxiliary.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -126,7 +129,7 @@ which CoreRoom drives.
 Default entrypoints:
 
 ```bash
-cr          # unified full-screen room: conversation/composer plus dashboard facts
+cr          # live CoreRoom Workspace: user <-> @host work plus dashboard facts
 cr start    # direct legacy REPL escape hatch
 cr console  # read-only dashboard/snapshot inspection surface
 ```
@@ -155,7 +158,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.5
+TAG=v0.9.6
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \

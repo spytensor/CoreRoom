@@ -58,7 +58,7 @@ fn live_room_routes_explicit_role_mentions_with_existing_repl_semantics() {
     assert!(snapshot.runtime.roles.iter().any(|role| {
         role.role == "reviewer"
             && role.state == RoleLaneState::Working
-            && role.last_activity.as_deref() == Some("queued by live room composer")
+            && role.last_activity.as_deref() == Some("received from room input")
     }));
     assert!(snapshot
         .conversation
@@ -114,13 +114,13 @@ fn permission_overlay_stays_out_of_snapshot_conversation() {
 }
 
 #[test]
-fn live_room_frame_renders_dashboard_conversation_and_composer_together() {
+fn live_room_frame_renders_room_workspace_and_user_input_together() {
     let mut snapshot = snapshot();
     let mut bridge = LiveRoomBridge::from_snapshot(&snapshot);
     let mut composer = ComposerState::new(
         bridge.roles().to_vec(),
         live_room_command_specs(),
-        "type a task - @role - /help - /exit",
+        "Ask @host what to build, review, or fix",
     );
     composer.paste_str("@reviewer check the bridge");
     let _ = bridge
@@ -130,9 +130,11 @@ fn live_room_frame_renders_dashboard_conversation_and_composer_together() {
     let rendered =
         render_live_room_to_text(&snapshot, 180, 52, &composer, &bridge).expect("render");
 
-    assert!(rendered.contains("Conversation"));
+    assert!(rendered.contains("CoreRoom Workspace"));
     assert!(rendered.contains("Host-managed task cards"));
-    assert!(rendered.contains("Composer"));
-    assert!(rendered.contains("bridge queued for @reviewer"));
+    assert!(rendered.contains("Ask @host"));
+    assert!(rendered.contains("@reviewer received the request"));
+    assert!(!rendered.contains("Composer"));
+    assert!(!rendered.contains("bridge queued"));
     assert!(rendered.contains("@reviewer check the bridge"));
 }

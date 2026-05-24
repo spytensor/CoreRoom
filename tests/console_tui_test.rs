@@ -29,7 +29,7 @@ fn console_shell_renders_core_snapshot_facts() {
     assert!(rendered.contains("Gates"));
     assert!(rendered.contains("Evidence"));
     assert!(rendered.contains("Sources"));
-    assert!(rendered.contains("Conversation"));
+    assert!(rendered.contains("Transcript"));
     assert!(rendered.contains("Control Rail"));
     assert!(rendered.contains("@user <-> @host"));
     assert!(rendered.contains("◉ @host"));
@@ -98,7 +98,7 @@ fn console_shell_renders_active_navigation_view_and_detail_source() {
     assert!(rendered.contains("workorders detail"));
     assert!(rendered.contains("> WO-0242"));
     assert!(rendered.contains("tracker:#238"));
-    assert!(!rendered.contains("Public conversation:"));
+    assert!(!rendered.contains("Public transcript:"));
 }
 
 #[test]

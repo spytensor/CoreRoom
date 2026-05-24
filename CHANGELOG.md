@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.9.6] - 2026-05-24
+
+### Fixed
+
+- **Default room workspace (#315).** Plain `cr` now starts from a
+  current-session CoreRoom workspace instead of projecting historical
+  `.coreroom/messages.jsonl` into the main panel. Read-only `cr console`
+  keeps transcript projection for dashboard/debug inspection.
+- **User-facing room input (#315).** The default full-screen room now labels
+  the center as `CoreRoom Workspace`, shows an empty-room prompt, and renders
+  submitted user text plus `@host` / explicit `@role` routing state in the
+  center. The technical `Composer` and `bridge queued...` debug lines are no
+  longer part of the primary user surface.
+- **Live-room PTY dogfood (#315).** The release dogfood now writes stale old
+  message history before running plain `cr` and fails if that history appears
+  in the default live room. It also asserts that typed input appears in the
+  workspace and that read-only console paths remain available.
+
 ## [0.9.5] - 2026-05-24
 
 ### Fixed
@@ -1310,7 +1328,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/spytensor/CoreRoom/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/spytensor/CoreRoom/compare/v0.9.2...v0.9.3
