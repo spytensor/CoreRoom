@@ -5,9 +5,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::crep::{CrepEvent, TurnOutcome};
-use crate::output;
 use crate::permissions::BridgeRequestSink;
-use crate::room_io::RoomSink;
+use crate::room_io::{self, RoomSink};
 
 use super::permission_prompt;
 use super::render::render_event;
@@ -252,14 +251,14 @@ pub(super) async fn drain_one_turn(
             // user is asked the moment the engine pauses for approval,
             // not after the next tool trace flushes.
             request = bridge_rx.recv() => {
-                let Some(sink) = request else { continue };
-                let request_role = sink.request.role.clone();
-                let request_tool = sink.request.tool.clone();
-                let request_input = sink.request.input.clone();
+                let Some(request_sink) = request else { continue };
+                let request_role = request_sink.request.role.clone();
+                let request_tool = request_sink.request.tool.clone();
+                let request_input = request_sink.request.input.clone();
                 status.mark_waiting_approval(&request_role, &request_tool, &request_input);
                 status.clear();
-                if let Err(error) = permission_prompt::handle_request(sink, host_role).await {
-                    output::bad(format!("permission prompt failed: {error:#}"));
+                if let Err(error) = permission_prompt::handle_request(request_sink, host_role).await {
+                    room_io::emit_bad(sink.as_ref(), format!("permission prompt failed: {error:#}"));
                 }
                 status.clear_waiting_approval(&request_role);
                 status.repaint();
@@ -288,6 +287,7 @@ pub(super) async fn drain_one_turn(
                             authority_badges,
                             &mut pending_delta,
                             &mut stream_md_state,
+                            sink.as_ref(),
                         ) {
                             streamed_rendered_text.push_str(&rendered);
                         }
@@ -374,14 +374,15 @@ pub(super) async fn drain_one_turn(
                             });
                             status.clear();
                             if let Some(rendered) = render_stream_delta(
-                                role,
-                                host_role,
-                                authority_badges,
-                                &mut pending_delta,
-                                &mut stream_md_state,
-                            ) {
-                                streamed_rendered_text.push_str(&rendered);
-                            }
+                            role,
+                            host_role,
+                            authority_badges,
+                            &mut pending_delta,
+                            &mut stream_md_state,
+                            sink.as_ref(),
+                        ) {
+                            streamed_rendered_text.push_str(&rendered);
+                        }
                             if printed_working_card || cleaned.text.trim().is_empty() {
                                 work::render_card(&card);
                             }
@@ -399,7 +400,7 @@ pub(super) async fn drain_one_turn(
                                     width,
                                     &mut md_state,
                                 );
-                                println!("{rendered}");
+                                room_io::emit_line(sink.as_ref(), rendered);
                             }
                             true
                         }
@@ -441,7 +442,7 @@ pub(super) async fn drain_one_turn(
                                     .map(|n| format!("@{n}"))
                                     .collect::<Vec<_>>()
                                     .join(", ");
-                                output::hint(format!(
+                                room_io::emit_hint(sink.as_ref(), format!(
                                     "partial reply mentioned {names} (not dispatched)"
                                 ));
                             }
@@ -460,7 +461,7 @@ pub(super) async fn drain_one_turn(
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     status.clear();
-                    output::system(format!(
+                    room_io::emit_system(sink.as_ref(), format!(
                         "renderer fell behind, skipped {skipped} event(s)"
                     ));
                     status.repaint();
@@ -495,6 +496,7 @@ fn render_stream_delta(
     authority_badges: &str,
     pending: &mut String,
     state: &mut super::markdown::StreamMarkdownState,
+    sink: &dyn RoomSink,
 ) -> Option<String> {
     if pending.trim().is_empty() {
         pending.clear();
@@ -515,7 +517,7 @@ fn render_stream_delta(
         width,
         state,
     );
-    println!("{rendered}");
+    room_io::emit_line(sink, rendered);
     pending.clear();
     Some(text_delta)
 }

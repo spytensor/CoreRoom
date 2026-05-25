@@ -38,6 +38,7 @@ use crate::crep::{CrepEvent, StopReason, TurnOutcome};
 use crate::output;
 use crate::permissions::{BridgeHandle, BridgeRequestSink, PermissionPolicy};
 use crate::priors;
+use crate::room_io::{self, RoomSink};
 
 mod command;
 mod input;
@@ -56,7 +57,7 @@ pub use command::{parse_line, Command, PermissionCommand};
 use input::InputLine;
 use render::render_event;
 pub use show::{show_log, ShowOptions};
-use splash::{print_help, print_home};
+use splash::{render_help, render_home};
 
 /// Crate-internal accessor used by [`crate::room_io::StdoutSink`] to
 /// render one CREP event into the same single-line string the legacy
@@ -175,6 +176,7 @@ struct SpawnContext<'a> {
     permission_mode_override: Option<PermissionMode>,
     allow_large_priors: bool,
     bus: &'a Arc<MessageBus>,
+    sink: &'a dyn RoomSink,
 }
 
 /// Runtime options for `cr start`.
@@ -266,32 +268,40 @@ fn resume_guard_noninteractive_message(names: &[String]) -> String {
     )
 }
 
-fn confirm_resume_guard(names: &[String]) -> Result<bool> {
-    print!("{} Resume them? [y/N] ", resume_guard_prompt_message(names));
+fn confirm_resume_guard(names: &[String], sink: &dyn RoomSink) -> Result<bool> {
+    room_io::emit_banner(
+        sink,
+        format!("{} Resume them? [y/N] ", resume_guard_prompt_message(names)),
+    );
     std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
-fn clear_all_sessions_for_fresh_start(project_root: &Path, source: &str) {
+fn clear_all_sessions_for_fresh_start(project_root: &Path, source: &str, sink: &dyn RoomSink) {
     if let Err(error) = sessions::clear_all(project_root) {
-        output::warn(format!("{source}: could not clear prior sessions: {error}"));
+        room_io::emit_warn(
+            sink,
+            format!("{source}: could not clear prior sessions: {error}"),
+        );
     } else {
-        output::hint(format!(
-            "{source}: starting fresh — prior role sessions cleared"
-        ));
+        room_io::emit_hint(
+            sink,
+            format!("{source}: starting fresh — prior role sessions cleared"),
+        );
     }
     if let Err(error) = sessions::start_new_room_session(project_root) {
-        output::warn(format!(
-            "{source}: could not create fresh room session: {error}"
-        ));
+        room_io::emit_warn(
+            sink,
+            format!("{source}: could not create fresh room session: {error}"),
+        );
     }
 }
 
-fn maybe_note_resumed_role(pending: &mut BTreeSet<String>, role: &str) {
+fn maybe_note_resumed_role(pending: &mut BTreeSet<String>, role: &str, sink: &dyn RoomSink) {
     if pending.remove(role) {
-        output::warn(format!(
+        room_io::emit_warn(sink, format!(
             "@{role} is using a resumed engine session — use `/refresh @{role}` or `/fresh` for clean context"
         ));
     }
@@ -325,7 +335,7 @@ pub async fn run_with_options_and_sink(
         if !coreroom_dir.exists() {
             return Ok(());
         }
-        println!();
+        room_io::emit_banner(sink.as_ref(), "\n");
     }
 
     let mut cfg = Config::load(project_root)
@@ -333,12 +343,15 @@ pub async fn run_with_options_and_sink(
     if crate::init::offer_role_expansion(project_root, &cfg)? {
         cfg = Config::load(project_root)
             .with_context(|| format!("reloading config in {}", project_root.display()))?;
-        println!();
+        room_io::emit_banner(sink.as_ref(), "\n");
     }
-    warn_if_priors_lock_drift(&coreroom_dir, options.allow_large_priors);
+    warn_if_priors_lock_drift(&coreroom_dir, options.allow_large_priors, sink.as_ref());
 
     let first_run = is_first_run(&coreroom_dir);
-    print_home(&cfg, &coreroom_dir, project_root, first_run);
+    room_io::emit_banner(
+        sink.as_ref(),
+        render_home(&cfg, &coreroom_dir, project_root, first_run),
+    );
     crate::update::maybe_notify_on_start();
     if first_run {
         mark_welcomed(&coreroom_dir).await;
@@ -353,18 +366,28 @@ pub async fn run_with_options_and_sink(
     let mut resumed_roles = BTreeSet::new();
     if options.fresh {
         if let Err(error) = sessions::clear_all(project_root) {
-            output::warn(format!(
-                "could not clear prior sessions for --fresh: {error}"
-            ));
+            room_io::emit_warn(
+                sink.as_ref(),
+                format!("could not clear prior sessions for --fresh: {error}"),
+            );
         } else {
-            output::hint("starting fresh — prior role sessions cleared");
+            room_io::emit_hint(
+                sink.as_ref(),
+                "starting fresh — prior role sessions cleared",
+            );
         }
         if let Err(error) = sessions::start_new_room_session(project_root) {
-            output::warn(format!("could not create fresh room session: {error}"));
+            room_io::emit_warn(
+                sink.as_ref(),
+                format!("could not create fresh room session: {error}"),
+            );
         }
     } else {
         if let Err(error) = sessions::ensure_current_room_session(project_root) {
-            output::warn(format!("could not prepare room session history: {error}"));
+            room_io::emit_warn(
+                sink.as_ref(),
+                format!("could not prepare room session history: {error}"),
+            );
         }
         // Surface which roles will actually resume so the user
         // isn't surprised. Stale synthetic placeholders are filtered
@@ -372,14 +395,17 @@ pub async fn run_with_options_and_sink(
         let resumed_wired = resumable_role_names(project_root, &cfg);
         if !resumed_wired.is_empty() {
             if interactive_tty {
-                if confirm_resume_guard(&resumed_wired)? {
-                    output::warn(resume_guard_resume_message(&resumed_wired));
+                if confirm_resume_guard(&resumed_wired, sink.as_ref())? {
+                    room_io::emit_warn(sink.as_ref(), resume_guard_resume_message(&resumed_wired));
                     resumed_roles = resumed_wired.into_iter().collect();
                 } else {
-                    clear_all_sessions_for_fresh_start(project_root, "resume guard");
+                    clear_all_sessions_for_fresh_start(project_root, "resume guard", sink.as_ref());
                 }
             } else {
-                output::warn(resume_guard_noninteractive_message(&resumed_wired));
+                room_io::emit_warn(
+                    sink.as_ref(),
+                    resume_guard_noninteractive_message(&resumed_wired),
+                );
                 resumed_roles = resumed_wired.into_iter().collect();
             }
         }
@@ -392,9 +418,12 @@ pub async fn run_with_options_and_sink(
 
     let permission_policy_path = crate::permissions::policy_path_for_coreroom(&coreroom_dir);
     ensure_permission_policy(&permission_policy_path)?;
-    surface_existing_permission_policy(&permission_policy_path);
+    surface_existing_permission_policy(&permission_policy_path, sink.as_ref());
     if options.permission_mode_override == Some(PermissionMode::Bypass) {
-        output::warn("permission_mode=bypass is active for this session");
+        room_io::emit_warn(
+            sink.as_ref(),
+            "permission_mode=bypass is active for this session",
+        );
     }
 
     // Permission IPC bridge — hook subprocesses connect over this Unix
@@ -408,9 +437,12 @@ pub async fn run_with_options_and_sink(
     let (bridge_handle, bridge_rx) = match crate::permissions::bridge::start(socket_path) {
         Ok((handle, rx)) => (Some(handle), rx),
         Err(error) => {
-            output::warn(format!(
-                "permission bridge unavailable ({error}); ask-mode tool requests will deny"
-            ));
+            room_io::emit_warn(
+                sink.as_ref(),
+                format!(
+                    "permission bridge unavailable ({error}); ask-mode tool requests will deny"
+                ),
+            );
             let (_dead_tx, rx) = tokio::sync::mpsc::channel::<BridgeRequestSink>(1);
             (None, rx)
         }
@@ -431,6 +463,7 @@ pub async fn run_with_options_and_sink(
             permission_mode_override: options.permission_mode_override,
             allow_large_priors: options.allow_large_priors,
             bus: &bus,
+            sink: sink.as_ref(),
         };
         let running = spawn_role(&spawn_context, &name).await?;
         roles.insert(name, running);
@@ -510,11 +543,11 @@ pub async fn run_with_options_and_sink(
                     recent
                 };
                 if was_recent {
-                    output::system("Ctrl-C twice; stopping all roles");
+                    room_io::emit_system(sink.as_ref(), "Ctrl-C twice; stopping all roles");
                     shutdown_all_roles(&mut roles, StopReason::Crashed);
                     anyhow::bail!("interrupted");
                 }
-                output::system(format!(
+                room_io::emit_system(sink.as_ref(), format!(
                     "Ctrl-C → no turn in flight. Press again within {}s to exit, or /halt to interrupt later.",
                     CTRL_C_DOUBLE_PRESS_WINDOW.as_secs()
                 ));
@@ -528,14 +561,14 @@ pub async fn run_with_options_and_sink(
                 break;
             }
             Command::Help => {
-                print_help(&cfg);
+                room_io::emit_banner(sink.as_ref(), render_help(&cfg));
             }
             Command::Stop(role) => {
                 if let Some(running) = roles.remove(&role) {
                     stop_running_role(&role, running, StopReason::Completed);
-                    output::system(format!("stopped @{role}"));
+                    room_io::emit_system(sink.as_ref(), format!("stopped @{role}"));
                 } else {
-                    output::bad(format!("no such role: @{role}"));
+                    room_io::emit_bad(sink.as_ref(), format!("no such role: @{role}"));
                 }
             }
             Command::Refresh(role) => {
@@ -548,8 +581,9 @@ pub async fn run_with_options_and_sink(
                     permission_mode_override: options.permission_mode_override,
                     allow_large_priors: options.allow_large_priors,
                     bus: &bus,
+                    sink: sink.as_ref(),
                 };
-                refresh_role(&spawn_context, &mut roles, &role).await;
+                refresh_role(&spawn_context, &mut roles, &role, sink.as_ref()).await;
                 resumed_notice_pending.remove(&role);
             }
             Command::Fresh => {
@@ -562,8 +596,9 @@ pub async fn run_with_options_and_sink(
                     permission_mode_override: options.permission_mode_override,
                     allow_large_priors: options.allow_large_priors,
                     bus: &bus,
+                    sink: sink.as_ref(),
                 };
-                handle_fresh(&spawn_context, &mut roles, project_root).await;
+                handle_fresh(&spawn_context, &mut roles, project_root, sink.as_ref()).await;
                 resumed_notice_pending.clear();
             }
             Command::Resume(selector) => {
@@ -576,12 +611,14 @@ pub async fn run_with_options_and_sink(
                     permission_mode_override: options.permission_mode_override,
                     allow_large_priors: options.allow_large_priors,
                     bus: &bus,
+                    sink: sink.as_ref(),
                 };
                 handle_resume(
                     &spawn_context,
                     &mut roles,
                     selector.as_deref(),
                     project_root,
+                    sink.as_ref(),
                 )
                 .await;
                 resumed_notice_pending = resumable_role_names(project_root, &cfg)
@@ -589,7 +626,7 @@ pub async fn run_with_options_and_sink(
                     .collect();
             }
             Command::Transcript(role) => {
-                show_transcript(&coreroom_dir, &role, &cfg.host_role).await;
+                show_transcript(&coreroom_dir, &role, &cfg.host_role, sink.as_ref()).await;
             }
             Command::Journal(role) => {
                 write_journal(
@@ -606,51 +643,58 @@ pub async fn run_with_options_and_sink(
                 )
                 .await;
             }
-            Command::Halt(target) => handle_halt(&roles, target.as_deref()).await,
-            Command::Compact(target) => handle_compact(&roles, &target).await,
+            Command::Halt(target) => handle_halt(&roles, target.as_deref(), sink.as_ref()).await,
+            Command::Compact(target) => handle_compact(&roles, &target, sink.as_ref()).await,
             Command::Welcome => {
-                print_home(&cfg, &coreroom_dir, project_root, false);
+                room_io::emit_banner(
+                    sink.as_ref(),
+                    render_home(&cfg, &coreroom_dir, project_root, false),
+                );
             }
             Command::Allow(tool) => {
-                update_permission_policy(&permission_policy_path, &tool, true);
+                update_permission_policy(&permission_policy_path, &tool, true, sink.as_ref());
             }
             Command::Deny(tool) => {
-                update_permission_policy(&permission_policy_path, &tool, false);
+                update_permission_policy(&permission_policy_path, &tool, false, sink.as_ref());
             }
             Command::Permissions(PermissionCommand::Show) => {
-                show_permission_policy(&permission_policy_path);
+                show_permission_policy(&permission_policy_path, sink.as_ref());
             }
             Command::Permissions(PermissionCommand::Clear) => {
-                clear_permission_policy(&permission_policy_path);
+                clear_permission_policy(&permission_policy_path, sink.as_ref());
             }
             Command::Host(role) => {
                 if cfg.roles.contains_key(&role) {
                     cfg.host_role.clone_from(&role);
-                    output::ok(format!("@{role} is host for this session"));
+                    room_io::emit_ok(sink.as_ref(), format!("@{role} is host for this session"));
                 } else {
-                    output::bad(format!("no such role: @{role}"));
+                    room_io::emit_bad(sink.as_ref(), format!("no such role: @{role}"));
                 }
             }
             Command::Patch { role, text } => {
                 if !cfg.roles.contains_key(&role) {
-                    output::bad(format!("no such role: @{role}"));
+                    room_io::emit_bad(sink.as_ref(), format!("no such role: @{role}"));
                     continue;
                 }
                 match priors::write_patch(&coreroom_dir, &role, &text) {
                     Ok(outcome) => {
-                        output::ok(format!("patched @{role} → {}", outcome.path.display()));
+                        room_io::emit_ok(
+                            sink.as_ref(),
+                            format!("patched @{role} → {}", outcome.path.display()),
+                        );
                         if let Some(archived) = outcome.archived {
-                            output::hint(format!(
-                                "(cap reached; archived oldest → {})",
-                                archived.display()
-                            ));
+                            room_io::emit_hint(
+                                sink.as_ref(),
+                                format!("(cap reached; archived oldest → {})", archived.display()),
+                            );
                         }
-                        output::hint(
+                        room_io::emit_hint(
+                            sink.as_ref(),
                             "applies to next /refresh; current session still uses old priors",
                         );
                     }
                     Err(error) => {
-                        output::bad(format!("patch failed: {error:#}"));
+                        room_io::emit_bad(sink.as_ref(), format!("patch failed: {error:#}"));
                     }
                 }
             }
@@ -674,19 +718,22 @@ pub async fn run_with_options_and_sink(
             Command::Broadcast(text) => {
                 let mut names: Vec<String> = roles.keys().cloned().collect();
                 names.sort();
-                println!(
-                    "  {} {}",
-                    "↳".with(output::FADE),
+                room_io::emit_line(
+                    sink.as_ref(),
                     format!(
-                        "broadcast → {}",
-                        names
-                            .iter()
-                            .map(|n| format!("@{n}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                    .with(output::DIM)
-                    .italic(),
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        format!(
+                            "broadcast → {}",
+                            names
+                                .iter()
+                                .map(|n| format!("@{n}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                        .with(output::DIM)
+                        .italic(),
+                    ),
                 );
                 for role in names {
                     send_and_drain(
@@ -731,7 +778,7 @@ pub async fn run_with_options_and_sink(
     Ok(())
 }
 
-fn warn_if_priors_lock_drift(coreroom_dir: &Path, allow_large_priors: bool) {
+fn warn_if_priors_lock_drift(coreroom_dir: &Path, allow_large_priors: bool, sink: &dyn RoomSink) {
     let report = crate::lock::verify(
         coreroom_dir,
         priors::ComposeOptions {
@@ -749,13 +796,13 @@ fn warn_if_priors_lock_drift(coreroom_dir: &Path, allow_large_priors: bool) {
                     report.drifts.len() - summary.len()
                 ));
             }
-            output::warn(format!(
+            room_io::emit_warn(sink, format!(
                 "priors.lock is out of sync: {}; run `cr lock` after reviewing intentional priors changes",
                 summary.join("; ")
             ));
         }
         Err(error) => {
-            output::warn(format!("could not verify priors.lock: {error:#}"));
+            room_io::emit_warn(sink, format!("could not verify priors.lock: {error:#}"));
         }
     }
 }
@@ -817,7 +864,7 @@ fn ensure_permission_policy_gitignored(path: &Path) -> Result<()> {
         .with_context(|| format!("writing {}", ignore_path.display()))
 }
 
-fn update_permission_policy(path: &Path, tool: &str, allow: bool) {
+fn update_permission_policy(path: &Path, tool: &str, allow: bool, sink: &dyn RoomSink) {
     let result = crate::permissions::update_policy(path, |policy| {
         if allow {
             policy.allow_tool(tool);
@@ -826,9 +873,12 @@ fn update_permission_policy(path: &Path, tool: &str, allow: bool) {
         }
     });
     match result {
-        Ok(_) if allow => output::ok(format!("{tool} allowed for this session")),
-        Ok(_) => output::ok(format!("{tool} denied for this session")),
-        Err(error) => output::bad(format!("updating permission policy failed: {error:#}")),
+        Ok(_) if allow => room_io::emit_ok(sink, format!("{tool} allowed for this session")),
+        Ok(_) => room_io::emit_ok(sink, format!("{tool} denied for this session")),
+        Err(error) => room_io::emit_bad(
+            sink,
+            format!("updating permission policy failed: {error:#}"),
+        ),
     }
 }
 
@@ -836,30 +886,41 @@ fn permission_policy_summary(path: &Path) -> Result<Option<String>> {
     Ok(PermissionPolicy::load(path)?.summary())
 }
 
-fn surface_existing_permission_policy(path: &Path) {
+fn surface_existing_permission_policy(path: &Path, sink: &dyn RoomSink) {
     match permission_policy_summary(path) {
-        Ok(Some(summary)) => output::warn(format!(
-            "permission policy active: {summary} — `/permissions clear` resets task approvals"
-        )),
+        Ok(Some(summary)) => room_io::emit_warn(
+            sink,
+            format!(
+                "permission policy active: {summary} — `/permissions clear` resets task approvals"
+            ),
+        ),
         Ok(None) => {}
-        Err(error) => output::bad(format!("reading permission policy failed: {error:#}")),
+        Err(error) => {
+            room_io::emit_bad(sink, format!("reading permission policy failed: {error:#}"));
+        }
     }
 }
 
-fn show_permission_policy(path: &Path) {
+fn show_permission_policy(path: &Path, sink: &dyn RoomSink) {
     match permission_policy_summary(path) {
-        Ok(Some(summary)) => output::system(format!(
-            "permission policy active: {summary} — `/permissions clear` resets it"
-        )),
-        Ok(None) => output::hint("permission policy is empty"),
-        Err(error) => output::bad(format!("reading permission policy failed: {error:#}")),
+        Ok(Some(summary)) => room_io::emit_system(
+            sink,
+            format!("permission policy active: {summary} — `/permissions clear` resets it"),
+        ),
+        Ok(None) => room_io::emit_hint(sink, "permission policy is empty"),
+        Err(error) => {
+            room_io::emit_bad(sink, format!("reading permission policy failed: {error:#}"));
+        }
     }
 }
 
-fn clear_permission_policy(path: &Path) {
+fn clear_permission_policy(path: &Path, sink: &dyn RoomSink) {
     match crate::permissions::clear_policy(path) {
-        Ok(_) => output::ok("permission approvals cleared for this task"),
-        Err(error) => output::bad(format!("clearing permission policy failed: {error:#}")),
+        Ok(_) => room_io::emit_ok(sink, "permission approvals cleared for this task"),
+        Err(error) => room_io::emit_bad(
+            sink,
+            format!("clearing permission policy failed: {error:#}"),
+        ),
     }
 }
 
@@ -901,6 +962,7 @@ async fn mark_welcomed(coreroom_dir: &Path) {
 ///    hallucination stops with that turn.
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "REPL command plumbing passes role maps, event drains, bridge, and Ctrl-C state"
 )]
 async fn send_and_drain(
@@ -926,7 +988,7 @@ async fn send_and_drain(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let home = dirs::home_dir();
     if let Err(error) = crate::image_paths::parse_image_refs(text, &cwd, home.as_deref()) {
-        output::bad(format!("image: {error}"));
+        room_io::emit_bad(sink.as_ref(), format!("image: {error}"));
         return Ok(());
     }
 
@@ -935,7 +997,7 @@ async fn send_and_drain(
     let mut dispatcher = RouteDispatcher::new_root(role, text);
 
     while let Some(current) = dispatcher.pop_next() {
-        maybe_note_resumed_role(resumed_notice_pending, &current.role);
+        maybe_note_resumed_role(resumed_notice_pending, &current.role, sink.as_ref());
         let priors_hash = roles
             .get(&current.role)
             .map_or("", |running| running.priors_hash.as_str());
@@ -963,18 +1025,23 @@ async fn send_and_drain(
             // those follow-ups did not silently fire.
             let pending = dispatcher.pending_count();
             if pending > 0 {
-                println!(
-                    "  {} {}",
-                    "↳".with(output::FADE),
-                    format!("{pending} follow-up turn(s) discarded after halt — re-issue manually if needed")
-                    .with(output::DIM)
-                    .italic(),
+                room_io::emit_line(
+                    sink.as_ref(),
+                    format!(
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        format!("{pending} follow-up turn(s) discarded after halt — re-issue manually if needed")
+                        .with(output::DIM)
+                        .italic(),
+                    ),
                 );
             }
             return Ok(());
         };
 
-        if record_phase_block_if_declared(bus, project_root, &current, &captured).await? {
+        if record_phase_block_if_declared(bus, project_root, &current, &captured, sink.as_ref())
+            .await?
+        {
             continue;
         }
 
@@ -1007,15 +1074,18 @@ async fn send_and_drain(
             } else {
                 format!("all {} tool calls failed", activity.proposed)
             };
-            println!(
-                "  {} {}",
-                "↳".with(output::FADE),
+            room_io::emit_line(
+                sink.as_ref(),
                 format!(
-                    "skipping auto-route: @{} had {summary} this turn{suggestion}",
-                    current.role
-                )
-                .with(output::DIM)
-                .italic(),
+                    "  {} {}",
+                    "↳".with(output::FADE),
+                    format!(
+                        "skipping auto-route: @{} had {summary} this turn{suggestion}",
+                        current.role
+                    )
+                    .with(output::DIM)
+                    .italic(),
+                ),
             );
             continue;
         }
@@ -1031,16 +1101,19 @@ async fn send_and_drain(
         // outcome claim is itself a guess.
         if !matches!(captured.outcome, TurnOutcome::Continue) {
             if !route_instructions.is_empty() {
-                println!(
-                    "  {} {}",
-                    "↳".with(output::FADE),
+                room_io::emit_line(
+                    sink.as_ref(),
                     format!(
-                        "skipping auto-route: @{} declared {} — not routing this reply's delegations",
-                        current.role,
-                        captured.outcome.label(),
-                    )
-                    .with(output::DIM)
-                    .italic(),
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        format!(
+                            "skipping auto-route: @{} declared {} — not routing this reply's delegations",
+                            current.role,
+                            captured.outcome.label(),
+                        )
+                        .with(output::DIM)
+                        .italic(),
+                    ),
                 );
             }
             continue;
@@ -1054,16 +1127,19 @@ async fn send_and_drain(
         let route_count = route_instructions.len();
         for (route_index, instruction) in route_instructions.into_iter().enumerate() {
             if !dispatcher.accepts_fan_out_index(route_index) {
-                println!(
-                    "  {} {}",
-                    "↳".with(output::FADE),
+                room_io::emit_line(
+                    sink.as_ref(),
                     format!(
-                        "skipping auto-route: @{} proposed {route_count} follow-up(s); max fan-out per turn is {}",
-                        current.role,
-                        dispatcher.max_fan_out_per_turn()
-                    )
-                    .with(output::DIM)
-                    .italic(),
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        format!(
+                            "skipping auto-route: @{} proposed {route_count} follow-up(s); max fan-out per turn is {}",
+                            current.role,
+                            dispatcher.max_fan_out_per_turn()
+                        )
+                        .with(output::DIM)
+                        .italic(),
+                    ),
                 );
                 break;
             }
@@ -1085,10 +1161,13 @@ async fn send_and_drain(
                 depth: current.depth + 1,
             };
             if let Err(skip) = dispatcher.enqueue_auto_route(queued) {
-                println!(
-                    "  {} {}",
-                    "↳".with(output::FADE),
-                    skip.message().with(output::DIM).italic(),
+                room_io::emit_line(
+                    sink.as_ref(),
+                    format!(
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        skip.message().with(output::DIM).italic(),
+                    ),
                 );
                 continue;
             }
@@ -1097,15 +1176,15 @@ async fn send_and_drain(
             // the parent reply triggered this hop. The handoff
             // banner from #98 then renders right beneath this when
             // the child role's turn actually starts.
-            println!(
-                "{}",
+            room_io::emit_line(
+                sink.as_ref(),
                 render::format_reply_quote(
                     &instruction.target,
                     &current.role,
                     host_role,
                     &instruction.brief,
-                    width
-                )
+                    width,
+                ),
             );
         }
     }
@@ -1118,6 +1197,7 @@ async fn record_phase_block_if_declared(
     project_root: &Path,
     current: &QueuedTurn,
     captured: &CapturedTurn,
+    sink: &dyn RoomSink,
 ) -> Result<bool> {
     let Some(reason) = captured.phase_block.as_deref() else {
         return Ok(false);
@@ -1133,19 +1213,22 @@ async fn record_phase_block_if_declared(
                 reason: block.reason,
             })
             .await?;
-            println!(
-                "  {} {}",
-                "⊘".with(output::WARN),
+            room_io::emit_line(
+                sink,
                 format!(
-                    "@{} blocked {} phase — not routing follow-up delegations",
-                    current.role,
-                    block.phase.label()
-                )
-                .with(output::DIM)
-                .italic(),
+                    "  {} {}",
+                    "⊘".with(output::WARN),
+                    format!(
+                        "@{} blocked {} phase — not routing follow-up delegations",
+                        current.role,
+                        block.phase.label()
+                    )
+                    .with(output::DIM)
+                    .italic(),
+                ),
             );
         }
-        Err(error) => output::bad(format!("phase block not recorded: {error:#}")),
+        Err(error) => room_io::emit_bad(sink, format!("phase block not recorded: {error:#}")),
     }
     Ok(true)
 }
@@ -1682,7 +1765,7 @@ async fn drain_one_turn_handling_ctrl_c(
             running.authority_badges.clone(),
         )
     }) else {
-        output::bad(format!("no such role: @{role}"));
+        room_io::emit_bad(sink.as_ref(), format!("no such role: @{role}"));
         return Ok(None);
     };
     let work_state = Arc::new(Mutex::new(TurnWork::new(role, host_role, text)));
@@ -1724,11 +1807,11 @@ async fn drain_one_turn_handling_ctrl_c(
                     .expect("turn work mutex poisoned")
                     .interrupted_card("Ctrl-C twice — exiting REPL");
                 render_card(&card);
-                output::system("Ctrl-C twice; stopping all roles");
+                room_io::emit_system(sink.as_ref(), "Ctrl-C twice; stopping all roles");
                 shutdown_all_roles(roles, StopReason::Crashed);
                 anyhow::bail!("interrupted");
             }
-            output::system(format!(
+            room_io::emit_system(sink.as_ref(), format!(
                 "Ctrl-C → halting @{role} (press again within {}s to exit)",
                 CTRL_C_DOUBLE_PRESS_WINDOW.as_secs()
             ));
@@ -1750,7 +1833,7 @@ async fn drain_one_turn_handling_ctrl_c(
                             CANCEL_SLO.as_secs()
                         ));
                     render_card(&card);
-                    output::bad(format!(
+                    room_io::emit_bad(sink.as_ref(), format!(
                         "@{role} did not respond to halt within {}s; killing role",
                         CANCEL_SLO.as_secs()
                     ));
@@ -1779,10 +1862,14 @@ const CTRL_C_DOUBLE_PRESS_WINDOW: Duration = Duration::from_secs(2);
 /// § F.1 fallback). When invoked between turns this is a near-no-op:
 /// the channel buffers the request and the next-turn drain picks it
 /// up, or the message is silently dropped if no turn arrives soon.
-async fn handle_halt(roles: &HashMap<String, RunningRole>, target: Option<&str>) {
+async fn handle_halt(
+    roles: &HashMap<String, RunningRole>,
+    target: Option<&str>,
+    sink: &dyn RoomSink,
+) {
     let mut targets: Vec<&String> = if let Some(name) = target {
         if !roles.contains_key(name) {
-            output::bad(format!("no such role: @{name}"));
+            room_io::emit_bad(sink, format!("no such role: @{name}"));
             return;
         }
         roles.keys().filter(|k| *k == name).collect()
@@ -1802,7 +1889,7 @@ async fn handle_halt(roles: &HashMap<String, RunningRole>, target: Option<&str>)
         }
     }
     let label = target.map_or_else(|| "all roles".to_owned(), |n| format!("@{n}"));
-    output::system(format!("/halt → {label}"));
+    room_io::emit_system(sink, format!("/halt → {label}"));
 }
 
 /// Handle `/compact <role|all>` from the prompt. This is deliberately
@@ -1810,10 +1897,10 @@ async fn handle_halt(roles: &HashMap<String, RunningRole>, target: Option<&str>)
 /// usage telemetry first. Unsupported engines report honestly instead of
 /// pretending wrapper-side summarization is equivalent to engine-native
 /// context compaction.
-async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str) {
+async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str, sink: &dyn RoomSink) {
     let normalized = target.strip_prefix('@').unwrap_or(target).trim();
     if normalized.is_empty() {
-        output::bad("usage: /compact <role|all>");
+        room_io::emit_bad(sink, "usage: /compact <role|all>");
         return;
     }
     let mut targets: Vec<&String> = if normalized == "all" {
@@ -1824,7 +1911,7 @@ async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str) {
             .filter(|name| name.as_str() == normalized)
             .collect()
     } else {
-        output::bad(format!("no such role: @{normalized}"));
+        room_io::emit_bad(sink, format!("no such role: @{normalized}"));
         return;
     };
     targets.sort();
@@ -1833,30 +1920,32 @@ async fn handle_compact(roles: &HashMap<String, RunningRole>, target: &str) {
         let Some(running) = roles.get(name) else {
             continue;
         };
-        output::system(format!(
-            "/compact -> @{} ({})",
-            name,
-            running.engine.as_str()
-        ));
+        room_io::emit_system(
+            sink,
+            format!("/compact -> @{} ({})", name, running.engine.as_str()),
+        );
         let (tx, rx) = oneshot::channel();
         if let Err(error) = running.dispatcher.send_compact(tx).await {
             debug!(role = %name, %error, "compact request channel closed");
-            output::bad(format!("@{name}: compact request could not be delivered"));
+            room_io::emit_bad(
+                sink,
+                format!("@{name}: compact request could not be delivered"),
+            );
             continue;
         }
         match rx.await {
             Ok(CompactResult::Completed) => {
-                output::ok(format!("@{name}: live context compacted"));
+                room_io::emit_ok(sink, format!("@{name}: live context compacted"));
             }
             Ok(CompactResult::Unsupported { reason }) => {
-                output::warn(format!("@{name}: compact unsupported: {reason}"));
+                room_io::emit_warn(sink, format!("@{name}: compact unsupported: {reason}"));
             }
             Ok(CompactResult::Failed { reason }) => {
-                output::bad(format!("@{name}: compact failed: {reason}"));
+                room_io::emit_bad(sink, format!("@{name}: compact failed: {reason}"));
             }
             Err(error) => {
                 debug!(role = %name, %error, "compact response channel dropped");
-                output::bad(format!("@{name}: compact response channel closed"));
+                room_io::emit_bad(sink, format!("@{name}: compact response channel closed"));
             }
         }
     }
@@ -1890,7 +1979,7 @@ async fn write_journal(
     sink: &Arc<dyn crate::room_io::RoomSink>,
 ) {
     if !roles.contains_key(role) {
-        output::bad(format!("no such role: @{role}"));
+        room_io::emit_bad(sink.as_ref(), format!("no such role: @{role}"));
         return;
     }
 
@@ -1900,9 +1989,12 @@ async fn write_journal(
         - a repo file path (`src/auth/verify.go`).\n\
         Do not include claims you can't cite. Keep it under 30 lines.";
 
-    println!(
-        "{}",
-        format!("asking @{role} for a journal entry...").with(output::DIM)
+    room_io::emit_line(
+        sink.as_ref(),
+        format!(
+            "{}",
+            format!("asking @{role} for a journal entry...").with(output::DIM),
+        ),
     );
 
     let turn = QueuedTurn {
@@ -1932,7 +2024,10 @@ async fn write_journal(
     )
     .await
     else {
-        output::bad(format!("@{role} did not produce a journal entry"));
+        room_io::emit_bad(
+            sink.as_ref(),
+            format!("@{role} did not produce a journal entry"),
+        );
         return;
     };
 
@@ -1941,7 +2036,10 @@ async fn write_journal(
         .join(priors::JOURNAL_DIR)
         .join(today.format("%Y-%m-%d").to_string());
     if let Err(error) = tokio::fs::create_dir_all(&day_dir).await {
-        output::bad(format!("failed to create {}: {error}", day_dir.display()));
+        room_io::emit_bad(
+            sink.as_ref(),
+            format!("failed to create {}: {error}", day_dir.display()),
+        );
         return;
     }
     let path = day_dir.join(format!("{role}.md"));
@@ -1951,33 +2049,45 @@ async fn write_journal(
         format!("{}\n", captured.text)
     };
     if let Err(error) = tokio::fs::write(&path, body).await {
-        output::bad(format!("failed to write {}: {error}", path.display()));
+        room_io::emit_bad(
+            sink.as_ref(),
+            format!("failed to write {}: {error}", path.display()),
+        );
         return;
     }
 
-    output::ok(format!("journal saved → {}", path.display()));
-    output::hint("next spawn (or /refresh) will load this entry into the role's priors");
+    room_io::emit_ok(sink.as_ref(), format!("journal saved → {}", path.display()));
+    room_io::emit_hint(
+        sink.as_ref(),
+        "next spawn (or /refresh) will load this entry into the role's priors",
+    );
 }
 
 /// In-REPL: print the last few RoleSpoke events for `role` from the
 /// active session's message log.
-async fn show_transcript(coreroom_dir: &Path, role: &str, host_role: &str) {
+async fn show_transcript(coreroom_dir: &Path, role: &str, host_role: &str, sink: &dyn RoomSink) {
     const TAIL: usize = 5;
     let log_path = coreroom_dir.join("messages.jsonl");
     if !log_path.is_file() {
-        println!(
-            "{}",
-            "(no messages logged yet this session)".with(output::DIM)
+        room_io::emit_line(
+            sink,
+            format!(
+                "{}",
+                "(no messages logged yet this session)".with(output::DIM)
+            ),
         );
         return;
     }
     match MessageBus::replay(&log_path).await {
         Ok(replay) => {
             if replay.skipped_malformed > 0 {
-                output::warn(format!(
-                    "{} corrupted line(s) skipped while reading transcript",
-                    replay.skipped_malformed
-                ));
+                room_io::emit_warn(
+                    sink,
+                    format!(
+                        "{} corrupted line(s) skipped while reading transcript",
+                        replay.skipped_malformed
+                    ),
+                );
             }
             let filtered: Vec<&CrepEvent> = replay
                 .events
@@ -1985,33 +2095,34 @@ async fn show_transcript(coreroom_dir: &Path, role: &str, host_role: &str) {
                 .filter(|e| matches!(e, CrepEvent::RoleSpoke { role: r, .. } if r == role))
                 .collect();
             if filtered.is_empty() {
-                println!(
-                    "{}",
-                    format!("(no spoken turns from @{role} yet)").with(output::DIM)
+                room_io::emit_line(
+                    sink,
+                    format!(
+                        "{}",
+                        format!("(no spoken turns from @{role} yet)").with(output::DIM)
+                    ),
                 );
                 return;
             }
             let start = filtered.len().saturating_sub(TAIL);
-            println!(
-                "{}",
+            room_io::emit_line(
+                sink,
                 format!(
-                    "── @{role}: last {} of {} turn(s) ──",
-                    filtered.len() - start,
-                    filtered.len()
-                )
-                .with(output::DIM)
+                    "{}",
+                    format!(
+                        "── @{role}: last {} of {} turn(s) ──",
+                        filtered.len() - start,
+                        filtered.len()
+                    )
+                    .with(output::DIM),
+                ),
             );
-            // `/transcript` always writes to stdout — it is a slash
-            // command that exists to print history to the user. The
-            // runtime's pluggable sink (`run_with_options_and_sink`)
-            // does not apply here.
-            let sink = crate::room_io::StdoutSink;
             for event in &filtered[start..] {
-                render_event(event, host_role, &sink);
+                render_event(event, host_role, sink);
             }
         }
         Err(error) => {
-            output::bad(format!("failed to read message log: {error}"));
+            room_io::emit_bad(sink, format!("failed to read message log: {error}"));
         }
     }
 }
@@ -2024,19 +2135,23 @@ async fn refresh_role(
     context: &SpawnContext<'_>,
     roles: &mut HashMap<String, RunningRole>,
     role: &str,
+    sink: &dyn RoomSink,
 ) {
     if !context.cfg.roles.contains_key(role) {
-        output::bad(format!("no such role: @{role}"));
+        room_io::emit_bad(sink, format!("no such role: @{role}"));
         return;
     }
     if let Some(old) = roles.remove(role) {
         stop_running_role(role, old, StopReason::Refreshed);
         // ⟳ is `warn` per docs/colors.md §4 — refresh is "attention,
         // non-fatal," not success or failure.
-        println!(
-            "{} {}",
-            "⟳".with(output::WARN),
-            format!("refreshing @{role}...").with(output::TEXT),
+        room_io::emit_line(
+            sink,
+            format!(
+                "{} {}",
+                "⟳".with(output::WARN),
+                format!("refreshing @{role}...").with(output::TEXT),
+            ),
         );
     }
     // Clear the persisted resume id so the refreshed role starts a
@@ -2058,10 +2173,10 @@ async fn refresh_role(
     match spawn_role(context, role).await {
         Ok(running) => {
             roles.insert(role.to_owned(), running);
-            output::ok(format!("@{role} refreshed"));
+            room_io::emit_ok(sink, format!("@{role} refreshed"));
         }
         Err(error) => {
-            output::bad(format!("refreshing @{role} failed: {error:#}"));
+            room_io::emit_bad(sink, format!("refreshing @{role} failed: {error:#}"));
         }
     }
 }
@@ -2071,17 +2186,18 @@ async fn handle_resume(
     roles: &mut HashMap<String, RunningRole>,
     selector: Option<&str>,
     project_root: &Path,
+    sink: &dyn RoomSink,
 ) {
     let session = match selector.map(str::trim).filter(|s| !s.is_empty()) {
         Some(selector) => match sessions::resolve_room_session(project_root, selector) {
             Ok(Some(session)) => session,
             Ok(None) => {
-                output::bad(format!("no saved room session matches `{selector}`"));
-                print_room_sessions(project_root);
+                room_io::emit_bad(sink, format!("no saved room session matches `{selector}`"));
+                print_room_sessions(project_root, sink);
                 return;
             }
             Err(error) => {
-                output::bad(format!("reading room sessions failed: {error}"));
+                room_io::emit_bad(sink, format!("reading room sessions failed: {error}"));
                 return;
             }
         },
@@ -2094,23 +2210,23 @@ async fn handle_resume(
                 let has_any = sessions::list_room_sessions(project_root)
                     .is_ok_and(|sessions| !sessions.is_empty());
                 if has_any {
-                    output::hint("resume cancelled");
+                    room_io::emit_hint(sink, "resume cancelled");
                 } else {
-                    output::hint("no saved room sessions yet");
+                    room_io::emit_hint(sink, "no saved room sessions yet");
                 }
                 return;
             }
             Err(error) => {
-                output::bad(format!("opening session picker failed: {error:#}"));
+                room_io::emit_bad(sink, format!("opening session picker failed: {error:#}"));
                 return;
             }
         },
     };
 
-    output::system(format!("resuming CoreRoom session {}", session.id));
+    room_io::emit_system(sink, format!("resuming CoreRoom session {}", session.id));
     shutdown_all_roles(roles, StopReason::Refreshed);
     if let Err(error) = sessions::activate_room_session(project_root, &session) {
-        output::bad(format!("activating session failed: {error}"));
+        room_io::emit_bad(sink, format!("activating session failed: {error}"));
         return;
     }
 
@@ -2120,30 +2236,37 @@ async fn handle_resume(
                 roles.insert(role.to_owned(), running);
             }
             Err(error) => {
-                output::bad(format!("spawning @{role} from session failed: {error:#}"));
+                room_io::emit_bad(
+                    sink,
+                    format!("spawning @{role} from session failed: {error:#}"),
+                );
             }
         }
     }
-    output::ok(format!(
-        "resumed {} ({} role session{})",
-        session.id,
-        session.role_sessions.len(),
-        if session.role_sessions.len() == 1 {
-            ""
-        } else {
-            "s"
-        }
-    ));
+    room_io::emit_ok(
+        sink,
+        format!(
+            "resumed {} ({} role session{})",
+            session.id,
+            session.role_sessions.len(),
+            if session.role_sessions.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ),
+    );
 }
 
 async fn handle_fresh(
     context: &SpawnContext<'_>,
     roles: &mut HashMap<String, RunningRole>,
     project_root: &Path,
+    sink: &dyn RoomSink,
 ) {
-    output::system("restarting CoreRoom with fresh role sessions");
+    room_io::emit_system(sink, "restarting CoreRoom with fresh role sessions");
     shutdown_all_roles(roles, StopReason::Refreshed);
-    clear_all_sessions_for_fresh_start(project_root, "/fresh");
+    clear_all_sessions_for_fresh_start(project_root, "/fresh", sink);
 
     for role in context.cfg.role_names() {
         match spawn_role(context, role).await {
@@ -2151,14 +2274,14 @@ async fn handle_fresh(
                 roles.insert(role.to_owned(), running);
             }
             Err(error) => {
-                output::bad(format!("spawning @{role} fresh failed: {error:#}"));
+                room_io::emit_bad(sink, format!("spawning @{role} fresh failed: {error:#}"));
             }
         }
     }
-    output::ok("fresh session started");
+    room_io::emit_ok(sink, "fresh session started");
 }
 
-fn print_room_sessions(project_root: &Path) {
+fn print_room_sessions(project_root: &Path, sink: &dyn RoomSink) {
     let current = sessions::read_current_room_id(project_root)
         .ok()
         .flatten()
@@ -2166,28 +2289,31 @@ fn print_room_sessions(project_root: &Path) {
     let sessions = match sessions::list_room_sessions(project_root) {
         Ok(sessions) => sessions,
         Err(error) => {
-            output::bad(format!("reading room sessions failed: {error}"));
+            room_io::emit_bad(sink, format!("reading room sessions failed: {error}"));
             return;
         }
     };
     if sessions.is_empty() {
-        output::hint("no saved room sessions yet");
+        room_io::emit_hint(sink, "no saved room sessions yet");
         return;
     }
-    println!("saved CoreRoom sessions:");
+    room_io::emit_line(sink, "saved CoreRoom sessions:");
     for (index, session) in sessions.iter().enumerate() {
         let role_count = session.role_sessions.len();
         let marker = if session.id == current { "*" } else { " " };
-        println!(
-            "  {marker} {:>2}. {}  updated {}  {} role session{}",
-            index + 1,
-            session.id,
-            session.updated_at,
-            role_count,
-            if role_count == 1 { "" } else { "s" }
+        room_io::emit_line(
+            sink,
+            format!(
+                "  {marker} {:>2}. {}  updated {}  {} role session{}",
+                index + 1,
+                session.id,
+                session.updated_at,
+                role_count,
+                if role_count == 1 { "" } else { "s" },
+            ),
         );
     }
-    output::hint("use `/resume <number|id|prefix|latest>` to switch");
+    room_io::emit_hint(sink, "use `/resume <number|id|prefix|latest>` to switch");
 }
 
 /// Compose priors, stage them in a tempfile, spawn the role's
@@ -2295,10 +2421,13 @@ async fn spawn_role(context: &SpawnContext<'_>, name: &str) -> Result<RunningRol
             // Resume attempt failed. Drop the stale id and retry
             // fresh. We print a hint so the user understands why
             // the role lost its prior conversation.
-            output::warn(format!(
+            room_io::emit_warn(
+                context.sink,
+                format!(
                 "@{name} could not resume prior session ({}); falling back to a fresh conversation",
                 err.root_cause()
-            ));
+            ),
+            );
             if let Err(clear_err) = sessions::clear_session_id(&project_root, name) {
                 debug!(role = %name, %clear_err, "failed to clear stale session id");
             }

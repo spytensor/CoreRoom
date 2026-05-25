@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::bus::MessageBus;
 use crate::config::{Config, COREROOM_DIR};
 use crate::crep::CrepEvent;
-use crate::output;
+use crate::room_io::{self, StdoutSink};
 use crate::work;
 
 use super::render::render_event;
@@ -27,17 +27,21 @@ pub struct ShowOptions {
 /// Replay events in `.coreroom/messages.jsonl` through the same renderer
 /// the live REPL uses. Used by `cr show`.
 pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> {
+    let sink = StdoutSink;
     let coreroom_dir = project_root.join(COREROOM_DIR);
     let log_path = coreroom_dir.join("messages.jsonl");
     if !log_path.is_file() {
-        println!("(no messages — has `cr start` ever run in this project?)");
+        room_io::emit_line(
+            &sink,
+            "(no messages — has `cr start` ever run in this project?)",
+        );
         return Ok(());
     }
     if let Some(since) = options.since {
         let modified = tokio::fs::metadata(&log_path).await?.modified()?;
         let modified: chrono::DateTime<chrono::Local> = modified.into();
         if modified.date_naive() < since {
-            println!("(message log is older than {since})");
+            room_io::emit_line(&sink, format!("(message log is older than {since})"));
             return Ok(());
         }
     }
@@ -48,21 +52,24 @@ pub async fn show_log(project_root: &Path, options: &ShowOptions) -> Result<()> 
         Config::load(project_root).map_or_else(|_| "host".to_owned(), |cfg| cfg.host_role);
     let replay = MessageBus::replay(&log_path).await?;
     if replay.skipped_malformed > 0 {
-        output::warn(format!(
-            "{} corrupted line(s) skipped while replaying{}",
-            replay.skipped_malformed,
-            replay
-                .first_malformed_line
-                .map_or_else(String::new, |line| format!(" (first at line {line})"))
-        ));
+        room_io::emit_warn(
+            &sink,
+            format!(
+                "{} corrupted line(s) skipped while replaying{}",
+                replay.skipped_malformed,
+                replay
+                    .first_malformed_line
+                    .map_or_else(String::new, |line| format!(" (first at line {line})"))
+            ),
+        );
     }
     if replay.events.is_empty() {
-        println!("(message log is empty)");
+        room_io::emit_line(&sink, "(message log is empty)");
         return Ok(());
     }
     let events = filter_show_events(&replay.events, options);
     if events.is_empty() {
-        println!("(no matching events)");
+        room_io::emit_line(&sink, "(no matching events)");
         return Ok(());
     }
     for event in events {
