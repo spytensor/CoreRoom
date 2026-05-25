@@ -64,9 +64,9 @@ pub struct RoomRuntimeState {
     show_cheatsheet: bool,
 }
 
-/// One row in the right-rail Team roster. Holds only the identity bits
-/// the rail needs to render an idle row; live work state lives in
-/// [`RoomRuntimeState::spinners`] and [`RoomRuntimeState::work_cards`].
+/// One configured role in the room roster. Live work state lives in
+/// [`RoomRuntimeState::spinners`] and [`RoomRuntimeState::work_cards`];
+/// the default right rail renders those work facts instead of this roster.
 #[derive(Debug, Clone)]
 pub struct TeamMember {
     /// Role name without the leading `@`.
@@ -782,18 +782,22 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
 
 fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let visible_rows = area.height.saturating_sub(2) as usize;
-    let start = state.scrollback.len().saturating_sub(visible_rows);
-    let items = if state.scrollback.is_empty() {
-        vec![ListItem::new(Line::from(vec![Span::styled(
+    let mut current_lines = current_turn_lines(state);
+    let scroll_rows = visible_rows.saturating_sub(current_lines.len());
+    let start = state.scrollback.len().saturating_sub(scroll_rows);
+    let scroll_items = if state.scrollback.is_empty() {
+        vec![Line::from(vec![Span::styled(
             "Submit a task below. Runtime output appears here.",
             Style::default().fg(Color::DarkGray),
-        )]))]
+        )])]
     } else {
-        state.scrollback[start..]
-            .iter()
-            .map(|line| ListItem::new(line.clone()))
-            .collect()
+        state.scrollback[start..].to_vec()
     };
+    current_lines.extend(scroll_items);
+    let items = current_lines
+        .into_iter()
+        .map(ListItem::new)
+        .collect::<Vec<_>>();
     frame.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title("Room")),
         area,
@@ -801,131 +805,20 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
 }
 
 fn render_status_rail(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    // The Work panel only appears when there is something to show.
-    // Otherwise the Team/Roles panel takes the full rail height. Rail
-    // width is constant, so the swap never causes horizontal jitter.
-    if state.work_cards.is_empty() {
-        render_role_lane(frame, area, state);
-    } else {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(6), Constraint::Length(10)])
-            .split(area);
-        render_role_lane(frame, chunks[0], state);
-        render_work_cards(frame, chunks[1], state);
-    }
-}
-
-fn render_role_lane(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let mut lines = Vec::new();
-    let pending_role = state.permission.as_ref().map(|p| p.request.role.as_str());
-    let pending_active = pending_role.is_some()
-        && pending_role.is_some_and(|role| !state.spinners.contains_key(role));
-    let title;
-    if state.spinners.is_empty() && !pending_active {
-        title = "Team";
-        let now = Instant::now();
-        for member in &state.team {
-            lines.push(team_line(member, &state.host_role, &state.last_seen, now));
-        }
-    } else {
-        title = "Roles";
-        for snapshot in state.spinners.values() {
-            lines.push(spinner_line(snapshot, &state.host_role));
-        }
-        // If a permission overlay is open for a role that no longer has
-        // a live spinner (because the kernel cleared it before/while
-        // the prompt arrived), synthesize a `waiting approval` row so
-        // the rail and the modal point at the same role.
-        if let Some(role) = pending_role {
-            if !state.spinners.contains_key(role) {
-                lines.push(waiting_approval_line(role, &state.host_role));
-            }
-        }
-        let visible_active = state.spinners.len() + usize::from(pending_active);
-        let inactive = state.team.len().saturating_sub(visible_active);
-        if inactive > 0 {
-            lines.push(Line::from(vec![Span::styled(
-                format!("+ {inactive} standby"),
-                Style::default().fg(Color::DarkGray),
-            )]));
-        }
+    let mut lines = status_panel_lines(state, area.width);
+    if !state.work_cards.is_empty() {
+        lines.push(Line::raw(""));
+        lines.extend(work_card_lines(area.width, state));
     }
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(Block::default().borders(Borders::ALL).title("Status"))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
-/// Synthesised row for a role that is blocked on a permission prompt
-/// but has no live spinner of its own. Uses the same yellow paint as
-/// [`SpinnerPaint::WaitingApproval`] and keeps the role identity color
-/// on the glyph and `@role` token so the rail stays coherent with the
-/// permission overlay above it.
-fn waiting_approval_line(role: &str, host_role: &str) -> Line<'static> {
-    let role_color = tui_style::role_color(role, host_role);
-    let glyph = tui_style::role_avatar_glyph(role, host_role);
-    Line::from(vec![
-        Span::styled(glyph.to_owned(), Style::default().fg(role_color)),
-        Span::raw(" "),
-        Span::styled("⏸", Style::default().fg(Color::Yellow)),
-        Span::raw(" "),
-        Span::styled(
-            format!("@{role}"),
-            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" · waiting approval", Style::default().fg(Color::Yellow)),
-    ])
-}
-
-/// One row in the Team roster. Identity (glyph + role token) uses
-/// [`tui_style::role_label_spans`]; engine label and last-seen hint
-/// trail in dim text. `standby` is the literal hint for any role that
-/// has not been seen this session.
-fn team_line(
-    member: &TeamMember,
-    host_role: &str,
-    last_seen: &BTreeMap<String, Instant>,
-    now: Instant,
-) -> Line<'static> {
-    let mut spans = tui_style::role_label_spans(&member.role, host_role);
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        engine_short(member.engine).to_owned(),
-        Style::default().fg(Color::Gray),
-    ));
-    spans.push(Span::raw("  "));
-    let hint = last_seen
-        .get(&member.role)
-        .map_or_else(|| "standby".to_owned(), |seen| last_seen_text(now, *seen));
-    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
-    Line::from(spans)
-}
-
-fn engine_short(engine: Engine) -> &'static str {
-    match engine {
-        Engine::Cc => "cc",
-        Engine::Codex => "codex",
-        Engine::Gemini => "gemini",
-        Engine::Fake => "fake",
-    }
-}
-
-/// Compact session-relative timestamp for the Team roster. Best-effort
-/// from [`Instant`]; not persisted across sessions.
-fn last_seen_text(now: Instant, seen: Instant) -> String {
-    let elapsed = now.saturating_duration_since(seen).as_secs();
-    match elapsed {
-        0 => "active".to_owned(),
-        s if s < 60 => format!("{s}s ago"),
-        s if s < 3600 => format!("{}m ago", s / 60),
-        s => format!("{}h ago", s / 3600),
-    }
-}
-
-/// Build the Team roster: host first, then declared roles in
+/// Build the configured room roster: host first, then declared roles in
 /// alphabetical order with the host excluded from the tail. Falls back
 /// to a single host row when no config is available.
 fn build_team(cfg: Option<&Config>, host_role: &str) -> Vec<TeamMember> {
@@ -1009,6 +902,7 @@ fn strip_leading_role_header(rendered: &str, role: &str) -> String {
 /// crossterm palette is `RGB(0xf0, 0xf0, 0xf0)` — warm off-white.
 const USER_TAG_COLOR: Color = Color::Rgb(0xf0, 0xf0, 0xf0);
 
+#[cfg(test)]
 fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {
     let frame = SPINNER_FRAMES[snapshot.frame % SPINNER_FRAMES.len()];
     let state = snapshot
@@ -1039,16 +933,203 @@ fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {
     ])
 }
 
-fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    // Caller is responsible for not invoking this when work_cards is
-    // empty — the rail folds the panel in that case (see
-    // `render_status_rail`). Defensive return keeps the function safe
-    // to call from snapshot tests.
-    if state.work_cards.is_empty() {
-        return;
+#[derive(Debug, Clone)]
+struct CurrentActivity {
+    role: String,
+    state: String,
+    detail: Option<String>,
+}
+
+fn current_activity(state: &RoomRuntimeState) -> Option<CurrentActivity> {
+    if let Some(permission) = &state.permission {
+        return Some(CurrentActivity {
+            role: permission.request.role.clone(),
+            state: "waiting approval".to_owned(),
+            detail: Some(permission.request.tool.clone()),
+        });
     }
+    state
+        .spinners
+        .values()
+        .next()
+        .map(|snapshot| CurrentActivity {
+            role: snapshot.role.clone(),
+            state: snapshot
+                .current_state
+                .clone()
+                .unwrap_or_else(|| "thinking".to_owned()),
+            detail: Some(format!("{}s", snapshot.started_at.elapsed().as_secs())),
+        })
+        .or_else(|| {
+            state
+                .work_cards
+                .values()
+                .find(|card| matches!(card.status, WorkStatus::Working { .. }))
+                .map(|card| CurrentActivity {
+                    role: card.role.clone(),
+                    state: "working".to_owned(),
+                    detail: Some(work_card_detail(card)),
+                })
+        })
+}
+
+fn current_turn_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
+    let Some(activity) = current_activity(state) else {
+        return Vec::new();
+    };
+    let mut line = vec![
+        Span::styled("Current turn: ", label_style()),
+        Span::styled("owner ", Style::default().fg(Color::DarkGray)),
+    ];
+    line.extend(tui_style::role_label_spans(
+        &activity.role,
+        &state.host_role,
+    ));
+    line.push(Span::raw(" · "));
+    line.push(Span::styled(
+        activity.state,
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ));
+    if let Some(detail) = activity.detail {
+        line.push(Span::styled(
+            format!(" · {detail}"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    vec![Line::from(line), Line::raw("")]
+}
+
+fn status_panel_lines(state: &RoomRuntimeState, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let width = usize::from(area.width.saturating_sub(4)).max(28);
+    lines.push(section_header("Current"));
+    if let Some(activity) = current_activity(state) {
+        lines.push(role_metadata_line(
+            "owner",
+            &activity.role,
+            &state.host_role,
+            Some(activity.state.as_str()),
+        ));
+        if let Some(detail) = activity.detail {
+            lines.push(status_kv_line("detail", &detail, Color::DarkGray));
+        }
+    } else {
+        lines.push(status_kv_line("state", "idle", Color::DarkGray));
+        lines.push(status_kv_line(
+            "next",
+            "type a task or @role",
+            Color::DarkGray,
+        ));
+    }
+    lines.push(Line::raw(""));
+    lines.push(section_header("Work"));
+    let active = state.active_work_count();
+    lines.push(status_kv_line(
+        "active",
+        &active.to_string(),
+        if active > 0 {
+            Color::Green
+        } else {
+            Color::DarkGray
+        },
+    ));
+    lines.push(status_kv_line(
+        "cards",
+        &state.work_cards.len().to_string(),
+        if state.work_cards.is_empty() {
+            Color::DarkGray
+        } else {
+            Color::Yellow
+        },
+    ));
+    let known_roles = state.team.len();
+    let observed_roles = state.last_seen.len();
+    lines.push(status_kv_line(
+        "activity",
+        &format!("{observed_roles}/{known_roles} roles seen"),
+        Color::DarkGray,
+    ));
+    if let Some(card) = state.work_cards.values().next_back() {
+        lines.push(status_kv_line(
+            "latest",
+            &truncate_with_ellipsis(&card.title, usize::from(width.saturating_sub(12)).max(12)),
+            status_color_for_work(&card.status),
+        ));
+        lines.push(role_metadata_line(
+            "assignee",
+            &card.role,
+            &state.host_role,
+            Some(work_status_label(&card.status)),
+        ));
+    }
+    lines.push(Line::raw(""));
+    lines.push(section_header("Blockers"));
+    if let Some(permission) = &state.permission {
+        lines.push(role_metadata_line(
+            "approval",
+            &permission.request.role,
+            &state.host_role,
+            Some(permission.request.tool.as_str()),
+        ));
+    } else if let Some(card) = state
+        .work_cards
+        .values()
+        .find(|card| matches!(card.status, WorkStatus::Interrupted { .. }))
+    {
+        lines.push(role_metadata_line(
+            "interrupted",
+            &card.role,
+            &state.host_role,
+            Some(work_card_detail(card).as_str()),
+        ));
+    } else {
+        lines.push(status_kv_line("state", "none observed", Color::DarkGray));
+    }
+    lines.push(Line::raw(""));
+    lines.push(section_header("Evidence"));
+    lines.push(status_kv_line(
+        "validation",
+        evidence_status_text(state),
+        evidence_status_color(state),
+    ));
+    lines
+}
+
+fn section_header(label: &'static str) -> Line<'static> {
+    Line::from(vec![Span::styled(label, label_style())])
+}
+
+fn status_kv_line(label: &'static str, value: &str, value_color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("  {label}: "), Style::default().fg(Color::White)),
+        Span::styled(value.to_owned(), Style::default().fg(value_color)),
+    ])
+}
+
+fn role_metadata_line(
+    label: &'static str,
+    role: &str,
+    host_role: &str,
+    suffix: Option<&str>,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!("  {label}: "),
+        Style::default().fg(Color::White),
+    )];
+    spans.extend(tui_style::role_label_spans(role, host_role));
+    if let Some(suffix) = suffix {
+        spans.push(Span::styled(
+            format!(" · {suffix}"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn work_card_lines(width: u16, state: &RoomRuntimeState) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let width = usize::from(width.saturating_sub(4)).max(28);
     for card in state.work_cards.values().rev().take(3) {
         // The card body's border title already carries the colored
         // `@role` token via the v0.9.10 ANSI bridge, so no separate
@@ -1059,12 +1140,72 @@ fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
         }
         lines.push(Line::raw(""));
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Work"))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
+    lines
+}
+
+fn work_status_label(status: &WorkStatus) -> &'static str {
+    match status {
+        WorkStatus::Working { .. } => "working",
+        WorkStatus::Done { .. } => "done",
+        WorkStatus::Interrupted { .. } => "interrupted",
+    }
+}
+
+fn status_color_for_work(status: &WorkStatus) -> Color {
+    match status {
+        WorkStatus::Working { .. } => Color::Yellow,
+        WorkStatus::Done { .. } => Color::Green,
+        WorkStatus::Interrupted { .. } => Color::Red,
+    }
+}
+
+fn work_card_detail(card: &WorkCard) -> String {
+    match &card.status {
+        WorkStatus::Working { current_step, .. } => {
+            current_step.clone().unwrap_or_else(|| card.title.clone())
+        }
+        WorkStatus::Done {
+            duration,
+            steps_count,
+        } => {
+            let step_word = if *steps_count == 1 { "step" } else { "steps" };
+            format!(
+                "done in {}s · {steps_count} {step_word}",
+                duration.as_secs()
+            )
+        }
+        WorkStatus::Interrupted { reason } => reason.clone(),
+    }
+}
+
+fn evidence_status_text(state: &RoomRuntimeState) -> &'static str {
+    if state.has_active_work() {
+        "pending"
+    } else if state
+        .work_cards
+        .values()
+        .any(|card| matches!(card.status, WorkStatus::Done { .. }))
+    {
+        "observed complete"
+    } else if state.permission.is_some()
+        || state
+            .work_cards
+            .values()
+            .any(|card| matches!(card.status, WorkStatus::Interrupted { .. }))
+    {
+        "blocked"
+    } else {
+        "not observed"
+    }
+}
+
+fn evidence_status_color(state: &RoomRuntimeState) -> Color {
+    match evidence_status_text(state) {
+        "observed complete" => Color::Green,
+        "pending" => Color::Yellow,
+        "blocked" => Color::Red,
+        _ => Color::DarkGray,
+    }
 }
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
@@ -1758,23 +1899,23 @@ mod tests {
     }
 
     #[test]
-    fn rail_shows_team_roster_when_no_spinners_and_no_cards() {
+    fn rail_shows_work_status_when_no_spinners_and_no_cards() {
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // Roster title is "Team", not "Roles", and the placeholder
-        // strings from the previous behavior are gone.
-        assert!(text.contains("Team"));
+        // The default right rail is project/work status, not a role roster.
+        assert!(text.contains("Status"));
+        assert!(!text.contains("Team"));
+        assert!(!text.contains("Roles"));
         assert!(!text.contains("no work cards yet"));
-        // Roster lists both host and backend, host appears first.
-        let host_idx = text.find("@host").expect("host in roster");
-        let backend_idx = text.find("@backend").expect("backend in roster");
-        assert!(host_idx < backend_idx, "host should appear before backend");
-        // Standby hint for roles that have not been seen this session.
-        assert!(text.contains("standby"));
+        assert!(text.contains("Current"));
+        assert!(text.contains("state: idle"));
+        assert!(text.contains("Work"));
+        assert!(text.contains("active: 0"));
+        assert!(text.contains("validation: not observed"));
     }
 
     #[test]
-    fn rail_shows_active_roles_and_standby_tail_when_spinning() {
+    fn rail_shows_status_and_center_current_turn_when_spinning() {
         let mut state = test_state();
         state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
             role: "backend".to_owned(),
@@ -1785,15 +1926,15 @@ mod tests {
             paint: SpinnerPaint::Painting,
         }));
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // Active panel uses the legacy "Roles" title.
-        assert!(text.contains("Roles"));
-        // Inactive roles fold into a dim tail.
-        assert!(text.contains("+ 1 standby"));
-        // The literal `idle` placeholder is gone.
-        // (Status badge says `idle` on the chrome row, but the rail
-        // panel itself does not.)
+        assert!(text.contains("Status"));
+        assert!(!text.contains("Roles"));
+        assert!(!text.contains("Team"));
+        assert!(!text.contains("standby"));
+        assert!(text.contains("Current turn:"));
+        assert!(text.contains("owner"));
         assert!(text.contains("@backend"));
         assert!(text.contains("thinking"));
+        assert!(text.contains("active: 1"));
     }
 
     #[test]
@@ -1801,7 +1942,7 @@ mod tests {
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         // No Work title and no placeholder copy when there are no
-        // cards. The Team panel takes the full rail height.
+        // cards. The Status panel owns the full rail height.
         assert!(!text.contains("Work─"));
         assert!(!text.contains("no work cards yet"));
     }
@@ -1811,8 +1952,11 @@ mod tests {
         let mut state = test_state();
         state.apply_event(RoomEvent::WorkCard(sample_work_card()));
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        assert!(text.contains("Team"));
-        // Work panel appears with its identity header for the role.
+        assert!(text.contains("Status"));
+        assert!(!text.contains("Team"));
+        assert!(!text.contains("Roles"));
+        assert!(text.contains("latest"));
+        assert!(text.contains("assignee"));
         assert!(text.contains("◇ @backend"));
         assert!(text.contains("Run validation"));
     }
@@ -2145,24 +2289,24 @@ mod tests {
 
     #[test]
     fn banner_with_ansi_preserves_role_colors_in_scrollback() {
-        use crossterm::style::Stylize as _;
         let mut state = test_state();
         // Imitate a splash row coming through the sink as a banner.
-        // The crossterm-styled string carries 24-bit RGB color escape
+        // The explicit SGR sequence carries 24-bit RGB color escape
         // codes that the ratatui scrollback must keep.
         let role_color = crate::output::role_color("backend", "host");
-        let banner = format!("◇ {}  cc · 1M · ask\n", "@backend".with(role_color));
-        state.apply_event(RoomEvent::Banner(banner));
-
-        let expected = match role_color {
-            crossterm::style::Color::Rgb { r, g, b } => Color::Rgb(r, g, b),
+        let (r, g, b) = match role_color {
+            crossterm::style::Color::Rgb { r, g, b } => (r, g, b),
             other => panic!("expected RGB role color, got {other:?}"),
         };
+        let banner = format!("◇ \x1b[38;2;{r};{g};{b}m@backend\x1b[39m  cc · 1M · ask\n");
+        state.apply_event(RoomEvent::Banner(banner));
+
+        let expected = Color::Rgb(r, g, b);
         let coloured = state
             .scrollback
             .iter()
             .flat_map(|line| line.spans.iter())
-            .find(|span| span.content.as_ref() == "@backend")
+            .find(|span| span.content.as_ref() == "@backend" && span.style.fg.is_some())
             .expect("@backend span survived scrollback");
         assert_eq!(coloured.style.fg, Some(expected));
     }
@@ -2177,8 +2321,8 @@ mod tests {
         // gone. Count `@backend` only inside the card body region
         // (the lines between the top and bottom box-drawing borders).
         // Work-card borders use rounded corners (╭ ╰); ratatui panel
-        // borders use square corners (┌ └). Match rounded only so the
-        // Team panel's `◇ @backend cc standby` row doesn't bleed in.
+        // borders use square corners (┌ └). Match rounded only so
+        // Status metadata rows do not bleed in.
         let mut inside_card = false;
         let mut card_lines: Vec<&str> = Vec::new();
         for line in text.lines() {
@@ -2198,16 +2342,11 @@ mod tests {
             1,
             "expected exactly one @backend in card body, got:\n{card_section}"
         );
-        // There must be no bare identity-header row above the card.
-        let above_card_top = text
-            .lines()
-            .take_while(|line| !line.contains("Run validation"))
-            .filter(|line| line.contains("◇ @backend") && !line.contains("standby"))
-            .count();
-        assert_eq!(
-            above_card_top, 0,
-            "expected no `◇ @backend` identity prefix above the card"
-        );
+        // Role identity may appear above the card only as Status
+        // metadata such as the assignee row, never as a separate
+        // role-roster prefix line.
+        assert!(!text.contains("standby"));
+        assert!(text.contains("assignee"));
     }
 
     #[test]
@@ -2262,7 +2401,7 @@ mod tests {
     }
 
     #[test]
-    fn permission_overlay_keeps_role_in_roles_rail_without_team_fallback() {
+    fn permission_overlay_keeps_role_in_status_without_team_fallback() {
         let mut state = test_state();
         let (tx, _rx) = mpsc::unbounded_channel();
         state.apply_event(RoomEvent::PermissionPrompt {
@@ -2271,11 +2410,11 @@ mod tests {
             response_tx: Some(tx),
         });
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // While permission is pending, the rail must show Roles, not
-        // the idle Team roster. The requesting role surfaces with a
-        // "waiting approval" label.
-        assert!(text.contains("Roles"));
+        assert!(text.contains("Status"));
+        assert!(!text.contains("Roles"));
         assert!(!text.contains("Team─") && !text.contains("─Team"));
+        assert!(text.contains("Current turn:"));
+        assert!(text.contains("approval"));
         assert!(text.contains("waiting approval"));
         assert!(text.contains("@backend"));
     }
