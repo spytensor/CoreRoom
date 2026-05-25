@@ -637,17 +637,17 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.9.10 ───────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.9.11 ───────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
-│ ◇ @backend   cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
-│ ◉ @host      cc     · 1M · ask          • /journal <role> captures today's … │
+│ ◉ @host      cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
+│ ◇ @backend   cc     · 1M · ask          • /journal <role> captures today's … │
 │ ◆ @security  codex  · default · bypass                                       │
-│                                         what's new in 0.9.10                 │
-│  3.3k  base tokens loaded               • splash role colors now reach the … │
-│ /repo/CoreRoom                          • scrollback preserves ANSI styling… │
-│                                         • permission notices and CREP trace… │
+│                                         what's new in 0.9.11                 │
+│  3.3k  base tokens loaded               • splash roster matches Team rail w… │
+│ /repo/CoreRoom                          • work cards stop double-printing @… │
+│                                         • permission overlays keep the wait… │
 │                                                                              │
 │                                         /help for commands                   │
 │                                                                              │

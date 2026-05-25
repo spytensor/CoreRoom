@@ -10,6 +10,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-05-25
+
+### Fixed
+
+- **Work card double-printed `@role` (#348).** v0.9.9 added an
+  identity prefix line above each work card so the role color was
+  visible even after `strip_ansi`. v0.9.10 then preserved the card's
+  own border colors via `ansi::ansi_to_lines`, making the prefix
+  redundant — the right rail printed `◇ @backend` then immediately
+  `╭─ @backend · Run validation ─╮` underneath. The prefix line is
+  gone; the card's border title remains and now carries the colored
+  role token.
+- **Consecutive role chunks doubled the `@role` divider (#349).**
+  `render_role_markdown` is stateless per call and emits the
+  `  @role` header at the top of every chunk. When the engine
+  produces a streaming `RoleOutputDelta` followed by the finalising
+  `RoleSpoke`, the scrollback ended up with two `@host` divider rows
+  back-to-back. The live-room runtime now tracks
+  `RoomRuntimeState::last_speaker` and strips the leading header
+  line when the previous chunk came from the same role. The stdout
+  `cr start` path keeps current behavior (out of scope; tracked).
+- **Permission overlay flipped the rail back to the idle Team
+  roster (#350).** When a role's permission prompt arrives, the
+  kernel may have already cleared its spinner snapshot, so
+  `state.spinners.is_empty()` became true and the rail rendered the
+  full Team roster with `1m ago` / `46s ago` labels even though
+  `@frontend` was visibly waiting in the modal above. The rail now
+  recognises an active permission and renders a synthesised
+  `waiting approval` row for the requesting role in the `Roles`
+  view, keeping the modal and the rail pointing at the same role.
+- **`work N` chip double-counted spinner + card for one turn
+  (#352).** `active_work_count` summed
+  `spinners.len() + working_cards.len()`, so a single active turn
+  showed `work 2`. It now counts the union of distinct active role
+  names.
+
+### Changed
+
+- **Splash roster anchors host first (#347).** The boot splash sorted
+  roles alphabetically while the Team rail anchored host at the top.
+  The splash now uses the same host-first ordering so the two
+  surfaces show the same team in the same order.
+- **`frontend` glyph swap (#347).** Replaced `▱` (U+25B1 WHITE
+  PARALLELOGRAM) with `◧` (U+25E7 SQUARE WITH LEFT HALF BLACK) for
+  the `frontend` / `design` role. The previous code point falls back
+  to a wavy tilde in a common subset of monospace fonts; the new
+  glyph renders consistently and stays distinct from host / engineer
+  / reviewer.
+- **`@user` tag has a stable identity color (#351).** The user-side
+  prompt row now renders `@user` in `EM` off-white + bold so it
+  reads as an identity slot alongside the colored role tags, instead
+  of a default-white island in a colored cast.
+
 ## [0.9.10] - 2026-05-25
 
 ### Fixed

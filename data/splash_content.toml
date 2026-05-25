@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.11"
+items = [
+  "splash roster matches Team rail with host pinned first and a sturdier frontend glyph",
+  "work cards stop double-printing @role and the runtime no longer doubles role headers",
+  "permission overlays keep the waiting role visible and @user gets a stable identity color",
+]
+
+[[whats_new]]
 version = "0.9.10"
 items = [
   "splash role colors now reach the live room — no more white-on-black @roles",
