@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.15"
+items = [
+  "role activity moves to inline rows at the bottom of Room, like chat tool calls",
+  "right rail drops the duplicate Current section — Work / Blockers / Evidence only",
+  "no more banner framing; the indicator reads as part of the conversation flow",
+]
+
+[[whats_new]]
 version = "0.9.14"
 items = [
   "live role activity now appears as a Room card above scrollback, not on the rail",
