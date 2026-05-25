@@ -70,6 +70,19 @@ fn console_snapshot_fixture_preserves_actionable_states() {
         .work
         .iter()
         .any(|work| work.lifecycle == WorkLifecycle::Blocked));
+    let grant_work = snapshot
+        .work
+        .iter()
+        .find(|work| work.id == "WO-0242")
+        .expect("WO-0242");
+    assert!(grant_work
+        .role_grants
+        .iter()
+        .any(|grant| grant.role == "backend" && grant.access.label() == "write"));
+    assert!(grant_work
+        .role_grants
+        .iter()
+        .any(|grant| grant.role == "reviewer" && grant.access.label() == "read-review"));
     assert!(snapshot
         .alerts
         .iter()

@@ -46,6 +46,7 @@ pub fn project_work_snapshot(
         tracker_state: tracker_state(github, status.lifecycle),
         lifecycle: status.lifecycle.into(),
         source_citations,
+        role_grants: work_order.role_grants.clone(),
     }
 }
 

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{AuthorityScope, RoleAccess};
 use crate::observation::Observation;
+use crate::work_order::WorkOrderRoleGrant;
 
 /// Current console snapshot schema version.
 pub const CONSOLE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -444,12 +445,19 @@ pub struct WorkSnapshot {
     /// Source citations related to this work.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_citations: Vec<String>,
+    /// Explicit role grants scoped to this WorkOrder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_grants: Vec<WorkOrderRoleGrant>,
 }
 
 impl WorkSnapshot {
     fn validate(&self) -> Result<()> {
         ensure_work_order_id(&self.id)?;
-        ensure_nonempty("work.title", &self.title)
+        ensure_nonempty("work.title", &self.title)?;
+        for grant in &self.role_grants {
+            grant.validate()?;
+        }
+        Ok(())
     }
 }
 

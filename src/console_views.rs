@@ -10,6 +10,7 @@ use crate::console_snapshot::{
     SourceHealthSnapshot, SourceHealthState, StatusState, WorkLifecycle,
 };
 use crate::crep::CrepEvent;
+use crate::work_order::{WorkOrderRoleAccess, WorkOrderRoleGrant};
 
 /// One role row in the Roles view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +68,10 @@ pub struct WorkOrderView {
     pub tracker_state: StatusState,
     /// Roles currently associated with this work item.
     pub owner_roles: Vec<String>,
+    /// Structural role grants scoped to this WorkOrder.
+    pub role_grants: Vec<WorkOrderRoleGrant>,
+    /// Roles with structural write grants for this WorkOrder.
+    pub escalated_roles: Vec<String>,
     /// Source/citation labels from the snapshot.
     pub citations: Vec<String>,
     /// Detail panel text.
@@ -311,6 +316,12 @@ pub fn build_workorders_view(snapshot: &CoreRoomSnapshot) -> Vec<WorkOrderView> 
                 .filter(|role| role.current_work_order.as_deref() == Some(work.id.as_str()))
                 .map(|role| format!("@{}", role.role))
                 .collect::<Vec<_>>();
+            let escalated_roles = work
+                .role_grants
+                .iter()
+                .filter(|grant| grant.access == WorkOrderRoleAccess::Write)
+                .map(|grant| format!("@{}", grant.role))
+                .collect::<Vec<_>>();
             let gate = snapshot
                 .gates
                 .iter()
@@ -338,6 +349,8 @@ pub fn build_workorders_view(snapshot: &CoreRoomSnapshot) -> Vec<WorkOrderView> 
                 evidence_state: work.evidence_state,
                 tracker_state: work.tracker_state,
                 owner_roles,
+                role_grants: work.role_grants.clone(),
+                escalated_roles,
                 citations: work.source_citations.clone(),
                 detail,
             }
