@@ -52,6 +52,11 @@ pub enum RoomEvent {
         /// glyphs and color; the runtime supplies the body.
         text: String,
     },
+    /// Already-rendered text block such as the boot splash, `/help`,
+    /// or a styled handoff/route line. `StdoutSink` prints this
+    /// byte-for-byte; a TUI sink may parse or place it as preformatted
+    /// scrollback until structured variants replace each surface.
+    Banner(String),
 }
 
 /// Categorical level for a one-line system notice. Sinks may map these
@@ -93,22 +98,80 @@ pub struct StdoutSink;
 
 impl RoomSink for StdoutSink {
     fn emit(&self, event: RoomEvent) {
+        print!("{}", Self::render_to_string(&event));
+    }
+}
+
+impl StdoutSink {
+    /// Render one room event exactly as `StdoutSink::emit` would write it.
+    #[must_use]
+    pub(crate) fn render_to_string(event: &RoomEvent) -> String {
         match event {
             RoomEvent::Crep { event, host_role } => {
-                let line = crate::repl::render_event_line_for_sink(&event, &host_role);
-                if !line.trim().is_empty() {
-                    println!("{line}");
+                let line = crate::repl::render_event_line_for_sink(event, host_role);
+                if line.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("{line}\n")
                 }
             }
             RoomEvent::Notice { level, text } => match level {
-                NoticeLevel::Ok => crate::output::ok(text),
-                NoticeLevel::Warn => crate::output::warn(text),
-                NoticeLevel::Bad => crate::output::bad(text),
-                NoticeLevel::Hint => crate::output::hint(text),
-                NoticeLevel::System => crate::output::system(text),
+                NoticeLevel::Ok => crate::output::ok_line(text),
+                NoticeLevel::Warn => crate::output::warn_line(text),
+                NoticeLevel::Bad => crate::output::bad_line(text),
+                NoticeLevel::Hint => crate::output::hint_line(text),
+                NoticeLevel::System => crate::output::system_line(text),
             },
+            RoomEvent::Banner(text) => text.clone(),
         }
     }
+}
+
+/// Emit a notice-level status line through `sink`.
+pub fn emit_notice(sink: &dyn RoomSink, level: NoticeLevel, text: impl Into<String>) {
+    sink.emit(RoomEvent::Notice {
+        level,
+        text: text.into(),
+    });
+}
+
+/// Emit an `ok` notice through `sink`.
+pub fn emit_ok(sink: &dyn RoomSink, text: impl Into<String>) {
+    emit_notice(sink, NoticeLevel::Ok, text);
+}
+
+/// Emit a `warn` notice through `sink`.
+pub fn emit_warn(sink: &dyn RoomSink, text: impl Into<String>) {
+    emit_notice(sink, NoticeLevel::Warn, text);
+}
+
+/// Emit a `bad` notice through `sink`.
+pub fn emit_bad(sink: &dyn RoomSink, text: impl Into<String>) {
+    emit_notice(sink, NoticeLevel::Bad, text);
+}
+
+/// Emit a `hint` notice through `sink`.
+pub fn emit_hint(sink: &dyn RoomSink, text: impl Into<String>) {
+    emit_notice(sink, NoticeLevel::Hint, text);
+}
+
+/// Emit a `system` notice through `sink`.
+pub fn emit_system(sink: &dyn RoomSink, text: impl Into<String>) {
+    emit_notice(sink, NoticeLevel::System, text);
+}
+
+/// Emit a preformatted banner block through `sink`.
+pub fn emit_banner(sink: &dyn RoomSink, text: impl Into<String>) {
+    sink.emit(RoomEvent::Banner(text.into()));
+}
+
+/// Emit a preformatted line through `sink`, appending a newline if needed.
+pub fn emit_line(sink: &dyn RoomSink, text: impl Into<String>) {
+    let mut text = text.into();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    emit_banner(sink, text);
 }
 
 /// Convenience constructor for an `Arc<dyn RoomSink>` pointing at
@@ -175,5 +238,50 @@ mod tests {
         });
         let events = sink.events.lock().expect("capturing sink mutex");
         assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn stdout_sink_notice_lines_match_output_helpers() {
+        let cases = [
+            (NoticeLevel::Ok, "ready", crate::output::ok_line("ready")),
+            (
+                NoticeLevel::Warn,
+                "careful",
+                crate::output::warn_line("careful"),
+            ),
+            (
+                NoticeLevel::Bad,
+                "broken",
+                crate::output::bad_line("broken"),
+            ),
+            (
+                NoticeLevel::Hint,
+                "next step",
+                crate::output::hint_line("next step"),
+            ),
+            (
+                NoticeLevel::System,
+                "routing",
+                crate::output::system_line("routing"),
+            ),
+        ];
+        for (level, text, expected) in cases {
+            assert_eq!(
+                StdoutSink::render_to_string(&RoomEvent::Notice {
+                    level,
+                    text: text.to_owned(),
+                }),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn stdout_sink_banner_is_byte_for_byte_passthrough() {
+        let banner = "\nCoreRoom\n  help\n".to_owned();
+        assert_eq!(
+            StdoutSink::render_to_string(&RoomEvent::Banner(banner.clone())),
+            banner
+        );
     }
 }

@@ -436,19 +436,21 @@ fn splash_role_rows(
 /// bare `cr`, and the `/welcome` slash command. The `first_run` flag
 /// only swaps the greeting verb — the surrounding frame stays identical
 /// so returning users see the same status surface.
-pub(super) fn print_home(cfg: &Config, coreroom_dir: &Path, project_root: &Path, first_run: bool) {
+pub(super) fn render_home(
+    cfg: &Config,
+    coreroom_dir: &Path,
+    project_root: &Path,
+    first_run: bool,
+) -> String {
     let user_name = git_user_name();
-    print!(
-        "{}",
-        render_home_at_width(
-            cfg,
-            coreroom_dir,
-            project_root,
-            first_run,
-            splash_width(),
-            user_name.as_deref(),
-        )
-    );
+    render_home_at_width(
+        cfg,
+        coreroom_dir,
+        project_root,
+        first_run,
+        splash_width(),
+        user_name.as_deref(),
+    )
 }
 
 pub(super) fn render_home_at_width(
@@ -624,36 +626,79 @@ pub(super) fn render_home_at_width(
     out
 }
 
-pub(super) fn print_help(cfg: &Config) {
-    println!("commands:");
-    println!("  @<role> <text>      send to a specific role");
-    println!("  @all <text>         broadcast to every running role");
-    println!("  <text>              send to host (@{})", cfg.host_role);
-    println!("  /host <role>        make role the host for this session");
-    println!("  /patch <role> <…>   save a correction; loads on next /refresh");
-    println!("  /compact <role|all> compact live engine context when supported");
-    println!("  /fresh              restart all roles with clean engine sessions");
-    println!("  /refresh <role>     re-instantiate role with latest priors+patches");
-    println!("  /resume [id]        list or switch saved CoreRoom sessions");
-    println!("  /transcript <role>  show that role's recent spoken turns");
-    println!("  /journal <role>     ask role to write today's journal entry");
-    println!("  /welcome            re-show the first-run welcome card");
-    println!("  /allow <tool>       allow a tool for this session");
-    println!("  /deny <tool>        deny a tool for this session");
-    println!("  /stop <role>        terminate a role's subprocess");
-    println!("  /halt [<role>]      interrupt the in-flight turn; role stays alive");
-    println!("  Ctrl-C              like /halt; second press within 2s exits REPL");
-    println!("  /help               this help");
-    println!("  /exit, /quit        leave the REPL");
-    println!();
-    println!("keys:");
-    println!("  Tab                 cycle @role completions");
-    println!("  Right, Ctrl-F       accept visible completion");
-    println!("  Enter               accept visible completion and send");
-    println!("  Esc                 dismiss visible completion");
-    println!();
-    println!(
+pub(super) fn render_help(cfg: &Config) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "commands:");
+    let _ = writeln!(out, "  @<role> <text>      send to a specific role");
+    let _ = writeln!(out, "  @all <text>         broadcast to every running role");
+    let _ = writeln!(
+        out,
+        "  <text>              send to host (@{})",
+        cfg.host_role
+    );
+    let _ = writeln!(
+        out,
+        "  /host <role>        make role the host for this session"
+    );
+    let _ = writeln!(
+        out,
+        "  /patch <role> <…>   save a correction; loads on next /refresh"
+    );
+    let _ = writeln!(
+        out,
+        "  /compact <role|all> compact live engine context when supported"
+    );
+    let _ = writeln!(
+        out,
+        "  /fresh              restart all roles with clean engine sessions"
+    );
+    let _ = writeln!(
+        out,
+        "  /refresh <role>     re-instantiate role with latest priors+patches"
+    );
+    let _ = writeln!(
+        out,
+        "  /resume [id]        list or switch saved CoreRoom sessions"
+    );
+    let _ = writeln!(
+        out,
+        "  /transcript <role>  show that role's recent spoken turns"
+    );
+    let _ = writeln!(
+        out,
+        "  /journal <role>     ask role to write today's journal entry"
+    );
+    let _ = writeln!(
+        out,
+        "  /welcome            re-show the first-run welcome card"
+    );
+    let _ = writeln!(out, "  /allow <tool>       allow a tool for this session");
+    let _ = writeln!(out, "  /deny <tool>        deny a tool for this session");
+    let _ = writeln!(out, "  /stop <role>        terminate a role's subprocess");
+    let _ = writeln!(
+        out,
+        "  /halt [<role>]      interrupt the in-flight turn; role stays alive"
+    );
+    let _ = writeln!(
+        out,
+        "  Ctrl-C              like /halt; second press within 2s exits REPL"
+    );
+    let _ = writeln!(out, "  /help               this help");
+    let _ = writeln!(out, "  /exit, /quit        leave the REPL");
+    let _ = writeln!(out);
+    let _ = writeln!(out, "keys:");
+    let _ = writeln!(out, "  Tab                 cycle @role completions");
+    let _ = writeln!(out, "  Right, Ctrl-F       accept visible completion");
+    let _ = writeln!(
+        out,
+        "  Enter               accept visible completion and send"
+    );
+    let _ = writeln!(out, "  Esc                 dismiss visible completion");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
         "{}",
         "tool traces are folded live; run `cr show` for the full event log".with(output::DIM)
     );
+    out
 }

@@ -53,39 +53,75 @@ pub fn role_color(role: &str, host_role: &str) -> Color {
 
 /// `✓ <msg>` in success colors.
 pub fn ok(msg: impl AsRef<str>) {
-    println!("{} {}", "✓".with(OK), msg.as_ref().with(TEXT));
+    print!("{}", ok_line(msg));
 }
 
 /// `⚠ <msg>` in warning colors.
 pub fn warn(msg: impl AsRef<str>) {
-    println!("{} {}", "⚠".with(WARN), msg.as_ref().with(TEXT));
+    print!("{}", warn_line(msg));
 }
 
 /// `✗ <msg>` in failure colors.
 pub fn bad(msg: impl AsRef<str>) {
-    println!("{} {}", "✗".with(BAD), msg.as_ref().with(TEXT));
+    print!("{}", bad_line(msg));
 }
 
 /// Indented secondary line that follows a primary status line. Color
 /// steps down to `FADE` per the npm/cargo convention.
 pub fn hint(msg: impl AsRef<str>) {
-    println!("  {}", msg.as_ref().with(FADE));
+    print!("{}", hint_line(msg));
 }
 
 /// `[<msg>]` in dimmed italic — system bracket convention used for
 /// `[@role ready · model=...]` and `[@role stopped: ...]`.
 pub fn system(msg: impl AsRef<str>) {
-    println!("{}", format!("[{}]", msg.as_ref()).with(DIM).italic());
+    print!("{}", system_line(msg));
 }
 
 /// `  ↳ @role · <summary>` — tool-call trace. No timestamp by design;
 /// tool events are too frequent for a per-line clock.
 pub fn tool_trace(role: &str, summary: impl AsRef<str>) {
-    println!(
+    print!("{}", tool_trace_line(role, summary));
+}
+
+/// Format `ok` output without writing to stdout.
+#[must_use]
+pub fn ok_line(msg: impl AsRef<str>) -> String {
+    format!("{} {}\n", "✓".with(OK), msg.as_ref().with(TEXT))
+}
+
+/// Format `warn` output without writing to stdout.
+#[must_use]
+pub fn warn_line(msg: impl AsRef<str>) -> String {
+    format!("{} {}\n", "⚠".with(WARN), msg.as_ref().with(TEXT))
+}
+
+/// Format `bad` output without writing to stdout.
+#[must_use]
+pub fn bad_line(msg: impl AsRef<str>) -> String {
+    format!("{} {}\n", "✗".with(BAD), msg.as_ref().with(TEXT))
+}
+
+/// Format `hint` output without writing to stdout.
+#[must_use]
+pub fn hint_line(msg: impl AsRef<str>) -> String {
+    format!("  {}\n", msg.as_ref().with(FADE))
+}
+
+/// Format `system` output without writing to stdout.
+#[must_use]
+pub fn system_line(msg: impl AsRef<str>) -> String {
+    format!("{}\n", format!("[{}]", msg.as_ref()).with(DIM).italic())
+}
+
+/// Format `tool_trace` output without writing to stdout.
+#[must_use]
+pub fn tool_trace_line(role: &str, summary: impl AsRef<str>) -> String {
+    format!(
         "  {} @{role} · {}",
         "↳".with(FADE),
         summary.as_ref().with(DIM),
-    );
+    ) + "\n"
 }
 
 // ───────────────────── fragment helpers ────────────────────
