@@ -50,7 +50,7 @@ pub struct RoomRuntimeState {
     team: Vec<TeamMember>,
     last_seen: BTreeMap<String, Instant>,
     composer: ComposerState,
-    scrollback: Vec<String>,
+    scrollback: Vec<Line<'static>>,
     spinners: BTreeMap<String, SpinnerSnapshot>,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
@@ -213,27 +213,39 @@ impl RoomRuntimeState {
     }
 
     fn push_user_line(&mut self, line: &str) {
-        self.push_scrollback(format!("@user {line}"));
+        self.push_scrollback(Line::raw(format!("@user {line}")));
     }
 
     fn push_notice(&mut self, level: NoticeLevel, text: impl Into<String>) {
-        let label = match level {
-            NoticeLevel::Ok => "ok",
-            NoticeLevel::Warn => "warn",
-            NoticeLevel::Bad => "error",
-            NoticeLevel::Hint => "hint",
-            NoticeLevel::System => "system",
+        let (label, color) = match level {
+            NoticeLevel::Ok => ("ok", Color::Green),
+            NoticeLevel::Warn => ("warn", Color::Yellow),
+            NoticeLevel::Bad => ("error", Color::Red),
+            NoticeLevel::Hint => ("hint", Color::Gray),
+            NoticeLevel::System => ("system", Color::DarkGray),
         };
-        self.push_scrollback(format!("{label}: {}", text.into()));
+        let body = text.into();
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{label}: "),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(body),
+        ]);
+        self.push_scrollback(line);
     }
 
     fn push_rendered(&mut self, text: &str) {
-        for line in strip_ansi(text).lines() {
-            self.push_scrollback(line.trim_end().to_owned());
+        // Preserve crossterm SGR colors emitted by the splash, CREP
+        // renderer, and permission-outcome formatter. Stripping ANSI
+        // here would leave role identity, frame strokes, and status
+        // colors as plain gray text inside the live-room.
+        for line in crate::ansi::ansi_to_lines(text) {
+            self.push_scrollback(line);
         }
     }
 
-    fn push_scrollback(&mut self, line: String) {
+    fn push_scrollback(&mut self, line: Line<'static>) {
         self.scrollback.push(line);
         let overflow = self.scrollback.len().saturating_sub(1000);
         if overflow > 0 {
@@ -736,7 +748,7 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
     } else {
         state.scrollback[start..]
             .iter()
-            .map(|line| ListItem::new(Line::raw(line.clone())))
+            .map(|line| ListItem::new(line.clone()))
             .collect()
     };
     frame.render_widget(
@@ -921,13 +933,14 @@ fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
     let width = usize::from(area.width.saturating_sub(4)).max(28);
     for card in state.work_cards.values().rev().take(3) {
         // Identity header line — gives each card a colored role label
-        // even though the body is rendered as plain text.
+        // up front, then the work card body keeps its own border and
+        // step colors via the ANSI → ratatui bridge.
         lines.push(Line::from(tui_style::role_label_spans(
             &card.role,
             &card.host_role,
         )));
-        for line in strip_ansi(&card.render(width)).lines() {
-            lines.push(Line::raw(line.to_owned()));
+        for line in crate::ansi::ansi_to_lines(&card.render(width)) {
+            lines.push(line);
         }
         lines.push(Line::raw(""));
     }
@@ -1952,6 +1965,47 @@ mod tests {
         assert!(text.contains("Help"));
         assert!(text.contains("toggle this help"));
         assert!(text.contains("? / esc to close"));
+    }
+
+    #[test]
+    fn banner_with_ansi_preserves_role_colors_in_scrollback() {
+        use crossterm::style::Stylize as _;
+        let mut state = test_state();
+        // Imitate a splash row coming through the sink as a banner.
+        // The crossterm-styled string carries 24-bit RGB color escape
+        // codes that the ratatui scrollback must keep.
+        let role_color = crate::output::role_color("backend", "host");
+        let banner = format!("◇ {}  cc · 1M · ask\n", "@backend".with(role_color));
+        state.apply_event(RoomEvent::Banner(banner));
+
+        let expected = match role_color {
+            crossterm::style::Color::Rgb { r, g, b } => Color::Rgb(r, g, b),
+            other => panic!("expected RGB role color, got {other:?}"),
+        };
+        let coloured = state
+            .scrollback
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == "@backend")
+            .expect("@backend span survived scrollback");
+        assert_eq!(coloured.style.fg, Some(expected));
+    }
+
+    #[test]
+    fn notice_keeps_label_styled_in_scrollback() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Notice {
+            level: NoticeLevel::Warn,
+            text: "approval pending".to_owned(),
+        });
+        let label_span = state
+            .scrollback
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == "warn: ")
+            .expect("warn label span present");
+        assert_eq!(label_span.style.fg, Some(Color::Yellow));
+        assert!(label_span.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
