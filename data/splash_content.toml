@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.14"
+items = [
+  "live role activity now appears as a Room card above scrollback, not on the rail",
+  "card shows tool count and the actual running step (cargo test, Bash gh ...)",
+  "right rail stays project-focused — Current/Work/Blockers/Evidence only",
+]
+
+[[whats_new]]
 version = "0.9.13"
 items = [
   "README hero is now a real terminal capture, not a Pillow mockup",

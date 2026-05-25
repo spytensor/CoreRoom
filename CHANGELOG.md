@@ -10,7 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.13] - 2026-05-25
+## [0.9.14] - 2026-05-25
+
+### Changed
+
+- **Live role activity surfaces as a Room activity card (#368).** The
+  v0.9.13 rail refactor unified Roles + Work into a single Status
+  panel but reduced active-turn signal to a vague
+  `owner: @host · thinking` line. After dogfood, role activity now
+  lives in the **Room** (center) area as its own framed card pinned
+  above the scrollback, separate from the project-level Status
+  panel on the right. The card renders one row per active role with
+  the live spinner frame, role identity (avatar + color), elapsed
+  time, tool count when `tools_seen > 0`, and the running step
+  (sourced from the work card's `current_step` so the card reads
+  `cargo test` instead of a perpetual `thinking`). A role blocked
+  on a permission overlay without a live spinner shows up as
+  `⏸ · waiting approval` in the same card. When no role is active,
+  the card disappears and Room shows clean scrollback.
+- **Right rail stays project-focused.** The Status panel keeps its
+  Current / Work / Blockers / Evidence sections without a
+  per-role roster mixed in. Roster info is content (lives in Room),
+  not chrome.
+- **`current_activity` prefers the work card's `current_step`.** The
+  spinner snapshot's generic `current_state = "thinking"` is the
+  fallback only; if the role has an open work card with an active
+  step, that step text drives both the Status panel's Current
+  section and the Room activity card.
+- **Tool count is now surfaced.** `SpinnerSnapshot::tools_seen` was
+  on the model but never rendered. The Room activity card and the
+  Status > Current detail row now include `· N tool(s)` when N > 0;
+  rows never read `0 tools`.
 
 ### Changed
 
