@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Run real local v0.9 CoreRoom user-case dogfood checks.
+"""Run local v0.9 CoreRoom user-case dogfood checks.
 
 This script is intentionally heavier than unit tests. It builds the local
 binary, creates a temporary user project, runs real `cr` commands against that
-project, verifies the default executable runtime entrypoint, enters the
-full-screen console through a PTY, verifies the removed live-room flag returns
-the rebuild notice, and regenerates README visual assets.
+project, drives the default full-screen runtime through a PTY with the
+deterministic fake engine, verifies durable behavior, enters the read-only
+console through a PTY, and regenerates README visual assets.
 It is meant for release gating, not fast inner-loop testing.
 """
 
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import pty
 import re
@@ -42,7 +43,7 @@ class DogfoodFailure(RuntimeError):
 
 
 def main() -> int:
-    print("CoreRoom v0.9 real local user-case dogfood")
+    print("CoreRoom v0.9 local user-case dogfood")
     print(f"repo: {ROOT}")
 
     run(["cargo", "build", "--locked", "--quiet"], cwd=ROOT, timeout=180)
@@ -51,13 +52,14 @@ def main() -> int:
     version = run([str(BIN), "--version"], cwd=ROOT)
     require("cr ", version, "binary version output")
 
-    with tempfile.TemporaryDirectory(prefix="coreroom-v09-dogfood-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="cr-v09-", dir="/tmp") as tmp:
         project = Path(tmp) / "fresh-user-project"
         create_sample_project(project)
         dogfood_fresh_project(project)
+        configure_fake_engine(project)
         dogfood_default_cr_entrypoint(project)
         dogfood_live_console_pty(project)
-        dogfood_removed_live_room_flag(project)
+        dogfood_live_room_flag_pty(project)
 
     dogfood_snapshot_console_pty(width=120, height=40)
     dogfood_nerd_font_avatar_pack()
@@ -101,25 +103,38 @@ def dogfood_fresh_project(project: Path) -> None:
 
 
 def dogfood_default_cr_entrypoint(project: Path) -> None:
-    print("\n== Scenario: plain `cr` opens the executable runtime")
-    output, code = run_pty_scripted_inputs(
+    print("\n== Scenario: plain `cr` executes the TUI room with fake engine")
+    before = read_messages(project)
+    output, code = run_pty_actions(
         [str(BIN)],
         cwd=project,
         width=160,
         height=48,
-        wait_for="⚡ cr".encode("utf-8"),
-        inputs=[
-            b"\x04",
+        actions=[
+            (b"cr >", b"hello dogfood\r", 0.25),
+            (b"fake-stream-3", b"fake permission please\r", 0.25),
+            (b"Permission", b"d", 0.25),
+            (b"fake-permission-denied", b"\x04", 0.5),
         ],
-        timeout=24,
+        timeout=30,
+        env_extra=fake_engine_env(),
     )
     if code != 0:
-        raise DogfoodFailure(f"plain cr executable runtime PTY exited with {code}\n{output}")
-    for token in ["CoreRoom v", "type a task", "/help for commands"]:
-        require(token, output, "plain cr executable runtime render")
+        raise DogfoodFailure(f"plain cr TUI runtime PTY exited with {code}\n{output}")
+    for token in [
+        "cr >",
+        "fake-stream-1",
+        "fake-stream-3",
+        "Permission",
+        "FakeTool",
+        "fake-permission-denied",
+    ]:
+        require(token, output, "plain cr fake-engine runtime render")
+    lower = output.lower()
+    for token in ["idle", "working"]:
+        require(token, lower, "plain cr role lane transition")
     forbidden = [
         "CoreRoom Workspace",
-        "Ask @host",
         "received the request",
         "staged preview route",
         "CoreRoom console closed; starting REPL",
@@ -127,7 +142,10 @@ def dogfood_default_cr_entrypoint(project: Path) -> None:
     for token in forbidden:
         if token in output:
             raise DogfoodFailure(f"plain cr unexpectedly showed staged live-room token: {token}")
-    print("plain `cr` reached the executable runtime entrypoint, not the staged live room")
+    after = read_messages(project)
+    new_events = after[len(before):]
+    assert_fake_runtime_events(new_events)
+    print("plain `cr` executed a fake-engine turn, streamed chunks, prompted permission, and wrote CREP")
 
 
 def dogfood_snapshot_console_pty(width: int, height: int) -> None:
@@ -170,6 +188,7 @@ def dogfood_live_console_pty(project: Path) -> None:
         send_when_seen=b"CoreRoom",
         send_bytes=b"q",
         timeout=12,
+        env_extra=fake_engine_env(),
     )
     if live_code != 0:
         raise DogfoodFailure(f"live console PTY exited with {live_code}\n{live_output}")
@@ -178,38 +197,42 @@ def dogfood_live_console_pty(project: Path) -> None:
     print("live PTY console entered without --snapshot at 120x40")
 
 
-def dogfood_removed_live_room_flag(project: Path) -> None:
-    print("\n== Scenario: removed live-room preview flag")
-    output, code = run_allow_failure(
+def dogfood_live_room_flag_pty(project: Path) -> None:
+    print("\n== Scenario: explicit live-room flag opens executable TUI room")
+    output, code = run_pty_actions(
         [str(BIN), "console", "--live-room"],
         cwd=project,
+        width=140,
+        height=42,
+        actions=[
+            (b"cr >", b"\x04", 0.5),
+        ],
+        timeout=18,
+        env_extra=fake_engine_env(),
     )
-    if code == 0:
-        raise DogfoodFailure("removed live-room flag unexpectedly exited successfully")
-    require(
-        "cr console --live-room: full-screen runtime is being rebuilt",
-        output,
-        "removed live-room flag",
-    )
-    require("#320", output, "removed live-room flag")
-    print("removed live-room flag fails with the rebuild notice")
+    if code != 0:
+        raise DogfoodFailure(f"live-room TUI flag exited with {code}\n{output}")
+    require("cr >", output, "live-room TUI flag")
+    print("cr console --live-room opens the executable TUI room")
 
 
-def run_pty_scripted_inputs(
+def run_pty_actions(
     cmd: list[str],
     *,
     cwd: Path,
     width: int,
     height: int,
-    wait_for: bytes,
-    inputs: list[bytes],
+    actions: list[tuple[bytes, bytes, float]],
     timeout: int,
+    env_extra: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     print(f"$ {shell_join(cmd)}  # PTY {width}x{height}, typed composer inputs")
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
     env = os.environ.copy()
     env.update({"TERM": "xterm-256color", "COLUMNS": str(width), "LINES": str(height)})
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -223,10 +246,10 @@ def run_pty_scripted_inputs(
     output = bytearray()
     deadline = time.time() + timeout
     try:
-        wait_until_seen(master, output, wait_for, deadline)
-        for payload in inputs:
+        for wait_for, payload, settle in actions:
+            wait_until_seen(master, output, wait_for, deadline)
             os.write(master, payload)
-            collect_for(master, output, seconds=0.55)
+            collect_for(master, output, seconds=settle)
         while time.time() < deadline and proc.poll() is None:
             collect_for(master, output, seconds=0.1)
         if proc.poll() is None:
@@ -311,6 +334,57 @@ def create_sample_project(project: Path) -> None:
         "fn main() { println!(\"hello from dogfood\"); }\n",
         encoding="utf-8",
     )
+
+
+def configure_fake_engine(project: Path) -> None:
+    print("\n== Setup: switch dogfood project to gated fake engine")
+    config = project / ".coreroom" / "config.toml"
+    text = config.read_text(encoding="utf-8")
+    text = re.sub(r'^default_engine = ".*"$', 'default_engine = "fake"', text, flags=re.M)
+    if 'permission_mode = "ask"' not in text:
+        text = text.replace(
+            'default_engine = "fake"',
+            'default_engine = "fake"\npermission_mode = "ask"',
+            1,
+        )
+    config.write_text(text, encoding="utf-8")
+    print(f"configured fake engine in {config.relative_to(project)}")
+
+
+def fake_engine_env() -> dict[str, str]:
+    return {
+        "COREROOM_ENABLE_FAKE_ENGINE": "1",
+        "COREROOM_FAKE_ENGINE_RESPONSE": "fake-stream-1 fake-stream-2 fake-stream-3",
+        "COREROOM_FAKE_ENGINE_CHUNK_MS": "25",
+    }
+
+
+def read_messages(project: Path) -> list[dict[str, object]]:
+    path = project / ".coreroom" / "messages.jsonl"
+    if not path.exists():
+        return []
+    events: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            events.append(json.loads(line))
+    return events
+
+
+def assert_fake_runtime_events(events: list[dict[str, object]]) -> None:
+    role_spoke = [
+        event
+        for event in events
+        if event.get("type") == "role_spoke"
+        and "fake-stream-3" in str(event.get("text", ""))
+    ]
+    if not role_spoke:
+        raise DogfoodFailure("messages.jsonl did not gain a fake role_spoke turn")
+    if not any(event.get("type") == "turn_dispatched" for event in events):
+        raise DogfoodFailure("messages.jsonl did not gain a durable turn_dispatched event")
+    if not any(event.get("type") == "permission_denied" for event in events):
+        raise DogfoodFailure("messages.jsonl did not record the fake permission denial")
+    if not all(event.get("turn_id") for event in role_spoke):
+        raise DogfoodFailure("fake role_spoke event did not carry a real turn_id")
 
 
 def run(

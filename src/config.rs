@@ -15,7 +15,7 @@
 //! `config.toml` shape:
 //!
 //! ```toml
-//! default_engine = "cc"          # cc | codex | gemini
+//! default_engine = "cc"          # cc | codex | gemini | fake (dogfood only)
 //! default_model = "opus"         # optional; engine-specific id
 //! permission_mode = "ask"        # ask | auto | bypass
 //! host_role = "pm"               # role that catches un-addressed text
@@ -219,6 +219,15 @@ pub enum ConfigError {
          or project config (.coreroom/config.toml `default_engine = \"cc\"`)."
     )]
     MissingDefaultEngine,
+    /// The deterministic fake engine is present in config without its
+    /// explicit dogfood/test gate.
+    #[error(
+        "engine `fake` is dogfood/test-only; set COREROOM_ENABLE_FAKE_ENGINE=1 to load roles: {roles:?}"
+    )]
+    FakeEngineDisabled {
+        /// Roles that would run on the fake engine.
+        roles: Vec<String>,
+    },
 }
 
 /// Convenience alias for config results.
@@ -258,6 +267,19 @@ impl Config {
             });
         }
 
+        let mut fake_roles = self
+            .roles
+            .iter()
+            .filter_map(|(name, entry)| {
+                let engine = entry.engine.unwrap_or(self.default_engine);
+                (engine == Engine::Fake).then_some(name.clone())
+            })
+            .collect::<Vec<_>>();
+        fake_roles.sort();
+        if !fake_roles.is_empty() && !crate::adapter::fake::enabled() {
+            return Err(ConfigError::FakeEngineDisabled { roles: fake_roles });
+        }
+
         for name in self.roles.keys() {
             let priors = priors_path_for(coreroom_dir, name);
             if !priors.is_file() {
@@ -292,7 +314,7 @@ impl Config {
             // roles startable as bypass; explicit ask/auto settings are
             // still validated by each adapter's current capability surface.
             Engine::Codex | Engine::Gemini => PermissionMode::Bypass,
-            Engine::Cc => self.permission_mode,
+            Engine::Cc | Engine::Fake => self.permission_mode,
         });
         Some(RoleConfig {
             name: name.to_owned(),

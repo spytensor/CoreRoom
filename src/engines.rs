@@ -19,6 +19,10 @@ use crossterm::style::Stylize;
 /// Not `Copy`: we pass it by reference to keep call sites consistent
 /// with the rest of `init.rs` and to leave room for future fields
 /// (paths, versions) without rewriting every signature.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "engine detection stores independent CLI presence bits"
+)]
 #[derive(Debug, Clone)]
 pub struct Engines {
     /// `claude` from `@anthropic-ai/claude-code`.
@@ -27,6 +31,8 @@ pub struct Engines {
     pub codex: bool,
     /// `gemini` from `@google/gemini-cli`.
     pub gemini: bool,
+    /// Dogfood-only fake engine enabled by explicit environment gate.
+    pub fake: bool,
 }
 
 impl Engines {
@@ -38,13 +44,14 @@ impl Engines {
             cc: bin_present("claude"),
             codex: bin_present("codex"),
             gemini: bin_present("gemini"),
+            fake: crate::adapter::fake::enabled(),
         }
     }
 
     /// True when at least one of the three engines is on `$PATH`.
     #[must_use]
     pub fn any_installed(&self) -> bool {
-        self.cc || self.codex || self.gemini
+        self.cc || self.codex || self.gemini || self.fake
     }
 
     /// True when the named engine is on `$PATH`.
@@ -54,6 +61,7 @@ impl Engines {
             Engine::Cc => self.cc,
             Engine::Codex => self.codex,
             Engine::Gemini => self.gemini,
+            Engine::Fake => self.fake,
         }
     }
 }
@@ -132,14 +140,23 @@ mod tests {
             cc: true,
             codex: false,
             gemini: false,
+            fake: false,
         };
         assert!(only_cc.any_installed());
         let only_gemini = Engines {
             cc: false,
             codex: false,
             gemini: true,
+            fake: false,
         };
         assert!(only_gemini.any_installed());
+        let only_fake = Engines {
+            cc: false,
+            codex: false,
+            gemini: false,
+            fake: true,
+        };
+        assert!(only_fake.any_installed());
     }
 
     #[test]
@@ -148,6 +165,7 @@ mod tests {
             cc: false,
             codex: false,
             gemini: false,
+            fake: false,
         };
         assert!(!none.any_installed());
     }
@@ -158,9 +176,11 @@ mod tests {
             cc: false,
             codex: true,
             gemini: false,
+            fake: false,
         };
         assert!(!only_codex.is_present(Engine::Cc));
         assert!(only_codex.is_present(Engine::Codex));
         assert!(!only_codex.is_present(Engine::Gemini));
+        assert!(!only_codex.is_present(Engine::Fake));
     }
 }

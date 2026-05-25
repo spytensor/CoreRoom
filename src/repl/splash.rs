@@ -87,6 +87,7 @@ fn splash_engine_short(engine: Engine) -> &'static str {
         Engine::Cc => "cc",
         Engine::Codex => "codex",
         Engine::Gemini => "gemini",
+        Engine::Fake => "fake",
     }
 }
 
@@ -100,7 +101,7 @@ fn splash_context_short(engine: Engine, model: Option<&str>) -> &'static str {
         Engine::Cc => "1M",
         Engine::Codex if normalized.contains("gpt-5") => "400k",
         Engine::Gemini if normalized.contains("pro") => "1M",
-        Engine::Codex | Engine::Gemini => "default",
+        Engine::Codex | Engine::Gemini | Engine::Fake => "default",
     }
 }
 
@@ -207,7 +208,8 @@ fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usiz
 /// dashboard mirrors `cr config show` rather than introducing a new
 /// vocabulary. Discrimination is by color, not by inventing terms.
 fn permission_label(engine: Engine, mode: PermissionMode) -> (&'static str, Color) {
-    let cr_gated = matches!(engine, Engine::Cc) && !matches!(mode, PermissionMode::Bypass);
+    let cr_gated =
+        matches!(engine, Engine::Cc | Engine::Fake) && !matches!(mode, PermissionMode::Bypass);
     let color = if cr_gated { output::MUTE } else { output::WARN };
     (mode.as_str(), color)
 }

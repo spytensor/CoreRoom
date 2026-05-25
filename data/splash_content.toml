@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.8"
+items = [
+  "plain cr now opens the executable full-screen TUI room",
+  "fake-engine dogfood proves streaming, permissions, and durable turns",
+  "cr start stays direct stdout while cr console stays read-only",
+]
+
+[[whats_new]]
 version = "0.9.7"
 items = [
   "plain cr is back on the executable runtime path",

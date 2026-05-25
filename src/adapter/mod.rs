@@ -12,6 +12,7 @@
 
 pub mod cc;
 pub mod codex;
+pub mod fake;
 pub mod gemini;
 
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use crate::turn::TurnId;
 /// Which engine drives a given role.
 ///
 /// Wire format in `config.toml` is the lower-case variant name
-/// (`"cc"`, `"codex"`, `"gemini"`).
+/// (`"cc"`, `"codex"`, `"gemini"`, `"fake"`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
@@ -35,6 +36,8 @@ pub enum Engine {
     Codex,
     /// Google Gemini CLI (`gemini` binary).
     Gemini,
+    /// Deterministic local engine for dogfood and tests only.
+    Fake,
 }
 
 impl Engine {
@@ -46,6 +49,7 @@ impl Engine {
             Self::Cc => "cc",
             Self::Codex => "codex",
             Self::Gemini => "gemini",
+            Self::Fake => "fake",
         }
     }
 
@@ -58,7 +62,7 @@ impl Engine {
                     | WorkTraceCapability::EARLY_WORK_TITLES
                     | WorkTraceCapability::LIVE_TOOL_STEPS,
             ),
-            Self::Codex | Self::Gemini => WorkTraceCapability::from_bits(
+            Self::Codex | Self::Gemini | Self::Fake => WorkTraceCapability::from_bits(
                 WorkTraceCapability::CR_TASK_TITLES
                     | WorkTraceCapability::LIVE_TOOL_STEPS
                     | WorkTraceCapability::PARTIAL_TRACE,
@@ -70,7 +74,7 @@ impl Engine {
     #[must_use]
     pub const fn session_kind(self) -> SessionKind {
         match self {
-            Self::Cc | Self::Codex => SessionKind::SessionBound,
+            Self::Cc | Self::Codex | Self::Fake => SessionKind::SessionBound,
             Self::Gemini => SessionKind::StatelessDispatch,
         }
     }
@@ -639,7 +643,7 @@ mod tests {
 
     #[test]
     fn engine_as_str_matches_serde() {
-        for engine in [Engine::Cc, Engine::Codex, Engine::Gemini] {
+        for engine in [Engine::Cc, Engine::Codex, Engine::Gemini, Engine::Fake] {
             let wire = serde_json::to_string(&engine).unwrap();
             // Serialized form is a JSON string ("cc"), strip quotes:
             let bare = wire.trim_matches('"');
@@ -649,7 +653,7 @@ mod tests {
 
     #[test]
     fn engine_round_trips_via_serde() {
-        for engine in [Engine::Cc, Engine::Codex, Engine::Gemini] {
+        for engine in [Engine::Cc, Engine::Codex, Engine::Gemini, Engine::Fake] {
             let wire = serde_json::to_string(&engine).unwrap();
             let parsed: Engine = serde_json::from_str(&wire).unwrap();
             assert_eq!(engine, parsed);
@@ -692,6 +696,12 @@ mod tests {
         assert!(!gemini.early_work_titles());
         assert!(gemini.live_tool_steps());
         assert!(gemini.partial_trace());
+
+        let fake = Engine::Fake.work_trace();
+        assert!(fake.cr_task_titles());
+        assert!(!fake.early_work_titles());
+        assert!(fake.live_tool_steps());
+        assert!(fake.partial_trace());
     }
 
     #[test]

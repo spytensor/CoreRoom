@@ -282,8 +282,9 @@ impl TryFrom<String> for EngineKey {
             "cc" => Ok(Self(Engine::Cc)),
             "codex" => Ok(Self(Engine::Codex)),
             "gemini" => Ok(Self(Engine::Gemini)),
+            "fake" => Ok(Self(Engine::Fake)),
             other => Err(format!(
-                "unknown engine `{other}` — valid: cc / codex / gemini"
+                "unknown engine `{other}` — valid: cc / codex / gemini / fake"
             )),
         }
     }

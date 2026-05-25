@@ -6,7 +6,7 @@ How to actually work on CoreRoom locally. For higher-level concerns
 ## Toolchain
 
 ```bash
-# Rust — version pinned in rust-toolchain.toml (currently 1.85)
+# Rust — version pinned in rust-toolchain.toml (currently 1.88)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup component add rustfmt clippy
 
@@ -22,7 +22,7 @@ sudo apt-get install -y jq shellcheck timeout
 Verify:
 
 ```bash
-cargo --version          # cargo 1.85+
+cargo --version          # cargo 1.88+
 claude --version         # 2.1.137+
 codex --version          # 0.128.0+
 gemini --version         # 0.32.1+
@@ -160,10 +160,11 @@ python3 scripts/dogfood-v09-user-cases.py
 This is intentionally not a syntax-level check. It builds the real local
 binary, initializes a temporary user project, inspects the generated team
 roles and host prompt, verifies priors, enters plain `cr` through a PTY to
-confirm the executable runtime entrypoint, checks that the removed
-`cr console --live-room` flag returns the rebuild notice, regenerates README
-images, and fails if staged live-room tokens become the default path again
-before runtime parity lands.
+confirm the executable full-screen TUI room, drives a gated fake engine through
+streaming output and a permission prompt, checks durable `.coreroom/messages.jsonl`
+turn events, verifies `cr console --live-room` opens the same TUI room,
+regenerates README images, and fails if staged live-room tokens become the
+default path again.
 Release evidence must include this command when console, setup/init, host
 control, role prompt composition, or README visual behavior changed.
 

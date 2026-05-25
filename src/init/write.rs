@@ -120,7 +120,7 @@ fn render_config(roles: &[RolePlan]) -> String {
                 );
                 let _ = writeln!(out, "permission_mode = \"bypass\"");
             }
-            Engine::Cc => {}
+            Engine::Cc | Engine::Fake => {}
         }
         let _ = writeln!(out);
     }
