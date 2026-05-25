@@ -13,7 +13,7 @@
 //! - `cr role rm <name>`         — remove a role (refuses for the host)
 //! - `cr` — enter the executable CoreRoom runtime
 //! - `cr start [--project PATH] [--allow-large-priors]` — enter the legacy REPL directly
-//! - `cr console [--project PATH] [--snapshot PATH] [--live-room]` — enter the v0.9 full-screen console
+//! - `cr console [--project PATH] [--snapshot PATH]` — enter the v0.9 full-screen console
 //! - `cr prompt show <role>`     — print a role's effective prompt
 //! - `cr lock`                   — regenerate `.coreroom/priors.lock`
 //! - `cr verify`                 — verify priors lock content
@@ -120,8 +120,7 @@ enum Cmd {
         /// derives a live local snapshot from project config and git state.
         #[arg(long, conflicts_with = "live_room")]
         snapshot: Option<PathBuf>,
-        /// Open the staged unified live room preview. Keeps
-        /// `cr console --snapshot` read-only.
+        /// Exit with a rebuild notice for the removed staged live-room preview.
         #[arg(long)]
         live_room: bool,
     },
@@ -1360,15 +1359,14 @@ fn run_console_first_default() -> Result<()> {
 }
 
 fn run_console(project: Option<PathBuf>, snapshot: Option<PathBuf>, live_room: bool) -> Result<()> {
+    if live_room {
+        bail!("cr console --live-room: full-screen runtime is being rebuilt — see #320");
+    }
     if let Some(snapshot) = snapshot {
         return coreroom::console_tui::run_snapshot_console(&snapshot);
     }
     let root = project_root_or_cwd(project)?;
-    if live_room {
-        coreroom::console_tui::run_live_room_console(&root)
-    } else {
-        coreroom::console_tui::run_live_console(&root)
-    }
+    coreroom::console_tui::run_live_console(&root)
 }
 
 fn run_lock(project: Option<PathBuf>) -> Result<()> {

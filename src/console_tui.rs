@@ -1,8 +1,8 @@
 //! Full-screen terminal console shell for CoreRoom snapshots.
 //!
-//! v0.9 started with an explicit, read-only shell. The default room now keeps
-//! conversation and composer in the same terminal surface while dashboard facts
-//! remain derived from [`CoreRoomSnapshot`](crate::console_snapshot::CoreRoomSnapshot).
+//! v0.9 started with an explicit, read-only shell. This module renders
+//! validated dashboard and transcript facts from
+//! [`CoreRoomSnapshot`](crate::console_snapshot::CoreRoomSnapshot).
 
 use std::fs;
 use std::io::{self, IsTerminal as _, Write};
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::{CrosstermBackend, TestBackend};
@@ -23,18 +23,16 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::console_actions::ConsolePermissionOverlay;
-use crate::console_composer::{ComposerState, ComposerSubmitOutcome};
 use crate::console_conversation::{
-    build_live_room_conversation, InternalTaskCard, LiveRoomConversationPanel, LiveRoomTurnKind,
+    build_live_room_conversation, InternalTaskCard, LiveRoomTurnKind,
 };
 use crate::console_health::overview_health_signals;
-use crate::console_layout::{compute_console_layout, RightRailSection, RightRailSectionKind};
+use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
-use crate::console_room::{live_room_command_specs, LiveRoomAction, LiveRoomBridge};
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, RoleLaneState,
-    StatusState, WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, StatusState,
+    WorkLifecycle,
 };
 use crate::role_avatar::{role_label, RoleAvatarPack};
 
@@ -60,12 +58,6 @@ pub fn run_live_console(project_root: &Path) -> Result<()> {
 pub fn run_snapshot_console(snapshot_path: &Path) -> Result<()> {
     let snapshot = load_snapshot(snapshot_path)?;
     run_console(&snapshot)
-}
-
-/// Run the unified live room console for a local project.
-pub fn run_live_room_console(project_root: &Path) -> Result<()> {
-    let snapshot = crate::console_live::live_room_snapshot_from_project(project_root)?;
-    run_live_room_console_with_snapshot(snapshot)
 }
 
 /// Run the interactive read-only full-screen console for a validated snapshot.
@@ -105,116 +97,6 @@ pub fn run_console(snapshot: &CoreRoomSnapshot) -> Result<()> {
         }
     }
     terminal.show_cursor().context("restore console cursor")?;
-    Ok(())
-}
-
-fn run_live_room_console_with_snapshot(mut snapshot: CoreRoomSnapshot) -> Result<()> {
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        anyhow::bail!("CoreRoom live room requires an interactive TTY");
-    }
-    let _guard = ConsoleTerminalGuard::enter()?;
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend).context("create live room terminal")?;
-    terminal.clear().context("clear live room terminal")?;
-    let navigator = ConsoleNavigator::default();
-    let mut bridge = LiveRoomBridge::from_snapshot(&snapshot);
-    let mut composer = ComposerState::new(
-        bridge.roles().to_vec(),
-        live_room_command_specs(),
-        "Ask @host what to build, review, or fix",
-    );
-    loop {
-        terminal
-            .draw(|frame| {
-                render_live_room_frame_with_nav_and_avatar(
-                    frame,
-                    &snapshot,
-                    &navigator,
-                    RoleAvatarPack::from_env(),
-                    &composer,
-                    &bridge,
-                );
-            })
-            .context("render live room frame")?;
-        if event::poll(Duration::from_millis(120)).context("poll live room input")? {
-            match event::read().context("read live room input")? {
-                Event::Paste(text) => composer.paste_str(&text),
-                Event::Key(key)
-                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-                {
-                    match key.code {
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            break;
-                        }
-                        KeyCode::Char('d')
-                            if key.modifiers.contains(KeyModifiers::CONTROL)
-                                && composer.input().is_empty() =>
-                        {
-                            break;
-                        }
-                        KeyCode::Enter
-                            if key
-                                .modifiers
-                                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
-                        {
-                            composer.insert_newline();
-                        }
-                        KeyCode::Enter => match composer.submit() {
-                            ComposerSubmitOutcome::Submitted(input) => {
-                                let action = bridge.submit(&mut snapshot, &input)?;
-                                composer.set_submission_state(
-                                    crate::console_composer::ComposerSubmissionState::Idle,
-                                );
-                                if action == LiveRoomAction::Exit {
-                                    break;
-                                }
-                            }
-                            ComposerSubmitOutcome::CompletionAccepted
-                            | ComposerSubmitOutcome::Noop => {}
-                        },
-                        KeyCode::Tab | KeyCode::Down if composer.cycle_completion() => {}
-                        KeyCode::BackTab | KeyCode::Up if composer.cycle_completion_back() => {}
-                        KeyCode::Esc if composer.dismiss_completion() => {}
-                        KeyCode::Esc if composer.input().is_empty() => break,
-                        KeyCode::Backspace => {
-                            let _ = composer.backspace();
-                        }
-                        KeyCode::Delete => {
-                            let _ = composer.delete();
-                        }
-                        KeyCode::Left => {
-                            let _ = composer.move_left();
-                        }
-                        KeyCode::Right if composer.view_model().ghost_suffix.is_some() => {
-                            let _ = composer.accept_completion();
-                        }
-                        KeyCode::Right => {
-                            let _ = composer.move_right();
-                        }
-                        KeyCode::Home => {
-                            let _ = composer.move_home();
-                        }
-                        KeyCode::End => {
-                            let _ = composer.move_end();
-                        }
-                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            composer.clear();
-                        }
-                        KeyCode::Char(ch)
-                            if !key
-                                .modifiers
-                                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                        {
-                            composer.insert_char(ch);
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    terminal.show_cursor().context("restore live room cursor")?;
     Ok(())
 }
 
@@ -301,31 +183,6 @@ pub fn render_snapshot_to_text_with_action_overlay(
     Ok(buffer_to_string(terminal.backend().buffer()))
 }
 
-/// Render the unified live room frame into plain text for tests.
-pub fn render_live_room_to_text(
-    snapshot: &CoreRoomSnapshot,
-    width: u16,
-    height: u16,
-    composer: &ComposerState,
-    bridge: &LiveRoomBridge,
-) -> Result<String> {
-    let backend = TestBackend::new(width, height);
-    let mut terminal = Terminal::new(backend).context("create test live room terminal")?;
-    terminal
-        .draw(|frame| {
-            render_live_room_frame_with_nav_and_avatar(
-                frame,
-                snapshot,
-                &ConsoleNavigator::default(),
-                RoleAvatarPack::from_env(),
-                composer,
-                bridge,
-            );
-        })
-        .context("draw test live room frame")?;
-    Ok(buffer_to_string(terminal.backend().buffer()))
-}
-
 fn render_console_frame_with_nav_and_avatar(
     frame: &mut Frame<'_>,
     snapshot: &CoreRoomSnapshot,
@@ -351,62 +208,8 @@ fn render_console_frame_with_nav_and_avatar(
         navigator,
         layout_model.right_rail.as_ref(),
         avatar_pack,
-        RoomSurface::ReadOnly,
     );
     render_footer(frame, root[2], snapshot, navigator);
-}
-
-fn render_live_room_frame_with_nav_and_avatar(
-    frame: &mut Frame<'_>,
-    snapshot: &CoreRoomSnapshot,
-    navigator: &ConsoleNavigator,
-    avatar_pack: RoleAvatarPack,
-    composer: &ComposerState,
-    bridge: &LiveRoomBridge,
-) {
-    let area = frame.area();
-    let layout_model = compute_console_layout(snapshot, area.width);
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Min(8),
-            Constraint::Length(4),
-            Constraint::Length(2),
-        ])
-        .split(area);
-
-    render_header(frame, root[0], snapshot);
-    render_body(
-        frame,
-        root[1],
-        snapshot,
-        navigator,
-        layout_model.right_rail.as_ref(),
-        avatar_pack,
-        RoomSurface::Live { bridge },
-    );
-    render_composer(frame, root[2], snapshot, composer, bridge);
-    render_live_room_footer(frame, root[3], snapshot);
-}
-
-#[derive(Clone, Copy)]
-enum RoomSurface<'a> {
-    ReadOnly,
-    Live { bridge: &'a LiveRoomBridge },
-}
-
-impl<'a> RoomSurface<'a> {
-    const fn is_live(self) -> bool {
-        matches!(self, Self::Live { .. })
-    }
-
-    const fn bridge(self) -> Option<&'a LiveRoomBridge> {
-        match self {
-            Self::ReadOnly => None,
-            Self::Live { bridge } => Some(bridge),
-        }
-    }
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
@@ -470,7 +273,6 @@ fn render_body(
     navigator: &ConsoleNavigator,
     right_rail: Option<&crate::console_layout::RightRailViewModel>,
     avatar_pack: RoleAvatarPack,
-    surface: RoomSurface<'_>,
 ) {
     let has_rail = right_rail.is_some() && area.width >= 120;
     let chunks = if has_rail {
@@ -485,7 +287,7 @@ fn render_body(
             .split(area)
     };
 
-    render_center(frame, chunks[0], snapshot, navigator, avatar_pack, surface);
+    render_center(frame, chunks[0], snapshot, navigator, avatar_pack);
     if let Some(rail) = right_rail.filter(|_| has_rail) {
         render_right_rail(
             frame,
@@ -493,7 +295,6 @@ fn render_body(
             rail,
             &snapshot.runtime.host_role,
             avatar_pack,
-            surface,
         );
     }
 }
@@ -504,7 +305,6 @@ fn render_center(
     snapshot: &CoreRoomSnapshot,
     navigator: &ConsoleNavigator,
     avatar_pack: RoleAvatarPack,
-    surface: RoomSurface<'_>,
 ) {
     if navigator.active_view != ConsoleView::Overview {
         render_active_view(frame, area, snapshot, navigator, avatar_pack);
@@ -515,12 +315,8 @@ fn render_center(
         .constraints([Constraint::Length(11), Constraint::Min(8)])
         .split(area);
     let overview = build_console_overview(snapshot);
-    if surface.is_live() {
-        render_live_room_overview(frame, chunks[0], snapshot, &overview);
-    } else {
-        render_overview(frame, chunks[0], &overview);
-    }
-    render_room_workspace(frame, chunks[1], snapshot, avatar_pack, surface);
+    render_overview(frame, chunks[0], &overview);
+    render_room_workspace(frame, chunks[1], snapshot, avatar_pack);
 }
 
 fn render_active_view(
@@ -670,64 +466,6 @@ fn render_overview(frame: &mut Frame<'_>, area: Rect, overview: &ConsoleOverview
     );
 }
 
-fn render_live_room_overview(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    snapshot: &CoreRoomSnapshot,
-    overview: &ConsoleOverview,
-) {
-    let enabled_roles = snapshot
-        .runtime
-        .roles
-        .iter()
-        .filter(|role| role.enabled)
-        .count();
-    let active_roles = snapshot
-        .runtime
-        .roles
-        .iter()
-        .filter(|role| matches!(role.state, RoleLaneState::Working))
-        .count();
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Surface ", label_style()),
-            Span::raw("live-room preview  "),
-            Span::styled("Runtime ", label_style()),
-            Span::styled("staged router only", Style::default().fg(Color::Yellow)),
-        ]),
-        Line::from(vec![Span::styled(
-            "Use plain `cr` or `cr start` for real role-engine turns until full-screen runtime parity lands.",
-            Style::default().fg(Color::DarkGray),
-        )]),
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled("Host ", label_style()),
-            Span::raw(format!("@{}  ", snapshot.runtime.host_role)),
-            Span::styled("Roles ", label_style()),
-            Span::raw(format!("enabled {enabled_roles} / active {active_roles}  ")),
-            Span::styled("Input ", label_style()),
-            Span::raw("@role, @all, /help, /exit preview routing"),
-        ]),
-    ];
-    if let Some(alert) = overview.alerts.first() {
-        lines.push(Line::from(vec![
-            Span::styled("Alert ", Style::default().fg(Color::Red)),
-            Span::raw(alert.title.clone()),
-            Span::styled(
-                format!(" [{}]", alert.source),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Overview"))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
 fn pulse_line(pulse: &OverviewPulse) -> Line<'_> {
     let mut spans = vec![
         Span::styled(
@@ -768,47 +506,38 @@ fn render_room_workspace(
     area: Rect,
     snapshot: &CoreRoomSnapshot,
     avatar_pack: RoleAvatarPack,
-    surface: RoomSurface<'_>,
 ) {
     let panel = build_live_room_conversation(snapshot);
     let mut lines = Vec::new();
-    if surface.is_live() {
-        lines.extend(live_room_header_lines(snapshot, &panel));
-    } else {
+    lines.push(Line::from(vec![
+        Span::styled("Public transcript: ", label_style()),
+        Span::raw("@user <-> @"),
+        Span::raw(snapshot.runtime.host_role.clone()),
+    ]));
+    if panel.hidden_internal_count > 0 || !panel.task_cards.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("Public transcript: ", label_style()),
-            Span::raw("@user <-> @"),
-            Span::raw(snapshot.runtime.host_role.clone()),
+            Span::styled("Internal work: ", label_style()),
+            Span::raw(format!(
+                "{} hidden turns · {} task cards",
+                panel.hidden_internal_count,
+                panel.task_cards.len()
+            )),
+            Span::styled(
+                "  surfaced only when user @mentions a role, or @host summarizes risk/evidence",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
-        if panel.hidden_internal_count > 0 || !panel.task_cards.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("Internal work: ", label_style()),
-                Span::raw(format!(
-                    "{} hidden turns · {} task cards",
-                    panel.hidden_internal_count,
-                    panel.task_cards.len()
-                )),
-                Span::styled(
-                    "  surfaced only when user @mentions a role, or @host summarizes risk/evidence",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
-        }
     }
     lines.push(Line::raw(""));
     if panel.public_turns.is_empty() {
-        if surface.is_live() {
-            lines.extend(empty_live_room_lines(snapshot));
-        } else {
-            lines.push(Line::from(vec![Span::styled(
-                "  No public transcript turns were projected from this snapshot.",
-                Style::default().fg(Color::DarkGray),
-            )]));
-            lines.push(Line::from(vec![Span::styled(
-                "  Plain `cr` opens the current live room; this view is for read-only dashboard inspection.",
-                Style::default().fg(Color::DarkGray),
-            )]));
-        }
+        lines.push(Line::from(vec![Span::styled(
+            "  No public transcript turns were projected from this snapshot.",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            "  Plain `cr` opens the executable runtime; this view is for read-only dashboard inspection.",
+            Style::default().fg(Color::DarkGray),
+        )]));
     } else {
         for turn in &panel.public_turns {
             lines.push(Line::from(vec![
@@ -821,11 +550,6 @@ fn render_room_workspace(
             ]));
             lines.extend(wrap_body(&turn.body));
             lines.push(Line::raw(""));
-        }
-    }
-    if surface.is_live() {
-        if let Some(action) = surface.bridge().and_then(LiveRoomBridge::last_action) {
-            lines.extend(live_room_action_lines(action));
         }
     }
     if !panel.task_cards.is_empty() {
@@ -849,131 +573,12 @@ fn render_room_workspace(
         }
     }
 
-    let title = if surface.is_live() {
-        "CoreRoom Workspace"
-    } else {
-        "Transcript"
-    };
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(Block::default().borders(Borders::ALL).title("Transcript"))
             .wrap(Wrap { trim: true }),
         area,
     );
-}
-
-fn live_room_header_lines(
-    snapshot: &CoreRoomSnapshot,
-    panel: &LiveRoomConversationPanel,
-) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(vec![
-        Span::styled("Room: ", label_style()),
-        Span::raw("@user <-> @"),
-        Span::raw(snapshot.runtime.host_role.clone()),
-        Span::styled("  preview surface", Style::default().fg(Color::DarkGray)),
-    ])];
-    if panel.hidden_internal_count > 0 || !panel.task_cards.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("Side work: ", label_style()),
-            Span::raw(format!(
-                "{} hidden turns · {} task cards",
-                panel.hidden_internal_count,
-                panel.task_cards.len()
-            )),
-            Span::styled(
-                "  visible as cards only when useful",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("Side work: ", label_style()),
-            Span::raw("none surfaced"),
-            Span::styled(
-                "  specialist chatter stays out of the room",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-    }
-    lines
-}
-
-fn empty_live_room_lines(snapshot: &CoreRoomSnapshot) -> Vec<Line<'static>> {
-    vec![
-        Line::raw(""),
-        Line::from(vec![Span::styled(
-            "What should we build, review, or fix in CoreRoom?",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled("Ask @", label_style()),
-            Span::raw(snapshot.runtime.host_role.clone()),
-            Span::raw(" in the input below. Bare text routes to the host."),
-        ]),
-        Line::from(vec![Span::styled(
-            "Use @role only when you want that specialist in the public room.",
-            Style::default().fg(Color::DarkGray),
-        )]),
-        Line::from(vec![Span::styled(
-            "Project, branch, gates, evidence, and sources remain live dashboard facts around the room.",
-            Style::default().fg(Color::DarkGray),
-        )]),
-    ]
-}
-
-fn live_room_action_lines(action: &LiveRoomAction) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::raw(""),
-        Line::from(vec![Span::styled("Room activity", label_style())]),
-    ];
-    match action {
-        LiveRoomAction::Dispatch {
-            target_role,
-            origin,
-            ..
-        } => {
-            let origin_label = match origin {
-                crate::console_room::DispatchOrigin::BareUserText => "bare room input",
-                crate::console_room::DispatchOrigin::ExplicitRoleMention => {
-                    "explicit @role request"
-                }
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("@{target_role}"),
-                    Style::default()
-                        .fg(Color::Magenta)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" staged preview route"),
-                Span::styled(
-                    format!("  from {origin_label}"),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
-            lines.push(Line::from(vec![Span::styled(
-                "  Not executing a role turn here; use plain `cr` or `cr start` for real runtime execution.",
-                Style::default().fg(Color::DarkGray),
-            )]));
-        }
-        LiveRoomAction::Broadcast { .. } => {
-            lines.push(Line::from(vec![Span::raw(
-                "  Broadcast received by the room; specialist output stays summarized unless surfaced.",
-            )]));
-        }
-        LiveRoomAction::SupportedSlash { message, .. }
-        | LiveRoomAction::UnsupportedSlash { message, .. } => {
-            lines.push(Line::from(vec![Span::raw(format!("  {message}"))]));
-        }
-        LiveRoomAction::Noop => {}
-        LiveRoomAction::Exit => {
-            lines.push(Line::from(vec![Span::raw("  exit requested")]));
-        }
-    }
-    lines
 }
 
 fn render_right_rail(
@@ -982,18 +587,10 @@ fn render_right_rail(
     rail: &crate::console_layout::RightRailViewModel,
     host_role: &str,
     avatar_pack: RoleAvatarPack,
-    surface: RoomSurface<'_>,
 ) {
     let items = rail
         .sections
         .iter()
-        .filter(|section| {
-            !(surface.is_live()
-                && matches!(
-                    section.kind,
-                    RightRailSectionKind::Environment | RightRailSectionKind::Changes
-                ))
-        })
         .flat_map(|section| section_to_items(section, host_role, avatar_pack))
         .collect::<Vec<_>>();
     frame.render_widget(
@@ -1030,114 +627,6 @@ fn section_to_items(
     }
     items.push(ListItem::new(Line::raw("")));
     items
-}
-
-fn render_composer(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    snapshot: &CoreRoomSnapshot,
-    composer: &ComposerState,
-    bridge: &LiveRoomBridge,
-) {
-    let view = composer.view_model();
-    let _ = bridge;
-    let mut input_spans = vec![Span::styled("cr > ", Style::default().fg(Color::Green))];
-    input_spans.extend(composer_input_spans(&view));
-    let mut lines = vec![Line::from(input_spans)];
-    if !view.candidates.is_empty() {
-        let labels = view
-            .candidates
-            .iter()
-            .take(4)
-            .map(|candidate| {
-                if candidate.selected {
-                    format!(">{}", candidate.label)
-                } else {
-                    candidate.label.clone()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        lines.push(Line::from(vec![
-            Span::styled("complete ", label_style()),
-            Span::raw(labels),
-        ]));
-    }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("Input @{}", snapshot.runtime.host_role)),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
-fn composer_input_spans(view: &crate::console_composer::ComposerViewModel) -> Vec<Span<'static>> {
-    let cursor = view.cursor.min(view.input.chars().count());
-    let cursor_span = Span::styled(
-        "|",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    );
-    if view.input.is_empty() {
-        return vec![
-            cursor_span,
-            Span::styled(
-                format!(" {}", view.prompt_hint),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ];
-    }
-
-    let before = view.input.chars().take(cursor).collect::<String>();
-    let after = view.input.chars().skip(cursor).collect::<String>();
-    let mut spans = Vec::new();
-    if !before.is_empty() {
-        spans.push(Span::raw(before));
-    }
-    spans.push(cursor_span);
-    if let Some(suffix) = &view.ghost_suffix {
-        spans.push(Span::styled(
-            suffix.clone(),
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-    if !after.is_empty() {
-        spans.push(Span::raw(after));
-    }
-    spans
-}
-
-fn render_live_room_footer(frame: &mut Frame<'_>, area: Rect, snapshot: &CoreRoomSnapshot) {
-    let active = snapshot
-        .work
-        .iter()
-        .filter(|work| {
-            matches!(
-                work.lifecycle,
-                WorkLifecycle::InProgress | WorkLifecycle::Ready
-            )
-        })
-        .count();
-    let footer = Line::from(vec![
-        Span::styled(" enter ", Style::default().fg(Color::Black).bg(Color::Cyan)),
-        Span::raw("send  "),
-        Span::styled("shift/alt+enter ", label_style()),
-        Span::raw("newline  "),
-        Span::styled("@role ", label_style()),
-        Span::raw("public specialist task  "),
-        Span::styled("/exit ", label_style()),
-        Span::raw("quit  "),
-        Span::styled("dashboard ", label_style()),
-        Span::raw("live facts  "),
-        Span::styled("active work ", label_style()),
-        Span::raw(active.to_string()),
-    ]);
-    frame.render_widget(Paragraph::new(vec![footer]), area);
 }
 
 fn render_footer(

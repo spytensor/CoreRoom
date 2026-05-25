@@ -4,8 +4,8 @@
 This script is intentionally heavier than unit tests. It builds the local
 binary, creates a temporary user project, runs real `cr` commands against that
 project, verifies the default executable runtime entrypoint, enters the
-full-screen console through a PTY, exercises the explicit live-room preview
-alias, and regenerates README visual assets.
+full-screen console through a PTY, verifies the removed live-room flag returns
+the rebuild notice, and regenerates README visual assets.
 It is meant for release gating, not fast inner-loop testing.
 """
 
@@ -57,7 +57,7 @@ def main() -> int:
         dogfood_fresh_project(project)
         dogfood_default_cr_entrypoint(project)
         dogfood_live_console_pty(project)
-        dogfood_live_room_composer_pty(project)
+        dogfood_removed_live_room_flag(project)
 
     dogfood_snapshot_console_pty(width=120, height=40)
     dogfood_nerd_font_avatar_pack()
@@ -178,45 +178,21 @@ def dogfood_live_console_pty(project: Path) -> None:
     print("live PTY console entered without --snapshot at 120x40")
 
 
-def dogfood_live_room_composer_pty(project: Path) -> None:
-    print("\n== Scenario: explicit live-room alias")
-    output, code = run_pty_scripted_inputs(
+def dogfood_removed_live_room_flag(project: Path) -> None:
+    print("\n== Scenario: removed live-room preview flag")
+    output, code = run_allow_failure(
         [str(BIN), "console", "--live-room"],
         cwd=project,
-        width=160,
-        height=48,
-        wait_for=b"Ask @host",
-        inputs=[
-            b"validate unified room from real pty\r",
-            b"@reviewer check explicit routing\r",
-            b"/journal reviewer\r",
-            b"/exit\r",
-        ],
-        timeout=24,
     )
-    if code != 0:
-        raise DogfoodFailure(f"live-room PTY exited with {code}\n{output}")
-    for token in [
-        "CoreRoom",
-        "Project",
-        "Ask @host",
-    ]:
-        require(token, output, "live-room PTY composer flow")
-    for token in [
-        "staged router only",
-        "cr > | Ask @host",
-        "validate unified room from real pty",
-        "@host staged preview route",
-        "@reviewer check explicit routing",
-        "@reviewer staged preview route",
-        "Not executing a role turn here",
-        "not yet available in the unified room",
-        "plain `cr` or `cr start`",
-    ]:
-        require_compact(token, output, "live-room PTY composer flow")
-    if "CoreRoom console closed; starting REPL" in output:
-        raise DogfoodFailure("live-room PTY unexpectedly fell through to the old REPL")
-    print("live-room PTY accepted user input, routed @host/@reviewer, and exited in-room")
+    if code == 0:
+        raise DogfoodFailure("removed live-room flag unexpectedly exited successfully")
+    require(
+        "cr console --live-room: full-screen runtime is being rebuilt",
+        output,
+        "removed live-room flag",
+    )
+    require("#320", output, "removed live-room flag")
+    print("removed live-room flag fails with the rebuild notice")
 
 
 def run_pty_scripted_inputs(
@@ -364,6 +340,27 @@ def run(
     return completed.stdout
 
 
+def run_allow_failure(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    timeout: int = 60,
+) -> tuple[str, int]:
+    print(f"$ {shell_join(cmd)}  # expect failure")
+    completed = subprocess.run(
+        cmd,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.stdout:
+        print(indent_output(completed.stdout))
+    return completed.stdout, completed.returncode
+
+
 def run_pty(
     cmd: list[str],
     *,
@@ -444,14 +441,6 @@ def assert_png(path: Path) -> None:
 
 def require(needle: str, haystack: str, context: str) -> None:
     if needle not in haystack:
-        raise DogfoodFailure(f"missing `{needle}` in {context}")
-
-
-def require_compact(needle: str, haystack: str, context: str) -> None:
-    """Require text while tolerating terminal cursor/layout whitespace loss."""
-    compact_needle = re.sub(r"\s+", "", needle)
-    compact_haystack = re.sub(r"\s+", "", haystack)
-    if compact_needle not in compact_haystack:
         raise DogfoodFailure(f"missing `{needle}` in {context}")
 
 
