@@ -46,10 +46,9 @@
 > **v0.9.4** added the staged unified live room path behind
 > `cr console --live-room`; **v0.9.5** and **v0.9.6** tested making that
 > staged surface the default. **v0.9.7** restores the truthful default:
-> plain `cr` enters the mature executable runtime, while
-> `cr console --live-room` remains an explicit preview until it owns real
-> role-engine execution, permission prompts, streaming status, and durable
-> turn state.
+> plain `cr` enters the mature executable runtime. The staged
+> `cr console --live-room` bridge has since been removed while the replacement
+> full-screen runtime is rebuilt on real runtime events.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -131,7 +130,7 @@ Default entrypoints:
 cr                         # executable CoreRoom runtime
 cr start                   # explicit direct runtime entrypoint
 cr console                 # read-only dashboard/snapshot inspection surface
-cr console --live-room     # staged full-screen room preview
+cr console --live-room     # rebuild notice for removed staged preview
 ```
 
 If `cr` conflicts with an existing command in your environment, npm also
@@ -229,9 +228,8 @@ Useful commands:
   interactive terminal gets the guided setup first.
 - `cr start` is the explicit direct-runtime spelling for scripts or muscle
   memory.
-- `cr console --live-room` opens the staged full-screen room preview. It can
-  render room input and dashboard facts together, but it is not the default
-  until full role-engine execution and permission prompt parity land.
+- `cr console --live-room` exits with a rebuild notice while the replacement
+  full-screen runtime shell is rebuilt on real runtime events.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
 - `cr start --fresh` starts clean instead of resuming saved engine sessions.

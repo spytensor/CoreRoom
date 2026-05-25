@@ -10,7 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Changed
+
+- **Removed staged live-room bridge (#330).** Deleted the preview-only bridge
+  and snapshot-mutation path. `cr console --live-room` now exits with
+  `cr console --live-room: full-screen runtime is being rebuilt — see #320`
+  while the replacement full-screen runtime shell is rebuilt on real runtime
+  events.
 
 ## [0.9.7] - 2026-05-24
 
