@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
@@ -1655,11 +1655,32 @@ fn buffer_to_string(buffer: &Buffer) -> String {
 }
 
 fn write_enter_commands<W: Write>(mut writer: W) -> io::Result<()> {
-    execute!(writer, EnterAlternateScreen, Hide, EnableBracketedPaste)
+    // `EnableMouseCapture` is what turns the live room into a true
+    // K9S / tmux / vim style sandbox: the terminal stops scrolling its
+    // own main-buffer scrollback in response to the wheel and forwards
+    // mouse events to us instead. Without this, alt-screen still lets
+    // the user surface prior shell history with the scroll wheel on
+    // iTerm2 / Terminal.app, which breaks the "this is its own app"
+    // impression. We don't act on the mouse events for now — the
+    // event loop ignores them — but the capture is enough to keep the
+    // viewport pinned to what the TUI rendered.
+    execute!(
+        writer,
+        EnterAlternateScreen,
+        Hide,
+        EnableBracketedPaste,
+        EnableMouseCapture,
+    )
 }
 
 fn write_leave_commands<W: Write>(mut writer: W) -> io::Result<()> {
-    execute!(writer, DisableBracketedPaste, Show, LeaveAlternateScreen)
+    execute!(
+        writer,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        Show,
+        LeaveAlternateScreen,
+    )
 }
 
 #[derive(Debug)]
@@ -2080,6 +2101,46 @@ mod tests {
         assert!(text.contains("Help"));
         assert!(text.contains("toggle this help"));
         assert!(text.contains("? / esc to close"));
+    }
+
+    #[test]
+    fn mouse_events_are_ignored_by_the_terminal_event_handler() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut state = test_state();
+        let initial_input = state.composer.view_model().input.clone();
+        let initial_exiting = state.exiting;
+        let initial_help = state.show_cheatsheet;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let events = [
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::empty(),
+            }),
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::empty(),
+            }),
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 4,
+                row: 4,
+                modifiers: KeyModifiers::empty(),
+            }),
+        ];
+        for event in events {
+            handle_terminal_event(event, &mut state, &tx).expect("event handled");
+        }
+        // Mouse capture is enabled so the terminal stops scrolling its
+        // main-buffer scrollback under the user; the events arrive
+        // here, but for now we keep them as noops. Nothing in the
+        // runtime state may have moved.
+        assert_eq!(state.composer.view_model().input, initial_input);
+        assert_eq!(state.exiting, initial_exiting);
+        assert_eq!(state.show_cheatsheet, initial_help);
     }
 
     #[test]
