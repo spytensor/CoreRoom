@@ -10,7 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.11] - 2026-05-25
+## [0.9.12] - 2026-05-25
+
+### Fixed
+
+- **Live room now reads as a true K9S-style sandbox (#355).** v0.9.11
+  plugged the stdout/stderr leaks that were corrupting the alt-screen
+  rendering, but iTerm2 / Terminal.app still let the user scroll the
+  mouse wheel and surface the previous shell session's history under
+  the TUI, because alt-screen alone does not pin the viewport — most
+  terminals merge alt-buffer + main-buffer scrollback for the wheel.
+  `RoomTerminalGuard` now toggles `EnableMouseCapture` on entry and
+  `DisableMouseCapture` on exit, the same mechanism K9S, tmux, vim,
+  htop, and btop use. The terminal stops scrolling its main buffer in
+  response to the wheel; what's on screen is exactly what cr drew.
+  The event loop continues to no-op on `Event::Mouse(_)` — a
+  regression test pins that — so capture is purely about claiming the
+  viewport. Native text selection still works with the standard
+  modifier escape (`Shift+drag` on most terminals, `Cmd+drag` on
+  iTerm2, `Option+drag` on Terminal.app).
 
 ### Fixed
 

@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.12"
+items = [
+  "live room is a true K9S-style sandbox — scroll wheel stays inside cr",
+  "mouse capture pins the viewport so prior shell history no longer surfaces",
+  "Shift / Cmd / Option + click still works for native text selection",
+]
+
+[[whats_new]]
 version = "0.9.11"
 items = [
   "splash roster matches Team rail with host pinned first and a sturdier frontend glyph",
