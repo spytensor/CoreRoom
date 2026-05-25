@@ -61,6 +61,7 @@ pub fn add(
             None
         },
         owner: None,
+        access: None,
         authority: Vec::new(),
     };
     raw.roles.insert(name.to_owned(), entry);

@@ -27,6 +27,7 @@
 //! engine = "codex"
 //! model = "o3"
 //! owner = "alice@example.com"
+//! access = "read-review" # host-control | write | read-review
 //! authority = ["deployment", "infra", "secrets"]
 //! ```
 
@@ -85,9 +86,48 @@ pub struct RoleEntry {
     /// Human owner responsible for this role's priors and authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Role access class. This is separate from tool permission mode:
+    /// `permission_mode` gates tool approval, while `access` describes
+    /// whether the role is host control, implementation/write, or
+    /// read/review by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<RoleAccess>,
     /// Canonical scopes where this role may issue a binding plan veto.
+    /// This is domain authority, not file-write permission.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authority: Vec<AuthorityScope>,
+}
+
+/// Default access class for a role before WorkOrder-scoped grants.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum RoleAccess {
+    /// User-facing project control role. This does not make the user
+    /// less authoritative; it means the role may coordinate CoreRoom
+    /// project state on behalf of the user.
+    HostControl,
+    /// Scoped implementation role that may be assigned file/test work.
+    Write,
+    /// Read, review, tool-assisted analysis, and suggestions only.
+    ReadReview,
+}
+
+impl RoleAccess {
+    /// Canonical config value.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HostControl => "host-control",
+            Self::Write => "write",
+            Self::ReadReview => "read-review",
+        }
+    }
+}
+
+impl fmt::Display for RoleAccess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Canonical authority scopes a role may be allowed to veto.
@@ -297,6 +337,28 @@ impl Config {
     #[must_use]
     pub fn is_host(&self, role: &str) -> bool {
         self.host_role == role
+    }
+
+    /// Effective role access before any WorkOrder-scoped escalation.
+    ///
+    /// This intentionally does not inspect [`PermissionMode`]:
+    /// permission mode is tool-supervision policy, while role access is
+    /// the project/work authority class shown in status surfaces.
+    #[must_use]
+    pub fn effective_role_access(&self, role: &str) -> RoleAccess {
+        if self.is_host(role) {
+            return RoleAccess::HostControl;
+        }
+        self.roles
+            .get(role)
+            .and_then(|entry| entry.access)
+            .unwrap_or_else(|| {
+                if role == "engineer" {
+                    RoleAccess::Write
+                } else {
+                    RoleAccess::ReadReview
+                }
+            })
     }
 
     /// Build an [`adapter::RoleConfig`](crate::adapter::RoleConfig) for

@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use coreroom::config::{AuthorityScope, RoleAccess};
 use coreroom::console_snapshot::{CoreRoomSnapshot, StatusState, WorkLifecycle};
 use coreroom::console_views::{build_roles_view, build_workorders_view, WorkOrderView};
 
@@ -30,10 +31,31 @@ fn roles_view_covers_enabled_working_blocked_waiting_and_stale_states() {
         .find(|role| role.role == "security")
         .expect("security role");
     assert_eq!(security.status, StatusState::Blocking);
+    assert_eq!(security.effective_access, Some(RoleAccess::ReadReview));
+    assert_eq!(security.authority, vec![AuthorityScope::Secrets]);
     assert!(security
         .next_action
         .as_deref()
         .is_some_and(|action| { action.contains("resolve role blocker") }));
+
+    let host = roles
+        .iter()
+        .find(|role| role.role == "host")
+        .expect("host role");
+    assert_eq!(host.effective_access, Some(RoleAccess::HostControl));
+
+    let engineer = roles
+        .iter()
+        .find(|role| role.role == "engineer")
+        .expect("engineer role");
+    assert_eq!(engineer.effective_access, Some(RoleAccess::Write));
+
+    let reviewer = roles
+        .iter()
+        .find(|role| role.role == "reviewer")
+        .expect("reviewer role");
+    assert_eq!(reviewer.configured_access, Some(RoleAccess::ReadReview));
+    assert_eq!(reviewer.owner.as_deref(), Some("review@example.com"));
 }
 
 #[test]

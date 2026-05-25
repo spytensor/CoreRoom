@@ -6,6 +6,7 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::config::{AuthorityScope, RoleAccess};
 use crate::observation::Observation;
 
 /// Current console snapshot schema version.
@@ -204,6 +205,18 @@ pub struct RoleRuntimeSnapshot {
     /// Role-specific permission mode summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    /// Configured access class when explicitly set on the role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configured_access: Option<RoleAccess>,
+    /// Effective access class after applying host/engineer defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_access: Option<RoleAccess>,
+    /// Human owner for role priors/authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Domain authority scopes where the role may issue plan vetoes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authority: Vec<AuthorityScope>,
     /// Role session freshness.
     #[serde(default)]
     pub session_state: SessionFreshness,
@@ -233,6 +246,9 @@ impl RoleRuntimeSnapshot {
     fn validate(&self) -> Result<()> {
         ensure_nonempty("role.role", &self.role)?;
         ensure_nonempty("role.engine", &self.engine)?;
+        if let Some(owner) = &self.owner {
+            ensure_nonempty("role.owner", owner)?;
+        }
         if let Some(work_order) = &self.current_work_order {
             ensure_work_order_id(work_order)?;
         }

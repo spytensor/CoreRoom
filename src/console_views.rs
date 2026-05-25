@@ -4,6 +4,7 @@
 //! give the future navigator concrete data to display without re-reading logs
 //! or inventing ownership.
 
+use crate::config::{AuthorityScope, RoleAccess};
 use crate::console_snapshot::{
     CoreRoomSnapshot, EvidenceClosureState, InternalDelegationState, RoleLaneState,
     SourceHealthSnapshot, SourceHealthState, StatusState, WorkLifecycle,
@@ -25,6 +26,14 @@ pub struct RoleLaneView {
     pub state: RoleLaneState,
     /// Permission mode summary.
     pub permission_mode: Option<String>,
+    /// Configured access class when explicitly set on the role.
+    pub configured_access: Option<RoleAccess>,
+    /// Effective access class after applying host/engineer defaults.
+    pub effective_access: Option<RoleAccess>,
+    /// Human owner for role priors/authority.
+    pub owner: Option<String>,
+    /// Domain authority scopes where this role may issue plan vetoes.
+    pub authority: Vec<AuthorityScope>,
     /// WorkOrder currently associated with the role.
     pub current_work_order: Option<String>,
     /// Current gate phase when known.
@@ -268,6 +277,10 @@ pub fn build_roles_view(snapshot: &CoreRoomSnapshot) -> Vec<RoleLaneView> {
             model: role.model.clone(),
             state: role.state,
             permission_mode: role.permission_mode.clone(),
+            configured_access: role.configured_access,
+            effective_access: role.effective_access,
+            owner: role.owner.clone(),
+            authority: role.authority.clone(),
             current_work_order: role.current_work_order.clone(),
             current_gate_phase: role.current_gate_phase.clone(),
             status: role_status(
