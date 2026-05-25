@@ -1,4 +1,5 @@
 use std::io::Write as _;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -13,6 +14,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::output;
 use crate::permissions::BridgeRequestSink;
+use crate::room_io::RoomSink;
 
 use super::command::{SlashCommand, SLASH_COMMANDS};
 use super::permission_prompt;
@@ -62,19 +64,23 @@ pub(super) async fn read_tty_line(
     roles: Vec<String>,
     bridge_rx: Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
     host_role: String,
+    sink: Arc<dyn RoomSink>,
 ) -> Result<(
     InputLine,
     Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
 )> {
-    tokio::task::spawn_blocking(move || read_tty_line_blocking(&roles, bridge_rx, &host_role))
-        .await
-        .context("joining tty input reader")?
+    tokio::task::spawn_blocking(move || {
+        read_tty_line_blocking(&roles, bridge_rx, &host_role, sink.as_ref())
+    })
+    .await
+    .context("joining tty input reader")?
 }
 
 fn read_tty_line_blocking(
     roles: &[String],
     mut bridge_rx: Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
     host_role: &str,
+    sink: &dyn RoomSink,
 ) -> Result<(
     InputLine,
     Option<tokio::sync::mpsc::Receiver<BridgeRequestSink>>,
@@ -92,9 +98,9 @@ fn read_tty_line_blocking(
         // at the prompt actually surface, instead of queuing silently
         // until the next role turn enters drain_one_turn.
         if let Some(rx) = bridge_rx.as_mut() {
-            while let Ok(sink) = rx.try_recv() {
+            while let Ok(request_sink) = rx.try_recv() {
                 editor.suspend(&mut stdout)?;
-                permission_prompt::handle_request_blocking(sink, host_role);
+                permission_prompt::handle_request_blocking(request_sink, host_role, sink);
                 editor.redraw(&mut stdout)?;
             }
         }

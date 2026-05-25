@@ -36,7 +36,9 @@ use crate::bus::MessageBus;
 use crate::config::{Config, COREROOM_DIR};
 use crate::crep::{CrepEvent, StopReason, TurnOutcome};
 use crate::output;
-use crate::permissions::{BridgeHandle, BridgeRequestSink, PermissionPolicy};
+use crate::permissions::{
+    BridgeHandle, BridgeRequest, BridgeRequestSink, BridgeResponse, PermissionPolicy,
+};
 use crate::priors;
 use crate::room_io::{self, RoomSink};
 
@@ -67,6 +69,7 @@ use splash::{render_help, render_home};
 pub(crate) fn render_event_line_for_sink(event: &CrepEvent, host_role: &str) -> String {
     render::render_event_line(event, host_role)
 }
+
 pub(crate) fn render_work_card_for_sink(card: &crate::output::work_card::WorkCard) -> String {
     work::render_card_for_stdout(card)
 }
@@ -91,6 +94,28 @@ pub(crate) fn render_spinner_snapshot_at_width_for_sink(
     width: usize,
 ) -> String {
     status::render_spinner_snapshot_at_width(snapshot, width)
+}
+
+/// Crate-internal accessor used by [`crate::room_io::StdoutSink`] to
+/// render the permission prompt with the legacy formatter. Kept as a
+/// wrapper so the pure formatter remains owned by `permission_prompt`.
+pub(crate) fn format_permission_prompt_line_for_sink(
+    request: &BridgeRequest,
+    host_role: &str,
+    width: usize,
+) -> String {
+    permission_prompt::format_prompt_line(request, host_role, width)
+}
+
+/// Crate-internal accessor used by [`crate::room_io::StdoutSink`] to
+/// render permission outcomes with the legacy formatter. `None` means
+/// the old live surface only clears the pending prompt row.
+pub(crate) fn format_permission_outcome_line_for_sink(
+    role: &str,
+    host_role: &str,
+    response: &BridgeResponse,
+) -> Option<String> {
+    permission_prompt::format_outcome_line(role, host_role, response)
 }
 use turn::{drain_one_turn, CapturedTurn};
 use work::TurnWork;
@@ -529,7 +554,8 @@ pub async fn run_with_options_and_sink(
             let host_role = cfg.host_role.clone();
             let bridge_rx_taken = bridge_rx_holder.take();
             let (line, bridge_rx_back) =
-                input::read_tty_line(role_names, bridge_rx_taken, host_role).await?;
+                input::read_tty_line(role_names, bridge_rx_taken, host_role, Arc::clone(&sink))
+                    .await?;
             bridge_rx_holder = bridge_rx_back;
             line
         } else {
