@@ -105,7 +105,7 @@ fn layout_width_cases_match_fixture() {
 }
 
 #[test]
-fn right_rail_contains_effective_project_roles_evidence_sources_and_alerts() {
+fn right_rail_contains_effective_project_status_evidence_sources_and_alerts() {
     let snapshot = snapshot();
     let layout = compute_console_layout(&snapshot, 160);
     let rail = layout.right_rail.expect("right rail");
@@ -129,11 +129,9 @@ fn right_rail_contains_effective_project_roles_evidence_sources_and_alerts() {
     assert!(rail
         .sections
         .iter()
-        .any(|section| section.kind == RightRailSectionKind::ActiveRoles
-            && section
-                .rows
-                .iter()
-                .any(|row| row.label == "@host" && row.value == "working")));
+        .any(|section| section.kind == RightRailSectionKind::Blockers
+            && section.rows.iter().any(|row| row.label == "WO-0251"
+                && row.action.as_deref() == Some("clear blocker before claiming progress"))));
     assert!(rail
         .sections
         .iter()

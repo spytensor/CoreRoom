@@ -30,7 +30,9 @@ fn console_shell_renders_core_snapshot_facts() {
     assert!(rendered.contains("Evidence"));
     assert!(rendered.contains("Sources"));
     assert!(rendered.contains("Transcript"));
-    assert!(rendered.contains("Control Rail"));
+    assert!(rendered.contains("Status"));
+    assert!(rendered.contains("Blockers"));
+    assert!(rendered.contains("Current turn:"));
     assert!(rendered.contains("@user <-> @host"));
     assert!(rendered.contains("◉ @host"));
     assert!(rendered.contains("◎ @reviewer"));
