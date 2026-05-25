@@ -66,6 +66,7 @@ pub(super) fn engine_color(engine: Engine) -> Color {
         Engine::Cc => Color::White,
         Engine::Codex => Color::Blue,
         Engine::Gemini => Color::Magenta,
+        Engine::Fake => Color::DarkGrey,
     }
 }
 
@@ -74,6 +75,7 @@ pub(super) fn engine_label(engine: Engine) -> &'static str {
         Engine::Cc => "claude-code",
         Engine::Codex => "codex",
         Engine::Gemini => "gemini-cli",
+        Engine::Fake => "fake",
     }
 }
 
@@ -82,6 +84,7 @@ pub(super) fn model_label(engine: Engine) -> &'static str {
         Engine::Cc => "claude default",
         Engine::Codex => "codex default",
         Engine::Gemini => "gemini default",
+        Engine::Fake => "fake dogfood",
     }
 }
 
@@ -90,6 +93,7 @@ pub(super) fn engine_install_hint(engine: Engine) -> &'static str {
         Engine::Cc => "docs.anthropic.com/claude-code",
         Engine::Codex => "github.com/openai/codex",
         Engine::Gemini => "github.com/google/gemini-cli",
+        Engine::Fake => "set COREROOM_ENABLE_FAKE_ENGINE=1",
     }
 }
 

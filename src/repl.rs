@@ -30,6 +30,7 @@ use tracing::{debug, warn};
 
 use crate::adapter::cc::CcAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::fake::FakeAdapter;
 use crate::adapter::gemini::GeminiAdapter;
 use crate::adapter::{CompactResult, Engine, EngineAdapter, PermissionMode, UserMessage};
 use crate::bus::MessageBus;
@@ -148,6 +149,7 @@ struct Adapters {
     cc: CcAdapter,
     codex: CodexAdapter,
     gemini: GeminiAdapter,
+    fake: FakeAdapter,
 }
 
 impl Adapters {
@@ -156,6 +158,7 @@ impl Adapters {
             cc: CcAdapter::new(),
             codex: CodexAdapter::new(),
             gemini: GeminiAdapter::new(),
+            fake: FakeAdapter::new(),
         }
     }
 }
@@ -2478,6 +2481,13 @@ async fn try_start_role(
             .await
             .map_err(anyhow::Error::from)
             .with_context(|| format!("spawning role `{name}` (gemini)")),
+        Engine::Fake => context
+            .adapters
+            .fake
+            .start(cfg)
+            .await
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("spawning role `{name}` (fake)")),
     }
 }
 
@@ -2492,7 +2502,7 @@ fn is_resumable_session_id(engine: Engine, role: &str, session_id: &str) -> bool
     // non-resumable so an upgraded build does not feed `codex-qa` or
     // `gemini-security` into the engine's native resume path.
     match engine {
-        Engine::Cc => true,
+        Engine::Cc | Engine::Fake => true,
         Engine::Codex => trimmed != format!("codex-{role}"),
         Engine::Gemini => trimmed != format!("gemini-{role}"),
     }

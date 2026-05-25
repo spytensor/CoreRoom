@@ -679,6 +679,11 @@ fn parse_engine(s: &str) -> Result<Engine, String> {
         "cc" => Ok(Engine::Cc),
         "codex" => Ok(Engine::Codex),
         "gemini" => Ok(Engine::Gemini),
+        "fake" if coreroom::adapter::fake::enabled() => Ok(Engine::Fake),
+        "fake" => Err(format!(
+            "engine `fake` is dogfood/test-only; set {}=1 to enable it",
+            coreroom::adapter::fake::ENABLE_ENV
+        )),
         other => Err(format!(
             "unknown engine `{other}` — valid: cc, codex, gemini"
         )),
@@ -1355,7 +1360,19 @@ fn run_start(
 
 fn run_console_first_default() -> Result<()> {
     let project_root = project_root_or_cwd(None)?;
-    run_start(Some(project_root), false, false, false)
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return run_start(Some(project_root), false, false, false);
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        coreroom::console_room_runtime::run_live_room(
+            &project_root,
+            coreroom::repl::RunOptions::default(),
+        )
+        .await
+    })
 }
 
 fn run_console(project: Option<PathBuf>, snapshot: Option<PathBuf>, live_room: bool) -> Result<()> {

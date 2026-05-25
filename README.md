@@ -12,7 +12,7 @@
 
 ![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
 
-> **Status: v0.9.7 — user-runnable, still pre-1.0.** Claude Code,
+> **Status: v0.9.8 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
 > directly, guides setup when `.coreroom/` is missing, and shows the
 > effective role / engine / model configuration on entry. **v0.4.3**
@@ -45,10 +45,12 @@
 > by default and optional Nerd Font glyphs through `COREROOM_AVATAR_PACK=nerd-font`.
 > **v0.9.4** added the staged unified live room path behind
 > `cr console --live-room`; **v0.9.5** and **v0.9.6** tested making that
-> staged surface the default. **v0.9.7** restores the truthful default:
-> plain `cr` enters the mature executable runtime. The staged
-> `cr console --live-room` bridge has since been removed while the replacement
-> full-screen runtime is rebuilt on real runtime events.
+> staged surface the default. **v0.9.7** restored the truthful default while
+> runtime parity was rebuilt. **v0.9.8** makes plain `cr` the executable
+> full-screen TUI room: it reuses the mature role runtime, streams role output,
+> surfaces permission prompts, and writes durable turn events. `cr start`
+> remains the direct stdout entrypoint, and `cr console` remains the read-only
+> dashboard/snapshot surface.
 > Per semver, 0.x.y means the public API is not yet stable.
 
 ## Why
@@ -128,9 +130,9 @@ Default entrypoints:
 
 ```bash
 cr                         # executable CoreRoom runtime
-cr start                   # explicit direct runtime entrypoint
+cr start                   # explicit direct stdout runtime entrypoint
 cr console                 # read-only dashboard/snapshot inspection surface
-cr console --live-room     # rebuild notice for removed staged preview
+cr console --live-room     # explicit executable full-screen TUI room
 ```
 
 If `cr` conflicts with an existing command in your environment, npm also
@@ -157,7 +159,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.7
+TAG=v0.9.8
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -171,7 +173,7 @@ cr --version
 <details>
 <summary>Building from source.</summary>
 
-Requires Rust 1.85+. Use [rustup](https://rustup.rs) — the
+Requires Rust 1.88+. Use [rustup](https://rustup.rs) — the
 distro-shipped `rustc` is usually too old (we depend on `edition2024`
 in the wider ecosystem).
 
@@ -183,7 +185,7 @@ sudo cp target/release/cr /usr/local/bin/
 ```
 
 `cargo install --git ...` works too if your active toolchain is
-1.85+; otherwise the install fails inside a transitive dep.
+1.88+; otherwise the install fails inside a transitive dep.
 
 </details>
 
@@ -224,12 +226,12 @@ cr › @host scope out adding email verification
 
 Useful commands:
 
-- `cr` enters the executable CoreRoom runtime. If `.coreroom/` is missing, an
-  interactive terminal gets the guided setup first.
+- `cr` enters the executable full-screen CoreRoom TUI room. If `.coreroom/`
+  is missing, an interactive terminal gets the guided setup first.
 - `cr start` is the explicit direct-runtime spelling for scripts or muscle
   memory.
-- `cr console --live-room` exits with a rebuild notice while the replacement
-  full-screen runtime shell is rebuilt on real runtime events.
+- `cr console --live-room` is the explicit full-screen TUI room spelling.
+  `cr console` without the flag stays the read-only dashboard.
 - `cr start --yolo` runs the current session with `permission_mode=bypass`
   for every role after an interactive confirmation.
 - `cr start --fresh` starts clean instead of resuming saved engine sessions.

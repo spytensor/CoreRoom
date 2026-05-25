@@ -164,6 +164,7 @@ fn snapshot_init_engine_picker() {
         cc: true,
         codex: true,
         gemini: false,
+        fake: false,
     };
     let roles = vec!["host".into(), "backend".into(), "security".into()];
     let assignments = HashMap::from([
@@ -392,6 +393,7 @@ fn expansion_defaults_keep_model_engine_pair_safe() {
         cc: true,
         codex: true,
         gemini: false,
+        fake: false,
     };
 
     assert_eq!(
@@ -415,6 +417,7 @@ fn expansion_uses_codex_for_security_when_no_default_model_can_leak() {
         cc: true,
         codex: true,
         gemini: false,
+        fake: false,
     };
     let engine = expansion_engine_for_role("security", &cfg, &installed);
     assert_eq!(engine, Engine::Codex);

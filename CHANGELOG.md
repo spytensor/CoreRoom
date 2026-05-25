@@ -10,13 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-05-25
+
+### Added
+
+- **Deterministic fake engine dogfood (#332).** Added gated
+  `engine = "fake"` support behind `COREROOM_ENABLE_FAKE_ENGINE=1` so release
+  dogfood can prove streaming chunks, permission overlays, and durable
+  `.coreroom/messages.jsonl` turn events without network access or API quota.
+
 ### Changed
 
+- **Executable full-screen default (#331, #332).** Plain `cr` now opens the
+  real full-screen TUI room backed by the same runtime path as `cr start`.
+  `cr start` remains the explicit stdout entrypoint, `cr console` remains the
+  read-only dashboard/snapshot surface, and `cr console --live-room` is the
+  explicit TUI-room spelling.
+- **Behavioral v0.9 dogfood (#332).** The release dogfood now drives the TUI
+  over a real PTY, asserts idle/working/idle role status, verifies streamed
+  fake-engine chunks, trips the permission overlay, and checks durable CREP
+  message events instead of treating rendered strings as proof.
+- **Rust toolchain floor.** Bumped the documented MSRV and pinned toolchain to
+  Rust 1.88 after dependency updates required newer compiler support.
+
 - **Removed staged live-room bridge (#330).** Deleted the preview-only bridge
-  and snapshot-mutation path. `cr console --live-room` now exits with
-  `cr console --live-room: full-screen runtime is being rebuilt — see #320`
-  while the replacement full-screen runtime shell is rebuilt on real runtime
-  events.
+  and snapshot-mutation path. `cr console --live-room` now opens the
+  executable TUI room instead of the removed staged preview path.
 
 ## [0.9.7] - 2026-05-24
 
@@ -1353,7 +1372,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.7...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.8...HEAD
+[0.9.8]: https://github.com/spytensor/CoreRoom/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/spytensor/CoreRoom/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/spytensor/CoreRoom/compare/v0.9.4...v0.9.5

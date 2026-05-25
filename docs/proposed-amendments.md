@@ -137,10 +137,12 @@ default dashboard-to-REPL split failed real user expectations, #313 / v0.9.5
 made bare `cr` open the unified room directly. `cr start` remains the
 legacy/direct REPL escape hatch while deeper runtime parity continues.
 
-v0.9.7 restores bare `cr` to the executable runtime because the staged
+v0.9.7 restored bare `cr` to the executable runtime because the staged
 full-screen bridge did not yet spawn role engines, stream runtime status,
-persist real turns, or surface the mature permission prompt path. The unified
-room can become the default again only after the runtime-parity tracker closes.
+persist real turns, or surface the mature permission prompt path. v0.9.8 makes
+the unified room the default again after `#331` moved the TUI onto real runtime
+events and `#332` proved dispatch, streaming, permission prompts, and durable
+turn state with a deterministic fake engine.
 
 ### Migration impact
 
@@ -156,6 +158,10 @@ The implementation is staged:
 - #306 adds real PTY dogfood before any default-entrypoint decision.
 - #313 makes the unified room the default plain-`cr` entrypoint after real
   user testing rejected the dashboard-to-REPL split.
+- #317 restores the executable stdout runtime while parity is rebuilt.
+- #330 removes the staged bridge instead of preserving misleading behavior.
+- #331 implements the executable TUI room on real runtime events.
+- #332 adds fake-engine dogfood and flips plain `cr` back to the TUI room.
 
 ### Decision
 
