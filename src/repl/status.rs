@@ -1,10 +1,12 @@
-use std::io::{IsTerminal, Write as _};
+use std::io::IsTerminal;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::{style::Stylize, terminal};
 
 use crate::crep::CrepEvent;
 use crate::output;
+use crate::room_io::{RoomEvent, RoomSink, SpinnerPaint, SpinnerSnapshot};
 
 use super::render::summarize_tool_input;
 
@@ -26,6 +28,7 @@ pub(super) struct StatusRegion {
     pub(super) slots: Vec<StatusSlot>,
     pub(super) is_painted: bool,
     pub(super) is_tty: bool,
+    pub(super) sink: Arc<dyn RoomSink>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,11 +48,11 @@ pub(super) struct StatusSlot {
 }
 
 impl StatusRegion {
-    pub(super) fn start(role: &str) -> Self {
-        Self::start_at(role, Instant::now())
+    pub(super) fn start(role: &str, sink: Arc<dyn RoomSink>) -> Self {
+        Self::start_at(role, Instant::now(), sink)
     }
 
-    pub(super) fn start_at(role: &str, started_at: Instant) -> Self {
+    pub(super) fn start_at(role: &str, started_at: Instant, sink: Arc<dyn RoomSink>) -> Self {
         let mut region = Self {
             slots: vec![StatusSlot {
                 role: role.to_owned(),
@@ -60,6 +63,7 @@ impl StatusRegion {
             }],
             is_painted: false,
             is_tty: std::io::stdout().is_terminal(),
+            sink,
         };
         region.repaint();
         region
@@ -72,7 +76,7 @@ impl StatusRegion {
         let Some(slot) = self.slots.first_mut() else {
             return;
         };
-        match event {
+        let changed = match event {
             CrepEvent::ToolCallProposed {
                 role,
                 tool_name,
@@ -86,16 +90,22 @@ impl StatusRegion {
                 } else {
                     format!("running {tool_name} {summary}")
                 });
+                true
             }
             CrepEvent::ToolCallExecuted { role, .. } if role == &slot.role => {
                 slot.current_state = Some("thinking".to_owned());
+                true
             }
             CrepEvent::PermissionDenied {
                 role, tool_name, ..
             } if role == &slot.role => {
                 slot.current_state = Some(format!("denied {tool_name}"));
+                true
             }
-            _ => {}
+            _ => false,
+        };
+        if changed {
+            self.paint_as(SpinnerPaint::Painting);
         }
     }
 
@@ -114,6 +124,7 @@ impl StatusRegion {
         } else {
             format!("waiting approval · {tool_name} {summary}")
         });
+        self.paint_as(SpinnerPaint::WaitingApproval);
     }
 
     pub(super) fn clear_waiting_approval(&mut self, role: &str) {
@@ -126,20 +137,16 @@ impl StatusRegion {
             .is_some_and(|state| state.starts_with("waiting approval"))
         {
             slot.current_state = Some("thinking".to_owned());
+            self.paint_as(SpinnerPaint::Painting);
         }
     }
 
-    fn paint(&mut self) {
-        if !self.is_tty {
+    fn paint_as(&mut self, paint: SpinnerPaint) {
+        let Some(snapshot) = self.snapshot(paint) else {
             return;
-        }
-        // \r returns cursor to col 0; \x1b[2K clears the whole line.
-        // The role color is dropped on intentionally so the line is
-        // unambiguously "status" and not confused with a RoleSpoke.
-        let columns = terminal::size().map_or(80, |(cols, _)| usize::from(cols));
-        print!("\r\x1b[2K{}", self.render_line_at_width(columns));
-        let _ = std::io::stdout().flush();
-        self.is_painted = true;
+        };
+        self.sink.emit(RoomEvent::Spinner(snapshot));
+        self.is_painted = self.is_tty && paint != SpinnerPaint::Cleared;
     }
 
     pub(super) fn advance(&mut self) {
@@ -147,51 +154,114 @@ impl StatusRegion {
             slot.frame = (slot.frame + 1) % SPINNER_FRAMES.len();
         }
         if self.is_painted {
-            self.paint();
+            self.paint_as(SpinnerPaint::Painting);
         }
     }
 
     pub(super) fn repaint(&mut self) {
-        self.paint();
+        self.paint_as(SpinnerPaint::Painting);
     }
 
     pub(super) fn clear(&mut self) {
-        if !self.is_tty || !self.is_painted {
+        if !self.is_painted {
             self.is_painted = false;
             return;
         }
-        print!("\r\x1b[2K");
-        let _ = std::io::stdout().flush();
-        self.is_painted = false;
+        self.paint_as(SpinnerPaint::Cleared);
     }
 
+    #[cfg(test)]
     pub(super) fn render_line_at_width(&self, width: usize) -> String {
-        let slots = self
-            .slots
-            .iter()
-            .map(|slot| {
-                let frame = SPINNER_FRAMES[slot.frame % SPINNER_FRAMES.len()];
-                let elapsed = format_short_duration(slot.started_at.elapsed());
-                let tools = match slot.tools_seen {
-                    0 => String::new(),
-                    1 => " · 1 tool".to_owned(),
-                    n => format!(" · {n} tools"),
-                };
-                let state = slot.current_state.as_deref().unwrap_or("thinking");
-                format!(
-                    "{frame} @{role} · {elapsed}{tools} · {state}",
-                    role = slot.role,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        let count = self.slots.len();
-        let noun = if count == 1 { "role" } else { "roles" };
-        let line = format!("  {count} {noun} working · {slots}");
-        output::truncate_visible(&line, width)
-            .with(output::DIM)
-            .to_string()
+        let slots = self.slots.iter().map(RenderSlot::from).collect::<Vec<_>>();
+        render_spinner_line_at_width(&slots, width)
     }
+
+    fn snapshot(&self, paint: SpinnerPaint) -> Option<SpinnerSnapshot> {
+        let slot = self.slots.first()?;
+        Some(SpinnerSnapshot {
+            role: slot.role.clone(),
+            frame: slot.frame,
+            started_at: slot.started_at,
+            tools_seen: slot.tools_seen,
+            current_state: slot.current_state.clone(),
+            paint,
+        })
+    }
+}
+
+pub(super) fn render_spinner_snapshot_for_stdout(snapshot: &SpinnerSnapshot) -> String {
+    let width = terminal::size().map_or(80, |(cols, _)| usize::from(cols));
+    render_spinner_snapshot_at_width(snapshot, width)
+}
+
+pub(super) fn render_spinner_snapshot_at_width(snapshot: &SpinnerSnapshot, width: usize) -> String {
+    match snapshot.paint {
+        SpinnerPaint::Cleared => "\r\x1b[2K".to_owned(),
+        SpinnerPaint::Painting | SpinnerPaint::WaitingApproval => {
+            let slot = RenderSlot::from(snapshot);
+            format!("\r\x1b[2K{}", render_spinner_line_at_width(&[slot], width))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RenderSlot<'a> {
+    role: &'a str,
+    frame: usize,
+    started_at: Instant,
+    tools_seen: usize,
+    current_state: Option<&'a str>,
+}
+
+impl<'a> From<&'a StatusSlot> for RenderSlot<'a> {
+    fn from(slot: &'a StatusSlot) -> Self {
+        Self {
+            role: &slot.role,
+            frame: slot.frame,
+            started_at: slot.started_at,
+            tools_seen: slot.tools_seen,
+            current_state: slot.current_state.as_deref(),
+        }
+    }
+}
+
+impl<'a> From<&'a SpinnerSnapshot> for RenderSlot<'a> {
+    fn from(snapshot: &'a SpinnerSnapshot) -> Self {
+        Self {
+            role: &snapshot.role,
+            frame: snapshot.frame,
+            started_at: snapshot.started_at,
+            tools_seen: snapshot.tools_seen,
+            current_state: snapshot.current_state.as_deref(),
+        }
+    }
+}
+
+fn render_spinner_line_at_width(slots: &[RenderSlot<'_>], width: usize) -> String {
+    let count = slots.len();
+    let slot_text = slots
+        .iter()
+        .map(|slot| {
+            let frame = SPINNER_FRAMES[slot.frame % SPINNER_FRAMES.len()];
+            let elapsed = format_short_duration(slot.started_at.elapsed());
+            let tools = match slot.tools_seen {
+                0 => String::new(),
+                1 => " · 1 tool".to_owned(),
+                n => format!(" · {n} tools"),
+            };
+            let state = slot.current_state.unwrap_or("thinking");
+            format!(
+                "{frame} @{role} · {elapsed}{tools} · {state}",
+                role = slot.role
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    let noun = if count == 1 { "role" } else { "roles" };
+    let line = format!("  {count} {noun} working · {slot_text}");
+    output::truncate_visible(&line, width)
+        .with(output::DIM)
+        .to_string()
 }
 
 /// Compact wall-clock readout for the status line.  `<60s` shows

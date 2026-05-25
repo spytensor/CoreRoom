@@ -1153,6 +1153,7 @@ fn status_region_advances_through_all_frames() {
         slots: vec![fixed_slot("backend")],
         is_painted: false,
         is_tty: false,
+        sink: test_sink(),
     };
     for expected in 1..=SPINNER_FRAMES.len() {
         s.advance();
@@ -1174,12 +1175,37 @@ fn fixed_slot(role: &str) -> StatusSlot {
     }
 }
 
+fn test_sink() -> Arc<dyn crate::room_io::RoomSink> {
+    crate::room_io::stdout_sink()
+}
+
+#[derive(Default)]
+struct CapturingRoomSink {
+    events: Mutex<Vec<crate::room_io::RoomEvent>>,
+}
+
+impl crate::room_io::RoomSink for CapturingRoomSink {
+    fn emit(&self, event: crate::room_io::RoomEvent) {
+        self.events
+            .lock()
+            .expect("capturing sink mutex")
+            .push(event);
+    }
+}
+
+impl CapturingRoomSink {
+    fn events(&self) -> Vec<crate::room_io::RoomEvent> {
+        self.events.lock().expect("capturing sink mutex").clone()
+    }
+}
+
 #[test]
 fn status_region_clear_is_idempotent_and_marks_unpainted() {
     let mut s = StatusRegion {
         slots: vec![fixed_slot("backend")],
         is_painted: true,
         is_tty: false,
+        sink: test_sink(),
     };
     s.clear();
     assert!(!s.is_painted);
@@ -1194,6 +1220,7 @@ fn status_region_skips_paint_when_non_tty() {
         slots: vec![fixed_slot("backend")],
         is_painted: false,
         is_tty: false,
+        sink: test_sink(),
     };
     s.repaint();
     // Non-TTY: paint should NOT mark as painted (so clear() doesn't
@@ -1207,6 +1234,7 @@ fn status_region_renders_role_with_elapsed_and_state() {
         slots: vec![fixed_slot("security")],
         is_painted: false,
         is_tty: false,
+        sink: test_sink(),
     };
     let rendered = strip_ansi(&s.render_line_at_width(80));
     // 1 role · braille spinner frame · @security · elapsed (~12s,
@@ -1225,6 +1253,7 @@ fn status_region_tracks_tool_count_and_state_from_events() {
         slots: vec![fixed_slot("security")],
         is_painted: false,
         is_tty: false,
+        sink: test_sink(),
     };
     s.update_from_event(&CrepEvent::ToolCallProposed {
         role: "security".into(),
@@ -1277,6 +1306,7 @@ fn status_region_marks_and_clears_waiting_approval() {
         slots: vec![fixed_slot("security")],
         is_painted: false,
         is_tty: false,
+        sink: test_sink(),
     };
     s.mark_waiting_approval(
         "security",
@@ -1290,6 +1320,74 @@ fn status_region_marks_and_clears_waiting_approval() {
     let rendered = strip_ansi(&s.render_line_at_width(120));
     assert!(rendered.contains("thinking"));
     assert!(!rendered.contains("waiting approval"));
+}
+
+#[test]
+fn status_region_emits_spinner_snapshots_for_transition() {
+    let capture = Arc::new(CapturingRoomSink::default());
+    let sink: Arc<dyn crate::room_io::RoomSink> = capture.clone();
+    let mut s = StatusRegion {
+        slots: vec![fixed_slot("security")],
+        is_painted: false,
+        is_tty: true,
+        sink,
+    };
+    s.repaint();
+    s.advance();
+    s.update_from_event(&CrepEvent::ToolCallProposed {
+        role: "security".into(),
+        priors_hash: String::new(),
+        tool_name: "Bash".into(),
+        tool_input: serde_json::json!({"command": "cargo test --locked"}),
+        tool_use_id: "t-1".into(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+    });
+    s.mark_waiting_approval(
+        "security",
+        "Bash",
+        &serde_json::json!({"command": "cargo test --locked"}),
+    );
+    s.clear_waiting_approval("security");
+    s.clear();
+
+    let snapshots = capture
+        .events()
+        .into_iter()
+        .map(|event| match event {
+            crate::room_io::RoomEvent::Spinner(snapshot) => snapshot,
+            other => panic!("expected spinner event, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(snapshots.len(), 6);
+    assert_eq!(snapshots[0].paint, crate::room_io::SpinnerPaint::Painting);
+    assert_eq!(snapshots[0].frame, 0);
+    assert_eq!(snapshots[0].tools_seen, 0);
+    assert_eq!(snapshots[0].current_state, None);
+
+    assert_eq!(snapshots[1].paint, crate::room_io::SpinnerPaint::Painting);
+    assert_eq!(snapshots[1].frame, 1);
+
+    assert_eq!(snapshots[2].paint, crate::room_io::SpinnerPaint::Painting);
+    assert_eq!(snapshots[2].tools_seen, 1);
+    assert_eq!(
+        snapshots[2].current_state.as_deref(),
+        Some("running Bash `cargo test --locked`")
+    );
+
+    assert_eq!(
+        snapshots[3].paint,
+        crate::room_io::SpinnerPaint::WaitingApproval
+    );
+    assert_eq!(
+        snapshots[3].current_state.as_deref(),
+        Some("waiting approval · Bash `cargo test --locked`")
+    );
+
+    assert_eq!(snapshots[4].paint, crate::room_io::SpinnerPaint::Painting);
+    assert_eq!(snapshots[4].current_state.as_deref(), Some("thinking"));
+
+    assert_eq!(snapshots[5].paint, crate::room_io::SpinnerPaint::Cleared);
 }
 
 #[test]

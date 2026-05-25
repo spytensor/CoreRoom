@@ -7,6 +7,7 @@ use crate::adapter::cc::parse_mentions;
 use crate::crep::CrepEvent;
 use crate::output;
 use crate::output::work_card::{Step, StepKind, WorkCard, WorkStatus};
+use crate::room_io::{RoomEvent, RoomSink};
 use crate::work;
 
 use super::render::summarize_tool_input;
@@ -18,6 +19,7 @@ const DEFAULT_CARD_WIDTH: usize = 80;
 #[derive(Debug, Clone)]
 pub(super) struct TurnWork {
     role: String,
+    host_role: String,
     role_color: crossterm::style::Color,
     title: String,
     title_from_task_block: bool,
@@ -36,6 +38,7 @@ impl TurnWork {
     pub(super) fn new(role: &str, host_role: &str, prompt: &str) -> Self {
         Self {
             role: role.to_owned(),
+            host_role: host_role.to_owned(),
             role_color: output::role_color(role, host_role),
             title: work::fallback_title(prompt),
             title_from_task_block: false,
@@ -140,6 +143,7 @@ impl TurnWork {
     pub(super) fn done_card(&self, duration: Duration) -> WorkCard {
         WorkCard {
             role: self.role.clone(),
+            host_role: self.host_role.clone(),
             role_color: self.role_color,
             title: self.title.clone(),
             status: WorkStatus::Done {
@@ -154,6 +158,7 @@ impl TurnWork {
     pub(super) fn working_card(&self, spinner_frame: usize) -> WorkCard {
         WorkCard {
             role: self.role.clone(),
+            host_role: self.host_role.clone(),
             role_color: self.role_color,
             title: self.title.clone(),
             status: WorkStatus::Working {
@@ -168,6 +173,7 @@ impl TurnWork {
     pub(super) fn interrupted_card(&self, reason: impl Into<String>) -> WorkCard {
         WorkCard {
             role: self.role.clone(),
+            host_role: self.host_role.clone(),
             role_color: self.role_color,
             title: self.title.clone(),
             status: WorkStatus::Interrupted {
@@ -198,14 +204,31 @@ impl TurnWork {
     }
 }
 
-pub(super) fn render_card(card: &WorkCard) {
-    let rendered = card.render(card_width());
-    for line in rendered.lines() {
-        println!("{CARD_INDENT}{line}");
-    }
+pub(super) fn render_card(sink: &dyn RoomSink, card: WorkCard) {
+    sink.emit(RoomEvent::WorkCard(card));
 }
 
-pub(super) fn card_width() -> usize {
+pub(super) fn render_card_for_stdout(card: &WorkCard) -> String {
+    render_card_at_width(card, card_width())
+}
+
+#[cfg(test)]
+pub(super) fn render_card_at_terminal_width(card: &WorkCard, columns: usize) -> String {
+    render_card_at_width(card, columns.saturating_sub(CARD_INDENT.len()))
+}
+
+fn render_card_at_width(card: &WorkCard, width: usize) -> String {
+    let rendered = card.render(width);
+    let mut out = String::new();
+    for line in rendered.lines() {
+        out.push_str(CARD_INDENT);
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn card_width() -> usize {
     terminal::size().map_or(DEFAULT_CARD_WIDTH, |(cols, _)| {
         usize::from(cols).saturating_sub(CARD_INDENT.len())
     })
