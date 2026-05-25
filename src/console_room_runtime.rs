@@ -952,13 +952,33 @@ fn current_activity(state: &RoomRuntimeState) -> Option<CurrentActivity> {
         .spinners
         .values()
         .next()
-        .map(|snapshot| CurrentActivity {
-            role: snapshot.role.clone(),
-            state: snapshot
-                .current_state
-                .clone()
-                .unwrap_or_else(|| "thinking".to_owned()),
-            detail: Some(format!("{}s", snapshot.started_at.elapsed().as_secs())),
+        .map(|snapshot| {
+            // Prefer the work card's `current_step` over the spinner's
+            // generic `current_state` so the rail shows what tool is
+            // actually running (e.g. `cargo test`) instead of a
+            // perpetual `thinking` placeholder.
+            let card_step =
+                state
+                    .work_cards
+                    .get(&snapshot.role)
+                    .and_then(|card| match &card.status {
+                        WorkStatus::Working { current_step, .. } => current_step.clone(),
+                        _ => None,
+                    });
+            let state_label = card_step
+                .or_else(|| snapshot.current_state.clone())
+                .unwrap_or_else(|| "thinking".to_owned());
+            let mut detail = format!("{}s", snapshot.started_at.elapsed().as_secs());
+            if snapshot.tools_seen > 0 {
+                use std::fmt::Write as _;
+                let plural = if snapshot.tools_seen == 1 { "" } else { "s" };
+                let _ = write!(detail, " · {} tool{plural}", snapshot.tools_seen);
+            }
+            CurrentActivity {
+                role: snapshot.role.clone(),
+                state: state_label,
+                detail: Some(detail),
+            }
         })
         .or_else(|| {
             state
@@ -973,32 +993,126 @@ fn current_activity(state: &RoomRuntimeState) -> Option<CurrentActivity> {
         })
 }
 
+/// Card pinned to the top of the Room scrollback showing live role
+/// activity. Empty when no role is working and no permission is open;
+/// otherwise renders one styled row per active role with its current
+/// step, elapsed time, and tool count, framed with a thin divider so
+/// the card reads as a distinct artifact above the conversation flow.
 fn current_turn_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
-    let Some(activity) = current_activity(state) else {
+    let active_roles: Vec<&str> = state.spinners.keys().map(String::as_str).collect();
+    let pending_role = state.permission.as_ref().map(|p| p.request.role.as_str());
+    let has_pending_only = pending_role.is_some_and(|role| !active_roles.contains(&role));
+    if active_roles.is_empty() && !has_pending_only {
         return Vec::new();
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    // Top divider with an embedded label so the card has a clear
+    // identity above the scrollback.
+    lines.push(Line::from(vec![
+        Span::styled("──[ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "team working",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ]──", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    for snapshot in state.spinners.values() {
+        lines.push(activity_card_row(snapshot, state));
+    }
+    if let Some(role) = pending_role {
+        if !active_roles.contains(&role) {
+            lines.push(activity_card_waiting_row(role, &state.host_role));
+        }
+    }
+    lines.push(Line::from(vec![Span::styled(
+        "────────",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    lines.push(Line::raw(""));
+    lines
+}
+
+/// One styled row inside the Room activity card for an active role.
+fn activity_card_row(snapshot: &SpinnerSnapshot, state: &RoomRuntimeState) -> Line<'static> {
+    let role_color = tui_style::role_color(&snapshot.role, &state.host_role);
+    let glyph = tui_style::role_avatar_glyph(&snapshot.role, &state.host_role);
+    let frame_text = SPINNER_FRAMES[snapshot.frame % SPINNER_FRAMES.len()];
+    let frame_color = match snapshot.paint {
+        SpinnerPaint::WaitingApproval => Color::Yellow,
+        SpinnerPaint::Painting => Color::Cyan,
+        SpinnerPaint::Cleared => Color::DarkGray,
     };
-    let mut line = vec![
-        Span::styled("Current turn: ", label_style()),
-        Span::styled("owner ", Style::default().fg(Color::DarkGray)),
-    ];
-    line.extend(tui_style::role_label_spans(
-        &activity.role,
-        &state.host_role,
+    let elapsed = snapshot.started_at.elapsed().as_secs();
+    let card_step = state
+        .work_cards
+        .get(&snapshot.role)
+        .and_then(|card| match &card.status {
+            WorkStatus::Working { current_step, .. } => current_step.clone(),
+            _ => None,
+        });
+    let action = card_step
+        .or_else(|| snapshot.current_state.clone())
+        .unwrap_or_else(|| "thinking".to_owned());
+    let mut spans = Vec::with_capacity(10);
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        glyph.to_owned(),
+        Style::default().fg(role_color),
     ));
-    line.push(Span::raw(" · "));
-    line.push(Span::styled(
-        activity.state,
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(frame_text, Style::default().fg(frame_color)));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        format!("@{}", snapshot.role),
+        Style::default().fg(role_color).add_modifier(Modifier::BOLD),
     ));
-    if let Some(detail) = activity.detail {
-        line.push(Span::styled(
-            format!(" · {detail}"),
+    spans.push(Span::styled(
+        format!(" · {elapsed}s"),
+        Style::default().fg(Color::DarkGray),
+    ));
+    if snapshot.tools_seen > 0 {
+        let plural = if snapshot.tools_seen == 1 { "" } else { "s" };
+        spans.push(Span::styled(
+            format!(" · {} tool{plural}", snapshot.tools_seen),
             Style::default().fg(Color::DarkGray),
         ));
     }
-    vec![Line::from(line), Line::raw("")]
+    spans.push(Span::raw(" · "));
+    spans.push(Span::styled(
+        action,
+        Style::default()
+            .fg(frame_color)
+            .add_modifier(Modifier::BOLD),
+    ));
+    Line::from(spans)
+}
+
+/// One styled row inside the Room activity card for a role that is
+/// blocked on a permission overlay but no longer has a live spinner.
+fn activity_card_waiting_row(role: &str, host_role: &str) -> Line<'static> {
+    let role_color = tui_style::role_color(role, host_role);
+    let glyph = tui_style::role_avatar_glyph(role, host_role);
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(glyph.to_owned(), Style::default().fg(role_color)),
+        Span::raw(" "),
+        Span::styled("⏸", Style::default().fg(Color::Yellow)),
+        Span::raw(" "),
+        Span::styled(
+            format!("@{role}"),
+            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " · waiting approval",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
 }
 
 fn status_panel_lines(state: &RoomRuntimeState, width: u16) -> Vec<Line<'static>> {
@@ -1902,9 +2016,10 @@ mod tests {
     fn rail_shows_work_status_when_no_spinners_and_no_cards() {
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // The default right rail is project/work status, not a role roster.
+        // The right rail is purely the project-level Status panel.
+        // Team / roster info lives in the Room activity card now, not
+        // here.
         assert!(text.contains("Status"));
-        assert!(!text.contains("Team"));
         assert!(!text.contains("Roles"));
         assert!(!text.contains("no work cards yet"));
         assert!(text.contains("Current"));
@@ -1912,6 +2027,9 @@ mod tests {
         assert!(text.contains("Work"));
         assert!(text.contains("active: 0"));
         assert!(text.contains("validation: not observed"));
+        // No Team section in the rail. The Room activity card is also
+        // empty when no role is working — no "team working" header.
+        assert!(!text.contains("team working"));
     }
 
     #[test]
@@ -1928,13 +2046,13 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("Status"));
         assert!(!text.contains("Roles"));
-        assert!(!text.contains("Team"));
-        assert!(!text.contains("standby"));
-        assert!(text.contains("Current turn:"));
-        assert!(text.contains("owner"));
+        assert!(text.contains("active: 1"));
+        // The Room activity card surfaces the working role with its
+        // current step. Role identity lives in the Room area now,
+        // not the rail.
+        assert!(text.contains("team working"));
         assert!(text.contains("@backend"));
         assert!(text.contains("thinking"));
-        assert!(text.contains("active: 1"));
     }
 
     #[test]
@@ -1953,12 +2071,15 @@ mod tests {
         state.apply_event(RoomEvent::WorkCard(sample_work_card()));
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("Status"));
-        assert!(!text.contains("Team"));
         assert!(!text.contains("Roles"));
         assert!(text.contains("latest"));
         assert!(text.contains("assignee"));
         assert!(text.contains("◇ @backend"));
         assert!(text.contains("Run validation"));
+        // No live spinner means no Room activity card surfaces
+        // either — work-card-only state belongs in the Status panel
+        // assignee row.
+        assert!(!text.contains("team working"));
     }
 
     #[test]
@@ -2315,7 +2436,9 @@ mod tests {
     fn work_card_renders_role_label_exactly_once_per_card() {
         let mut state = test_state();
         state.apply_event(RoomEvent::WorkCard(sample_work_card()));
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // Use a tall render area so the Team + Status sections do not
+        // crowd the work card off the bottom of the rail.
+        let text = render_room_runtime_to_text(&state, 120, 60).expect("render");
         // The card's own border title already carries `@backend`. The
         // pre-v0.9.11 identity-header prefix line above the card is
         // gone. Count `@backend` only inside the card body region
@@ -2342,11 +2465,123 @@ mod tests {
             1,
             "expected exactly one @backend in card body, got:\n{card_section}"
         );
-        // Role identity may appear above the card only as Status
-        // metadata such as the assignee row, never as a separate
-        // role-roster prefix line.
-        assert!(!text.contains("standby"));
+        // The card body is the only place `@backend` should appear
+        // *inside* card borders. The Status panel may also mention
+        // `@backend` as the assignee, and the Team section may show
+        // other roles as standby — both are outside the card body
+        // and OK.
         assert!(text.contains("assignee"));
+    }
+
+    #[test]
+    fn current_section_surfaces_tools_count_when_above_zero() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 3,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
+        assert!(text.contains("3 tools"));
+    }
+
+    #[test]
+    fn current_section_omits_tool_count_when_zero() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
+        // No "0 tools" anywhere on the rail.
+        assert!(!text.contains("0 tool"));
+    }
+
+    #[test]
+    fn current_section_prefers_work_card_current_step_over_thinking() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 1,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        // sample_work_card carries current_step = Some("cargo test").
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text = render_room_runtime_to_text(&state, 120, 60).expect("render");
+        // Status panel's Current section uses the card's current_step
+        // verbatim instead of the generic spinner "thinking".
+        assert!(text.contains("cargo test"));
+    }
+
+    #[test]
+    fn room_activity_card_is_empty_when_no_role_is_working() {
+        let state = test_state();
+        let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
+        // No "team working" header on the Room area when idle.
+        assert!(!text.contains("team working"));
+    }
+
+    #[test]
+    fn room_activity_card_surfaces_active_role_with_tool_count_and_step() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 2,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        // sample_work_card carries current_step = Some("cargo test").
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
+        assert!(text.contains("team working"));
+        // The card row mentions the role, the tool count, and the
+        // running step taken from the work card.
+        let activity_row = text
+            .lines()
+            .find(|line| line.contains("@backend") && line.contains("cargo test"))
+            .expect("activity card row");
+        assert!(activity_row.contains("2 tools"));
+    }
+
+    #[test]
+    fn room_activity_card_lists_every_active_role_separately() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "host".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 1,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 3,
+            current_state: Some("running".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
+        assert!(text.contains("team working"));
+        assert!(text
+            .lines()
+            .any(|line| line.contains("@host") && line.contains("1 tool")));
+        assert!(text
+            .lines()
+            .any(|line| line.contains("@backend") && line.contains("3 tools")));
     }
 
     #[test]
@@ -2412,9 +2647,9 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("Status"));
         assert!(!text.contains("Roles"));
-        assert!(!text.contains("Team─") && !text.contains("─Team"));
-        assert!(text.contains("Current turn:"));
-        assert!(text.contains("approval"));
+        // The Room activity card surfaces the role waiting on a
+        // permission prompt even when its spinner has been cleared.
+        assert!(text.contains("team working"));
         assert!(text.contains("waiting approval"));
         assert!(text.contains("@backend"));
     }
