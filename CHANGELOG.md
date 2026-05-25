@@ -10,6 +10,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-05-25
+
+### Added
+
+- **Industrial-grade live room visual polish (#339 #340 #341 #342 #343 #344).** A
+  cohesive identity pass on the executable full-screen TUI. Every role has a
+  stable color + avatar glyph that propagates through splash, the right rail,
+  work cards, and the composer mention menu. Idle right rail shows a Team
+  roster (host first, glyph + engine + last seen / standby) instead of an
+  `idle` stub; the Work panel folds entirely when there are no cards. The
+  composer renders three distinct visual states — idle, working (dim border +
+  inline mini spinner synced to active role frame + `· working`/`· queued`
+  title suffix), and blocked (yellow border + dim body + waiting hint).
+
+### Changed
+
+- **Consolidated runtime chrome.** The bordered `CoreRoom Runtime` header is
+  replaced by a single-line top status bar carrying identity on the left
+  (`CoreRoom v{version} · {project} · {short-path}`) and a colored status
+  badge + `work N` on the right. `RunOptions::frameless_splash` and
+  `render_home_in_room` let the splash drop its own border + version title
+  when rendered inside the live room, so identity is single-sourced. The
+  footer no longer carries `path`.
+- **Context-aware footer keybindings.** Hints are derived from
+  `ComposerSubmissionState`, pending permission, and input buffer state. `?`
+  opens a centered cheatsheet overlay that lists every key for the current
+  state and closes on `?` or `Esc`. Narrow widths drop secondary actions
+  first while primary action and halt/cancel chips never disappear. `Esc`
+  now clears the composer input when nothing else is active.
+
+### Internal
+
+- **`tui_style` module.** New `src/tui_style.rs` bridges
+  `crossterm::style::Color` to `ratatui::style::Color` and exposes
+  `role_label_spans` as the single helper every ratatui surface uses to
+  render a role label. Canonical roles (engineer/backend, reviewer, security,
+  qa, sre, frontend, product) are pinned to specific palette slots so glyph
+  and color agree on identity; unknown roles still hash deterministically
+  into the remaining slots.
+
 ## [0.9.8] - 2026-05-25
 
 ### Added

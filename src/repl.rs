@@ -60,7 +60,7 @@ pub use command::{parse_line, Command, PermissionCommand};
 use input::InputLine;
 use render::render_event;
 pub use show::{show_log, ShowOptions};
-use splash::{render_help, render_home};
+use splash::{render_help, render_home, render_home_in_room};
 
 /// Slash-command metadata for external composers. Dispatch remains
 /// owned by [`parse_line`]; this is only the completion catalogue.
@@ -261,6 +261,11 @@ pub struct RunOptions {
     pub fresh: bool,
     /// Allow composed role priors above the 500KB hard limit.
     pub allow_large_priors: bool,
+    /// Skip the splash frame and identity title when the splash is
+    /// rendered inside a host (e.g. the live-room TUI) that already
+    /// provides its own panel border and top status bar. Avoids
+    /// duplicated `CoreRoom v{x}` and `<project path>` rendering.
+    pub frameless_splash: bool,
 }
 
 /// One raw input action submitted to the executable room runtime.
@@ -470,10 +475,13 @@ async fn run_with_options_and_sink_source(
     warn_if_priors_lock_drift(&coreroom_dir, options.allow_large_priors, sink.as_ref());
 
     let first_run = is_first_run(&coreroom_dir);
-    room_io::emit_banner(
-        sink.as_ref(),
-        render_home(&cfg, &coreroom_dir, project_root, first_run),
-    );
+    let frameless_splash = options.frameless_splash;
+    let splash_text = if frameless_splash {
+        render_home_in_room(&cfg, &coreroom_dir, project_root, first_run)
+    } else {
+        render_home(&cfg, &coreroom_dir, project_root, first_run)
+    };
+    room_io::emit_banner(sink.as_ref(), splash_text);
     crate::update::maybe_notify_on_start();
     if first_run {
         mark_welcomed(&coreroom_dir).await;
@@ -777,10 +785,12 @@ async fn run_with_options_and_sink_source(
             Command::Halt(target) => handle_halt(&roles, target.as_deref(), sink.as_ref()).await,
             Command::Compact(target) => handle_compact(&roles, &target, sink.as_ref()).await,
             Command::Welcome => {
-                room_io::emit_banner(
-                    sink.as_ref(),
-                    render_home(&cfg, &coreroom_dir, project_root, false),
-                );
+                let splash_text = if frameless_splash {
+                    render_home_in_room(&cfg, &coreroom_dir, project_root, false)
+                } else {
+                    render_home(&cfg, &coreroom_dir, project_root, false)
+                };
+                room_io::emit_banner(sink.as_ref(), splash_text);
             }
             Command::Allow(tool) => {
                 update_permission_policy(&permission_policy_path, &tool, true, sink.as_ref());

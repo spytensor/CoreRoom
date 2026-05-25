@@ -108,18 +108,18 @@ space toggles · ↑↓ moves · enter continues · esc backs out
 
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
 
-    [x] ● @host        orchestrates requests and keeps the room coherent · req…
-    [ ] ● @engineer    implements changes across the project
-    [ ] ● @reviewer    reviews plans and code for regressions
-    [ ] ● @sre         runtime reliability, deploys, operations
-  > [x] ● @backend     APIs, services, storage boundaries
-    [ ] ● @frontend    UI, components, routing, client-side state
-    [x] ● @security    authn, authz, threat modeling
+    [x] ◉ @host        orchestrates requests and keeps the room coherent · req…
+    [ ] ◇ @engineer    implements changes across the project
+    [ ] ◎ @reviewer    reviews plans and code for regressions
+    [ ] ▣ @sre         runtime reliability, deploys, operations
+  > [x] ◇ @backend     APIs, services, storage boundaries
+    [ ] ▱ @frontend    UI, components, routing, client-side state
+    [x] ◆ @security    authn, authz, threat modeling
     [ ] ● @data        schemas, migrations, query patterns
-    [ ] ● @devops      CI/CD, infra, deploys, runtime health
-    [ ] ● @ci          workflows, checks, release gates
-    [ ] ● @qa          test strategy, edge cases, regression risk
-    [ ] ● @docs        technical writing, examples, API reference
+    [ ] ▣ @devops      CI/CD, infra, deploys, runtime health
+    [ ] □ @ci          workflows, checks, release gates
+    [ ] △ @qa          test strategy, edge cases, regression risk
+    [ ] △ @docs        technical writing, examples, API reference
 
 3 selected · host is always present · enter continues
 ");
@@ -141,18 +141,18 @@ space toggles · ↑↓ moves · enter adds selected · esc skips
 detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
 CoreRoom found only @host. Choose the specialists to add:
 
-    [x] ● @host        orchestrates requests and keeps the room coherent · exi…
-    [ ] ● @engineer    implements changes across the project
-    [ ] ● @reviewer    reviews plans and code for regressions
-    [ ] ● @sre         runtime reliability, deploys, operations
-  > [x] ● @backend     APIs, services, storage boundaries
-    [ ] ● @frontend    UI, components, routing, client-side state
-    [x] ● @security    authn, authz, threat modeling
+    [x] ◉ @host        orchestrates requests and keeps the room coherent · exi…
+    [ ] ◇ @engineer    implements changes across the project
+    [ ] ◎ @reviewer    reviews plans and code for regressions
+    [ ] ▣ @sre         runtime reliability, deploys, operations
+  > [x] ◇ @backend     APIs, services, storage boundaries
+    [ ] ▱ @frontend    UI, components, routing, client-side state
+    [x] ◆ @security    authn, authz, threat modeling
     [ ] ● @data        schemas, migrations, query patterns
-    [ ] ● @devops      CI/CD, infra, deploys, runtime health
-    [ ] ● @ci          workflows, checks, release gates
-    [ ] ● @qa          test strategy, edge cases, regression risk
-    [ ] ● @docs        technical writing, examples, API reference
+    [ ] ▣ @devops      CI/CD, infra, deploys, runtime health
+    [ ] □ @ci          workflows, checks, release gates
+    [ ] △ @qa          test strategy, edge cases, regression risk
+    [ ] △ @docs        technical writing, examples, API reference
 
 2 new role(s) selected · enter writes config and priors
 ");

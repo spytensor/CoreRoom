@@ -9,6 +9,9 @@ use crate::adapter::Engine;
 use crate::config::COREROOM_DIR;
 use crate::detect;
 use crate::output;
+use crate::role_avatar::{role_avatar, RoleAvatarPack};
+
+const WIZARD_HOST_ROLE: &str = "host";
 
 use super::{
     engine_color, engine_install_hint, engine_label, engine_note, human_label, model_label,
@@ -70,11 +73,12 @@ pub(super) fn picker_row(
     let desc_truncated = output::truncate_visible(&desc_plain, desc_budget);
 
     let paint = role_color(info.name);
+    let glyph = role_avatar(info.name, WIZARD_HOST_ROLE, RoleAvatarPack::from_env()).glyph;
     format!(
         "{}{}{} {} {}",
         cursor_glyph.with(output::PROMPT),
         check.with(if is_cursor { output::EM } else { output::TEXT }),
-        "●".with(paint),
+        glyph.with(paint),
         name_plain.with(paint).bold(),
         desc_truncated.with(output::DIM),
     )

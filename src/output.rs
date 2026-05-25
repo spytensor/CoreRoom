@@ -37,16 +37,38 @@ fn fnv1a(s: &str) -> u32 {
     h
 }
 
-/// Stable role color. The host role is always lavender; every other role
-/// hashes deterministically into slots 1..8. The same role name therefore
-/// keeps the same color across sessions and across Rust versions.
+/// Stable role color. The host role is always lavender; canonical roles
+/// (`engineer`/`backend`, `reviewer`, `security`, `qa`, `sre`, `frontend`,
+/// `product`) are pinned to specific palette slots so they match the
+/// avatar glyph table in [`crate::role_avatar`]. Every other role hashes
+/// deterministically into slots 1..8. The same role name therefore keeps
+/// the same color across sessions and across Rust versions.
 #[must_use]
 pub fn role_color(role: &str, host_role: &str) -> Color {
     if role == "host" || role == host_role {
         return ROLE_PALETTE[0];
     }
+    if let Some(slot) = canonical_role_slot(role) {
+        return ROLE_PALETTE[slot];
+    }
     let idx = 1 + (fnv1a(role) as usize) % 7;
     ROLE_PALETTE[idx]
+}
+
+/// Pinned palette slot for canonical role names. Aligns 1:1 with the
+/// glyph table in [`crate::role_avatar::role_avatar`] so each role has
+/// one identity across glyph and color.
+fn canonical_role_slot(role: &str) -> Option<usize> {
+    match role {
+        "engineer" | "backend" => Some(4),
+        "reviewer" => Some(5),
+        "security" => Some(2),
+        "qa" | "test" | "tester" => Some(6),
+        "sre" | "ops" | "devops" => Some(7),
+        "frontend" | "design" => Some(3),
+        "product" | "pm" => Some(1),
+        _ => None,
+    }
 }
 
 // ───────────────────── status helpers ──────────────────────

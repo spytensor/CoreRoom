@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::io::{self, IsTerminal as _, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
@@ -28,6 +28,7 @@ use ratatui::{Frame, Terminal};
 use tokio::sync::mpsc;
 use unicode_width::UnicodeWidthChar;
 
+use crate::adapter::Engine;
 use crate::config::Config;
 use crate::console_composer::{
     ComposerState, ComposerSubmissionState, ComposerSubmitOutcome, ComposerViewModel,
@@ -38,6 +39,7 @@ use crate::permissions::{BridgeRequest, BridgeResponse, DecisionScope, Permissio
 use crate::repl::{Command, RuntimeInput};
 use crate::room_io::{NoticeLevel, RoomEvent, RoomSink, SpinnerPaint, SpinnerSnapshot, StdoutSink};
 use crate::room_io_tui::TuiSink;
+use crate::tui_style;
 
 /// Mutable render state for the executable room.
 #[derive(Debug)]
@@ -45,12 +47,26 @@ pub struct RoomRuntimeState {
     project_root: PathBuf,
     project_name: String,
     host_role: String,
+    team: Vec<TeamMember>,
+    last_seen: BTreeMap<String, Instant>,
     composer: ComposerState,
     scrollback: Vec<String>,
     spinners: BTreeMap<String, SpinnerSnapshot>,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
     exiting: bool,
+    show_cheatsheet: bool,
+}
+
+/// One row in the right-rail Team roster. Holds only the identity bits
+/// the rail needs to render an idle row; live work state lives in
+/// [`RoomRuntimeState::spinners`] and [`RoomRuntimeState::work_cards`].
+#[derive(Debug, Clone)]
+pub struct TeamMember {
+    /// Role name without the leading `@`.
+    pub role: String,
+    /// Engine that this role's adapter targets.
+    pub engine: Engine,
 }
 
 #[derive(Debug, Clone)]
@@ -69,17 +85,17 @@ impl RoomRuntimeState {
         let host_role = cfg
             .as_ref()
             .map_or_else(|| "host".to_owned(), |cfg| cfg.host_role.clone());
-        let mut roles = cfg.as_ref().map_or_else(
-            || vec![host_role.clone()],
-            |cfg| cfg.role_names().map(ToOwned::to_owned).collect::<Vec<_>>(),
-        );
-        if roles.is_empty() {
-            roles.push(host_role.clone());
-        }
-        Self::new(project_root.to_path_buf(), host_role, roles)
+        let team = build_team(cfg.as_ref(), &host_role);
+        let roles: Vec<String> = team.iter().map(|member| member.role.clone()).collect();
+        Self::new(project_root.to_path_buf(), host_role, roles, team)
     }
 
-    fn new(project_root: PathBuf, host_role: String, roles: Vec<String>) -> Self {
+    fn new(
+        project_root: PathBuf,
+        host_role: String,
+        roles: Vec<String>,
+        team: Vec<TeamMember>,
+    ) -> Self {
         let project_name = project_root
             .file_name()
             .and_then(|name| name.to_str())
@@ -94,12 +110,15 @@ impl RoomRuntimeState {
             project_root,
             project_name,
             host_role,
+            team,
+            last_seen: BTreeMap::new(),
             composer,
             scrollback: Vec::new(),
             spinners: BTreeMap::new(),
             work_cards: BTreeMap::new(),
             permission: None,
             exiting: false,
+            show_cheatsheet: false,
         }
     }
 
@@ -130,6 +149,7 @@ impl RoomRuntimeState {
                 }
             }
             RoomEvent::Spinner(snapshot) => {
+                self.last_seen.insert(snapshot.role.clone(), Instant::now());
                 match snapshot.paint {
                     SpinnerPaint::Cleared => {
                         self.spinners.remove(&snapshot.role);
@@ -252,8 +272,14 @@ pub async fn run_live_room(project_root: &Path, options: crate::repl::RunOptions
     let sink: Arc<dyn RoomSink> = Arc::new(tui_sink);
     let (input_tx, input_rx) = mpsc::unbounded_channel();
     let runtime_root = project_root.to_path_buf();
+    // The TUI's top status bar and Room panel already provide the
+    // identity title and outer border; ask the splash to render
+    // frameless so we do not duplicate them.
+    let mut runtime_options = options;
+    runtime_options.frameless_splash = true;
     let runtime_task = tokio::spawn(async move {
-        crate::repl::run_with_options_and_sink_input(&runtime_root, options, sink, input_rx).await
+        crate::repl::run_with_options_and_sink_input(&runtime_root, runtime_options, sink, input_rx)
+            .await
     });
 
     let _guard = RoomTerminalGuard::enter()?;
@@ -342,6 +368,12 @@ fn handle_key(
     state: &mut RoomRuntimeState,
     input_tx: &mpsc::UnboundedSender<RuntimeInput>,
 ) -> Result<()> {
+    if state.show_cheatsheet {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+            state.show_cheatsheet = false;
+        }
+        return Ok(());
+    }
     if state.permission.is_some() {
         if let Some(response) = permission_response_for_key(key) {
             answer_permission(state, response);
@@ -350,6 +382,14 @@ fn handle_key(
     }
 
     match key.code {
+        KeyCode::Char('?')
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && state.composer.view_model().input.is_empty() =>
+        {
+            state.show_cheatsheet = true;
+        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if state.has_active_work() {
                 raise_runtime_interrupt()?;
@@ -381,7 +421,17 @@ fn handle_key(
             }
         }
         KeyCode::Esc => {
-            let _ = state.composer.dismiss_completion();
+            // Esc has three jobs depending on what's open:
+            //   1. dismiss an active completion candidate
+            //   2. otherwise, clear the input buffer
+            //   3. otherwise, noop
+            if state.composer.view_model().ghost_suffix.is_some()
+                || !state.composer.view_model().candidates.is_empty()
+            {
+                let _ = state.composer.dismiss_completion();
+            } else if !state.composer.view_model().input.is_empty() {
+                state.composer.clear();
+            }
         }
         KeyCode::Backspace => {
             let _ = state.composer.backspace();
@@ -520,54 +570,146 @@ fn render_room_runtime_frame(frame: &mut Frame<'_>, state: &RoomRuntimeState) {
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Min(8),
             Constraint::Length(5),
             Constraint::Length(1),
         ])
         .split(area);
 
-    render_header(frame, root[0], state);
+    render_status_bar(frame, root[0], state);
     render_body(frame, root[1], state);
     render_composer(frame, root[2], state);
     render_footer(frame, root[3], state);
     if let Some(permission) = &state.permission {
         render_permission_overlay(frame, area, permission);
+    } else if state.show_cheatsheet {
+        render_cheatsheet_overlay(frame, area, state);
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let status = if state.exiting {
-        "exiting"
-    } else if state.permission.is_some() {
-        "waiting approval"
-    } else if state.has_active_work() {
-        "working"
+/// Top chrome row: a single borderless line carrying identity on the
+/// left (product + version + project + short path) and runtime state
+/// on the right (status badge with color, `work N` when N > 0).
+///
+/// At narrow widths the path truncates with `…` and the status badge
+/// degrades to text-only; identity (product + version + project) is
+/// never dropped.
+fn render_status_bar(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
+    let runtime_state = current_status(state);
+    let badge_label = runtime_state.label();
+    let badge_color = runtime_state.color();
+    let work = state.active_work_count();
+    let work_text = if work > 0 {
+        format!("  work {work}")
     } else {
-        "idle"
+        String::new()
     };
-    let line = Line::from(vec![
-        Span::styled("Project ", label_style()),
-        Span::raw(state.project_name.clone()),
-        Span::raw("  "),
-        Span::styled("Host ", label_style()),
-        Span::raw(format!("@{}  ", state.host_role)),
-        Span::styled("Status ", label_style()),
-        Span::raw(status),
-        Span::raw("  "),
-        Span::styled("Work ", label_style()),
-        Span::raw(state.active_work_count().to_string()),
-    ]);
-    frame.render_widget(
-        Paragraph::new(vec![line])
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("CoreRoom Runtime"),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
+
+    let identity_full = format!(
+        "CoreRoom v{}  ·  {}  ·  {}",
+        env!("CARGO_PKG_VERSION"),
+        state.project_name,
+        home_relative(&state.project_root)
     );
+
+    let right_visible = badge_label.chars().count() + 2 + work_text.chars().count();
+    let total = area.width as usize;
+    let identity_budget = total.saturating_sub(right_visible).saturating_sub(2).max(1);
+    let identity_truncated = truncate_with_ellipsis(&identity_full, identity_budget);
+    let identity_visible = identity_truncated.chars().count();
+
+    // Spacer fills any gap between identity (left) and badge (right).
+    let spacer_width = total
+        .saturating_sub(identity_visible)
+        .saturating_sub(right_visible);
+    let spacer = " ".repeat(spacer_width);
+
+    let line = Line::from(vec![
+        Span::styled(identity_truncated, Style::default().fg(Color::Gray)),
+        Span::raw(spacer),
+        Span::styled(
+            "●",
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            badge_label.to_owned(),
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(work_text, Style::default().fg(Color::DarkGray)),
+    ]);
+    frame.render_widget(Paragraph::new(vec![line]), area);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeStatus {
+    Idle,
+    Working,
+    WaitingApproval,
+    Exiting,
+}
+
+impl RuntimeStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Working => "working",
+            Self::WaitingApproval => "waiting approval",
+            Self::Exiting => "exiting",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Idle => Color::DarkGray,
+            Self::Working => Color::Green,
+            Self::WaitingApproval => Color::Yellow,
+            Self::Exiting => Color::Red,
+        }
+    }
+}
+
+fn current_status(state: &RoomRuntimeState) -> RuntimeStatus {
+    if state.exiting {
+        RuntimeStatus::Exiting
+    } else if state.permission.is_some() {
+        RuntimeStatus::WaitingApproval
+    } else if state.has_active_work() {
+        RuntimeStatus::Working
+    } else {
+        RuntimeStatus::Idle
+    }
+}
+
+fn home_relative(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rel) = path.strip_prefix(&home) {
+            let rel_str = rel.display().to_string();
+            return if rel_str.is_empty() {
+                "~".to_owned()
+            } else {
+                format!("~/{rel_str}")
+            };
+        }
+    }
+    path.display().to_string()
+}
+
+fn truncate_with_ellipsis(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if input.chars().count() <= max_chars {
+        return input.to_owned();
+    }
+    let mut out: String = input.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn render_body(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
@@ -604,76 +746,190 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
 }
 
 fn render_status_rail(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(6)])
-        .split(area);
-    render_role_lane(frame, chunks[0], state);
-    render_work_cards(frame, chunks[1], state);
+    // The Work panel only appears when there is something to show.
+    // Otherwise the Team/Roles panel takes the full rail height. Rail
+    // width is constant, so the swap never causes horizontal jitter.
+    if state.work_cards.is_empty() {
+        render_role_lane(frame, area, state);
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(6), Constraint::Length(10)])
+            .split(area);
+        render_role_lane(frame, chunks[0], state);
+        render_work_cards(frame, chunks[1], state);
+    }
 }
 
 fn render_role_lane(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let mut lines = Vec::new();
+    let title;
     if state.spinners.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "idle",
-            Style::default().fg(Color::DarkGray),
-        )]));
+        title = "Team";
+        let now = Instant::now();
+        for member in &state.team {
+            lines.push(team_line(member, &state.host_role, &state.last_seen, now));
+        }
     } else {
+        title = "Roles";
         for snapshot in state.spinners.values() {
-            lines.push(spinner_line(snapshot));
+            lines.push(spinner_line(snapshot, &state.host_role));
+        }
+        let inactive = state.team.len().saturating_sub(state.spinners.len());
+        if inactive > 0 {
+            lines.push(Line::from(vec![Span::styled(
+                format!("+ {inactive} standby"),
+                Style::default().fg(Color::DarkGray),
+            )]));
         }
     }
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Roles"))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
-fn spinner_line(snapshot: &SpinnerSnapshot) -> Line<'static> {
-    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let frame = FRAMES[snapshot.frame % FRAMES.len()];
+/// One row in the Team roster. Identity (glyph + role token) uses
+/// [`tui_style::role_label_spans`]; engine label and last-seen hint
+/// trail in dim text. `standby` is the literal hint for any role that
+/// has not been seen this session.
+fn team_line(
+    member: &TeamMember,
+    host_role: &str,
+    last_seen: &BTreeMap<String, Instant>,
+    now: Instant,
+) -> Line<'static> {
+    let mut spans = tui_style::role_label_spans(&member.role, host_role);
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        engine_short(member.engine).to_owned(),
+        Style::default().fg(Color::Gray),
+    ));
+    spans.push(Span::raw("  "));
+    let hint = last_seen
+        .get(&member.role)
+        .map_or_else(|| "standby".to_owned(), |seen| last_seen_text(now, *seen));
+    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    Line::from(spans)
+}
+
+fn engine_short(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Cc => "cc",
+        Engine::Codex => "codex",
+        Engine::Gemini => "gemini",
+        Engine::Fake => "fake",
+    }
+}
+
+/// Compact session-relative timestamp for the Team roster. Best-effort
+/// from [`Instant`]; not persisted across sessions.
+fn last_seen_text(now: Instant, seen: Instant) -> String {
+    let elapsed = now.saturating_duration_since(seen).as_secs();
+    match elapsed {
+        0 => "active".to_owned(),
+        s if s < 60 => format!("{s}s ago"),
+        s if s < 3600 => format!("{}m ago", s / 60),
+        s => format!("{}h ago", s / 3600),
+    }
+}
+
+/// Build the Team roster: host first, then declared roles in
+/// alphabetical order with the host excluded from the tail. Falls back
+/// to a single host row when no config is available.
+fn build_team(cfg: Option<&Config>, host_role: &str) -> Vec<TeamMember> {
+    let Some(cfg) = cfg else {
+        return vec![TeamMember {
+            role: host_role.to_owned(),
+            engine: Engine::Cc,
+        }];
+    };
+    let mut others: Vec<TeamMember> = cfg
+        .role_names()
+        .filter(|name| *name != host_role)
+        .map(|name| {
+            let engine = cfg
+                .roles
+                .get(name)
+                .and_then(|entry| entry.engine)
+                .unwrap_or(cfg.default_engine);
+            TeamMember {
+                role: name.to_owned(),
+                engine,
+            }
+        })
+        .collect();
+    others.sort_by(|a, b| a.role.cmp(&b.role));
+
+    let host_engine = cfg
+        .roles
+        .get(host_role)
+        .and_then(|entry| entry.engine)
+        .unwrap_or(cfg.default_engine);
+    let mut team = Vec::with_capacity(others.len() + 1);
+    team.push(TeamMember {
+        role: host_role.to_owned(),
+        engine: host_engine,
+    });
+    team.extend(others);
+    team
+}
+
+const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {
+    let frame = SPINNER_FRAMES[snapshot.frame % SPINNER_FRAMES.len()];
     let state = snapshot
         .current_state
         .clone()
         .unwrap_or_else(|| "thinking".to_owned());
-    let style = match snapshot.paint {
+    let frame_style = match snapshot.paint {
         SpinnerPaint::WaitingApproval => Style::default().fg(Color::Yellow),
         SpinnerPaint::Painting => Style::default().fg(Color::Cyan),
         SpinnerPaint::Cleared => Style::default().fg(Color::DarkGray),
     };
+    let role_color = tui_style::role_color(&snapshot.role, host_role);
+    let glyph = tui_style::role_avatar_glyph(&snapshot.role, host_role);
     Line::from(vec![
-        Span::styled(frame, style),
+        Span::styled(glyph.to_owned(), Style::default().fg(role_color)),
+        Span::raw(" "),
+        Span::styled(frame, frame_style),
         Span::raw(" "),
         Span::styled(
             format!("@{}", snapshot.role),
-            style.add_modifier(Modifier::BOLD),
+            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
             " · {}s · ",
             snapshot.started_at.elapsed().as_secs()
         )),
-        Span::raw(state),
+        Span::styled(state, Style::default().fg(Color::DarkGray)),
     ])
 }
 
 fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let mut lines = Vec::new();
+    // Caller is responsible for not invoking this when work_cards is
+    // empty — the rail folds the panel in that case (see
+    // `render_status_rail`). Defensive return keeps the function safe
+    // to call from snapshot tests.
     if state.work_cards.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "no work cards yet",
-            Style::default().fg(Color::DarkGray),
-        )]));
-    } else {
-        let width = usize::from(area.width.saturating_sub(4)).max(28);
-        for card in state.work_cards.values().rev().take(3) {
-            for line in strip_ansi(&card.render(width)).lines() {
-                lines.push(Line::raw(line.to_owned()));
-            }
-            lines.push(Line::raw(""));
+        return;
+    }
+    let mut lines = Vec::new();
+    let width = usize::from(area.width.saturating_sub(4)).max(28);
+    for card in state.work_cards.values().rev().take(3) {
+        // Identity header line — gives each card a colored role label
+        // even though the body is rendered as plain text.
+        lines.push(Line::from(tui_style::role_label_spans(
+            &card.role,
+            &card.host_role,
+        )));
+        for line in strip_ansi(&card.render(width)).lines() {
+            lines.push(Line::raw(line.to_owned()));
         }
+        lines.push(Line::raw(""));
     }
     frame.render_widget(
         Paragraph::new(lines)
@@ -685,39 +941,117 @@ fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let vm = state.composer.view_model();
-    let title = match vm.submission_state {
-        ComposerSubmissionState::Idle => format!("Ask @{}", state.host_role),
-        ComposerSubmissionState::Submitting => "Runtime active".to_owned(),
-        ComposerSubmissionState::Blocked => "Permission required".to_owned(),
-    };
+    let visual = composer_visual(state, &vm);
+    let lines = composer_lines(&vm, &state.host_role, &visual);
     frame.render_widget(
-        Paragraph::new(composer_lines(&vm))
-            .block(Block::default().borders(Borders::ALL).title(title))
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(visual.border_style)
+                    .title(visual.title.clone()),
+            )
             .wrap(Wrap { trim: false }),
         area,
     );
     if vm.submission_state != ComposerSubmissionState::Blocked {
-        frame.set_cursor_position(composer_cursor_position(area, &vm));
+        frame.set_cursor_position(composer_cursor_position(area, &vm, visual.prompt_width));
     }
 }
 
-fn composer_lines(vm: &ComposerViewModel) -> Vec<Line<'static>> {
+/// Visual state of the composer derived purely from
+/// [`ComposerSubmissionState`] and [`RoomRuntimeState::permission`].
+/// Three states: idle (default), working (gray border + inline mini
+/// spinner), blocked (yellow border + dim body + hint).
+#[derive(Debug, Clone)]
+struct ComposerVisual {
+    title: String,
+    border_style: Style,
+    prompt_prefix_spans: Vec<Span<'static>>,
+    /// Visible columns the prompt prefix occupies. Used by the cursor
+    /// position calc; must match the total `chars().count()` of the
+    /// prompt spans.
+    prompt_width: usize,
+    body_style: Option<Style>,
+    blocked_hint: Option<&'static str>,
+}
+
+fn composer_visual(state: &RoomRuntimeState, vm: &ComposerViewModel) -> ComposerVisual {
+    match vm.submission_state {
+        ComposerSubmissionState::Blocked => ComposerVisual {
+            title: "Permission required".to_owned(),
+            border_style: Style::default().fg(Color::Yellow),
+            prompt_prefix_spans: vec![Span::styled("cr > ", Style::default().fg(Color::DarkGray))],
+            prompt_width: 5,
+            body_style: Some(Style::default().fg(Color::DarkGray)),
+            blocked_hint: Some("waiting for your approval above"),
+        },
+        ComposerSubmissionState::Submitting => {
+            let frame_idx = state
+                .spinners
+                .values()
+                .next()
+                .map_or(0, |snapshot| snapshot.frame % SPINNER_FRAMES.len());
+            let mini_spinner = SPINNER_FRAMES[frame_idx];
+            let suffix = if vm.input.is_empty() {
+                "working"
+            } else {
+                "queued"
+            };
+            ComposerVisual {
+                title: format!("Ask @{} · {}", state.host_role, suffix),
+                border_style: Style::default().fg(Color::DarkGray),
+                prompt_prefix_spans: vec![
+                    Span::styled(mini_spinner, Style::default().fg(Color::Cyan)),
+                    Span::raw(" "),
+                    Span::styled("cr > ", Style::default().fg(Color::Green)),
+                ],
+                // mini spinner (1) + space (1) + "cr > " (5) = 7
+                prompt_width: 7,
+                body_style: None,
+                blocked_hint: None,
+            }
+        }
+        ComposerSubmissionState::Idle => ComposerVisual {
+            title: format!("Ask @{}", state.host_role),
+            border_style: Style::default(),
+            prompt_prefix_spans: vec![Span::styled("cr > ", Style::default().fg(Color::Green))],
+            prompt_width: 5,
+            body_style: None,
+            blocked_hint: None,
+        },
+    }
+}
+
+fn composer_lines(
+    vm: &ComposerViewModel,
+    host_role: &str,
+    visual: &ComposerVisual,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let input = vm.input.clone();
+    let continuation = " ".repeat(visual.prompt_width);
+
     if input.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("cr > ", Style::default().fg(Color::Green)),
-            Span::styled(vm.prompt_hint.clone(), Style::default().fg(Color::DarkGray)),
-        ]));
+        let mut spans = visual.prompt_prefix_spans.clone();
+        spans.push(Span::styled(
+            vm.prompt_hint.clone(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        lines.push(Line::from(spans));
     } else {
         for (index, line) in input.lines().enumerate() {
             let mut spans = Vec::new();
             if index == 0 {
-                spans.push(Span::styled("cr > ", Style::default().fg(Color::Green)));
+                spans.extend(visual.prompt_prefix_spans.clone());
             } else {
-                spans.push(Span::raw("     "));
+                spans.push(Span::raw(continuation.clone()));
             }
-            spans.push(Span::raw(line.to_owned()));
+            let body_span = match visual.body_style {
+                Some(style) => Span::styled(line.to_owned(), style),
+                None => Span::raw(line.to_owned()),
+            };
+            spans.push(body_span);
             if index == input.lines().count().saturating_sub(1) {
                 if let Some(ghost) = &vm.ghost_suffix {
                     spans.push(Span::styled(
@@ -729,35 +1063,59 @@ fn composer_lines(vm: &ComposerViewModel) -> Vec<Line<'static>> {
             lines.push(Line::from(spans));
         }
     }
-    if !vm.candidates.is_empty() {
-        let menu = vm
-            .candidates
-            .iter()
-            .take(4)
-            .map(|candidate| {
-                if candidate.selected {
-                    format!("[{}]", candidate.label)
-                } else {
-                    candidate.label.clone()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
+    if let Some(hint) = visual.blocked_hint {
         lines.push(Line::from(vec![Span::styled(
-            menu,
-            Style::default().fg(Color::DarkGray),
+            hint,
+            Style::default().fg(Color::Yellow),
         )]));
+    }
+    if !vm.candidates.is_empty() {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (i, candidate) in vm.candidates.iter().take(4).enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            spans.extend(candidate_spans(candidate, host_role));
+        }
+        lines.push(Line::from(spans));
     }
     lines
 }
 
-fn composer_cursor_position(area: Rect, vm: &ComposerViewModel) -> (u16, u16) {
+/// Style one completion candidate. Role mentions (`@role`) pick up the
+/// role's identity color; slash commands stay neutral dim gray. The
+/// selected candidate is wrapped in `[…]` brackets so a screen-reader
+/// or no-color terminal can still tell which one is active.
+fn candidate_spans(
+    candidate: &crate::console_composer::ComposerCandidate,
+    host_role: &str,
+) -> Vec<Span<'static>> {
+    let label = candidate.label.clone();
+    let selected = candidate.selected;
+    let role_style = label.strip_prefix('@').map(|role| {
+        Style::default()
+            .fg(tui_style::role_color(role, host_role))
+            .add_modifier(Modifier::BOLD)
+    });
+    let body_style = role_style.unwrap_or_else(|| Style::default().fg(Color::DarkGray));
+    if selected {
+        vec![
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled(label, body_style),
+            Span::styled("]", Style::default().fg(Color::DarkGray)),
+        ]
+    } else {
+        vec![Span::styled(label, body_style)]
+    }
+}
+
+fn composer_cursor_position(area: Rect, vm: &ComposerViewModel, prompt_width: usize) -> (u16, u16) {
     let inner_x = area.x.saturating_add(1);
     let inner_y = area.y.saturating_add(1);
     let inner_width = area.width.saturating_sub(2);
     let inner_height = area.height.saturating_sub(2).max(1);
     let (row, col) = cursor_row_col(&vm.input, vm.cursor);
-    let prompt_width = 5;
+    let prompt_width = u16::try_from(prompt_width).unwrap_or(u16::MAX);
     let max_col = usize::from(inner_width.saturating_sub(1));
     let cursor_col = u16::try_from(col.min(max_col)).unwrap_or(u16::MAX);
     let cursor_row = u16::try_from(row).unwrap_or(u16::MAX);
@@ -786,19 +1144,288 @@ fn cursor_row_col(input: &str, cursor: usize) -> (usize, usize) {
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let footer = Line::from(vec![
-        Span::styled(" enter ", Style::default().fg(Color::Black).bg(Color::Cyan)),
-        Span::raw("send  "),
-        Span::styled(" shift/alt+enter ", label_style()),
-        Span::raw("newline  "),
-        Span::styled(" ctrl-c ", label_style()),
-        Span::raw("halt  "),
-        Span::styled(" ctrl-d ", label_style()),
-        Span::raw("exit  "),
-        Span::styled(" path ", label_style()),
-        Span::raw(state.project_root.display().to_string()),
-    ]);
-    frame.render_widget(Paragraph::new(vec![footer]), area);
+    let bindings = footer_bindings(state);
+    let fitted = fit_bindings_to_width(&bindings, area.width.into());
+    frame.render_widget(Paragraph::new(vec![bindings_to_line(&fitted)]), area);
+}
+
+/// One footer chip: a styled keys badge + a plain action label.
+/// Priority controls drop order when the row is wider than the area:
+/// lower priorities (0) are never dropped; higher priorities go first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FooterBinding {
+    keys: &'static str,
+    action: &'static str,
+    /// 0 = primary action / halt / cancel (never dropped).
+    /// 1 = destructive (ctrl-d exit).
+    /// 2 = `? help`.
+    /// 3 = secondary actions (newline, clear).
+    priority: u8,
+    /// `true` to render the keys with the primary `enter`-style chip
+    /// (black-on-cyan); `false` for the bold-yellow label chip.
+    primary_chip: bool,
+}
+
+fn footer_bindings(state: &RoomRuntimeState) -> Vec<FooterBinding> {
+    let typed = !state.composer.view_model().input.is_empty();
+    if state.permission.is_some() {
+        return vec![
+            FooterBinding {
+                keys: "y",
+                action: "allow",
+                priority: 0,
+                primary_chip: true,
+            },
+            FooterBinding {
+                keys: "n",
+                action: "deny",
+                priority: 0,
+                primary_chip: false,
+            },
+            FooterBinding {
+                keys: "esc",
+                action: "cancel",
+                priority: 0,
+                primary_chip: false,
+            },
+        ];
+    }
+    let working = state.has_active_work();
+    let mut bindings = Vec::new();
+    if typed {
+        bindings.push(FooterBinding {
+            keys: "enter",
+            action: "send",
+            priority: 0,
+            primary_chip: true,
+        });
+    }
+    if working {
+        bindings.push(FooterBinding {
+            keys: "ctrl-c",
+            action: "halt",
+            priority: 0,
+            primary_chip: false,
+        });
+    }
+    if typed {
+        bindings.push(FooterBinding {
+            keys: "shift+enter",
+            action: "newline",
+            priority: 3,
+            primary_chip: false,
+        });
+        bindings.push(FooterBinding {
+            keys: "esc",
+            action: "clear",
+            priority: 3,
+            primary_chip: false,
+        });
+    }
+    bindings.push(FooterBinding {
+        keys: "?",
+        action: "help",
+        priority: 2,
+        primary_chip: false,
+    });
+    if !typed && !working {
+        bindings.push(FooterBinding {
+            keys: "ctrl-d",
+            action: "exit",
+            priority: 1,
+            primary_chip: false,
+        });
+    }
+    bindings
+}
+
+/// Drop highest-priority bindings until the row fits `max_width`.
+/// Priorities 0 (primary / halt / cancel) are never dropped.
+fn fit_bindings_to_width(bindings: &[FooterBinding], max_width: usize) -> Vec<FooterBinding> {
+    let mut current: Vec<FooterBinding> = bindings.to_vec();
+    while bindings_render_width(&current) > max_width {
+        let drop_index = current
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.priority > 0)
+            .max_by_key(|(_, b)| b.priority)
+            .map(|(i, _)| i);
+        match drop_index {
+            Some(i) => {
+                current.remove(i);
+            }
+            None => break,
+        }
+    }
+    current
+}
+
+fn binding_visible_width(b: &FooterBinding) -> usize {
+    // ` <keys> ` plus a space plus `<action>`
+    1 + b.keys.chars().count() + 1 + 1 + b.action.chars().count()
+}
+
+fn bindings_render_width(bindings: &[FooterBinding]) -> usize {
+    let mut total = 0;
+    for (i, b) in bindings.iter().enumerate() {
+        if i > 0 {
+            total += 2; // "  " separator between chips
+        }
+        total += binding_visible_width(b);
+    }
+    total
+}
+
+fn bindings_to_line(bindings: &[FooterBinding]) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, b) in bindings.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        let chip_style = if b.primary_chip {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            label_style()
+        };
+        spans.push(Span::styled(format!(" {} ", b.keys), chip_style));
+        spans.push(Span::raw(format!(" {}", b.action)));
+    }
+    Line::from(spans)
+}
+
+/// Centered help overlay listing every binding available in the current
+/// state. Triggered by `?` in idle/working states and dismissed by `?`
+/// or `Esc`. Hidden in permission-blocked state because the permission
+/// modal carries its own key list.
+fn render_cheatsheet_overlay(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
+    let bindings = cheatsheet_bindings(state);
+    let inner_w = bindings
+        .iter()
+        .map(|b| 4 + b.keys.chars().count() + b.action.chars().count())
+        .max()
+        .unwrap_or(40);
+    let width = u16::try_from(inner_w + 4)
+        .unwrap_or(60)
+        .clamp(40, area.width.saturating_sub(4).max(40));
+    // header (1) + empty (1) + bindings (N) + empty (1) + close (1)
+    // + top/bottom borders (2) = N + 6.
+    let height = u16::try_from(bindings.len() + 6)
+        .unwrap_or(14)
+        .clamp(8, area.height.saturating_sub(4));
+    let rect = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    let mut lines = vec![
+        Line::from(vec![Span::styled(
+            "Keys for this state",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::raw(""),
+    ];
+    for b in &bindings {
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", b.keys), label_style()),
+            Span::raw(format!("  {}", b.action)),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![Span::styled(
+        "? / esc to close",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Help"))
+            .wrap(Wrap { trim: false }),
+        rect,
+    );
+}
+
+/// Full key list shown inside the cheatsheet overlay. Includes the
+/// bindings dropped by the contextual footer so users can still
+/// discover them.
+fn cheatsheet_bindings(state: &RoomRuntimeState) -> Vec<FooterBinding> {
+    let typed = !state.composer.view_model().input.is_empty();
+    let working = state.has_active_work();
+    let mut bindings = Vec::new();
+    if state.permission.is_some() {
+        bindings.push(FooterBinding {
+            keys: "y / a",
+            action: "allow once",
+            priority: 0,
+            primary_chip: false,
+        });
+        bindings.push(FooterBinding {
+            keys: "s",
+            action: "allow session",
+            priority: 0,
+            primary_chip: false,
+        });
+        bindings.push(FooterBinding {
+            keys: "d",
+            action: "deny once",
+            priority: 0,
+            primary_chip: false,
+        });
+        bindings.push(FooterBinding {
+            keys: "n / esc",
+            action: "deny session",
+            priority: 0,
+            primary_chip: false,
+        });
+        return bindings;
+    }
+    bindings.push(FooterBinding {
+        keys: "enter",
+        action: if typed { "send" } else { "send (type first)" },
+        priority: 0,
+        primary_chip: true,
+    });
+    bindings.push(FooterBinding {
+        keys: "shift+enter",
+        action: "newline",
+        priority: 3,
+        primary_chip: false,
+    });
+    bindings.push(FooterBinding {
+        keys: "tab",
+        action: "next completion",
+        priority: 3,
+        primary_chip: false,
+    });
+    bindings.push(FooterBinding {
+        keys: "esc",
+        action: "dismiss / clear",
+        priority: 3,
+        primary_chip: false,
+    });
+    if working {
+        bindings.push(FooterBinding {
+            keys: "ctrl-c",
+            action: "halt active turn",
+            priority: 0,
+            primary_chip: false,
+        });
+    }
+    bindings.push(FooterBinding {
+        keys: "ctrl-d",
+        action: "exit room",
+        priority: 1,
+        primary_chip: false,
+    });
+    bindings.push(FooterBinding {
+        keys: "?",
+        action: "toggle this help",
+        priority: 2,
+        primary_chip: false,
+    });
+    bindings
 }
 
 fn render_permission_overlay(frame: &mut Frame<'_>, area: Rect, pending: &PendingPermission) {
@@ -942,9 +1569,389 @@ mod tests {
         state.composer.insert_char('@');
         state.composer.insert_char('h');
         let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
-        assert!(text.contains("CoreRoom Runtime"));
+        // Top status row carries identity (product + version + project).
+        assert!(text.contains(concat!("CoreRoom v", env!("CARGO_PKG_VERSION"))));
+        assert!(text.contains("CoreRoom"));
+        // Idle status badge text appears once on the boot frame.
+        assert!(text.contains("idle"));
         assert!(text.contains("cr > @h"));
         assert!(text.contains("Ask @host"));
+    }
+
+    #[test]
+    fn status_bar_replaces_bordered_runtime_header() {
+        let state = test_state();
+        let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        // The old bordered title is gone.
+        assert!(!text.contains("CoreRoom Runtime"));
+        // Identity material renders once.
+        let version_token = concat!("v", env!("CARGO_PKG_VERSION"));
+        assert_eq!(text.matches(version_token).count(), 1);
+    }
+
+    #[test]
+    fn status_bar_shows_work_count_only_when_active() {
+        let mut state = test_state();
+        let text_idle = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        assert!(!text_idle.contains("work 1"));
+        assert!(!text_idle.contains("work 0"));
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        let text_working = render_room_runtime_to_text(&state, 120, 28).expect("render");
+        assert!(text_working.contains("working"));
+        assert!(text_working.contains("work 1"));
+    }
+
+    #[test]
+    fn rail_shows_team_roster_when_no_spinners_and_no_cards() {
+        let state = test_state();
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // Roster title is "Team", not "Roles", and the placeholder
+        // strings from the previous behavior are gone.
+        assert!(text.contains("Team"));
+        assert!(!text.contains("no work cards yet"));
+        // Roster lists both host and backend, host appears first.
+        let host_idx = text.find("@host").expect("host in roster");
+        let backend_idx = text.find("@backend").expect("backend in roster");
+        assert!(host_idx < backend_idx, "host should appear before backend");
+        // Standby hint for roles that have not been seen this session.
+        assert!(text.contains("standby"));
+    }
+
+    #[test]
+    fn rail_shows_active_roles_and_standby_tail_when_spinning() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // Active panel uses the legacy "Roles" title.
+        assert!(text.contains("Roles"));
+        // Inactive roles fold into a dim tail.
+        assert!(text.contains("+ 1 standby"));
+        // The literal `idle` placeholder is gone.
+        // (Status badge says `idle` on the chrome row, but the rail
+        // panel itself does not.)
+        assert!(text.contains("@backend"));
+        assert!(text.contains("thinking"));
+    }
+
+    #[test]
+    fn rail_folds_work_panel_when_no_cards() {
+        let state = test_state();
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // No Work title and no placeholder copy when there are no
+        // cards. The Team panel takes the full rail height.
+        assert!(!text.contains("Work─"));
+        assert!(!text.contains("no work cards yet"));
+    }
+
+    #[test]
+    fn rail_renders_team_plus_work_when_card_present_but_no_spinner() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(text.contains("Team"));
+        // Work panel appears with its identity header for the role.
+        assert!(text.contains("◇ @backend"));
+        assert!(text.contains("Run validation"));
+    }
+
+    #[test]
+    fn composer_idle_state_uses_default_border_and_green_prompt() {
+        let state = test_state();
+        let vm = state.composer.view_model();
+        let visual = super::composer_visual(&state, &vm);
+        assert_eq!(visual.title, "Ask @host");
+        assert_eq!(visual.border_style, Style::default());
+        assert!(visual.blocked_hint.is_none());
+        assert_eq!(visual.prompt_width, 5);
+        // First prompt span is `cr > ` in green.
+        let prompt_text: String = visual
+            .prompt_prefix_spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(prompt_text, "cr > ");
+        let last_fg = visual.prompt_prefix_spans.last().unwrap().style.fg;
+        assert_eq!(last_fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn composer_working_state_dims_border_and_prepends_mini_spinner() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 3,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let vm = state.composer.view_model();
+        let visual = super::composer_visual(&state, &vm);
+        assert_eq!(visual.title, "Ask @host · working");
+        assert_eq!(visual.border_style.fg, Some(Color::DarkGray));
+        // Prompt prefix is `<spinner> cr > `.
+        let prompt_text: String = visual
+            .prompt_prefix_spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(SPINNER_FRAMES.contains(&prompt_text.chars().next().unwrap().to_string().as_str()));
+        assert!(prompt_text.ends_with("cr > "));
+        assert_eq!(visual.prompt_width, 7);
+    }
+
+    #[test]
+    fn composer_working_state_with_typed_input_shows_queued_in_title() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        state.composer.insert_char('h');
+        state.composer.insert_char('i');
+        let vm = state.composer.view_model();
+        let visual = super::composer_visual(&state, &vm);
+        assert_eq!(visual.title, "Ask @host · queued");
+    }
+
+    #[test]
+    fn composer_blocked_state_yellow_border_and_hint_line() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let vm = state.composer.view_model();
+        let visual = super::composer_visual(&state, &vm);
+        assert_eq!(visual.title, "Permission required");
+        assert_eq!(visual.border_style.fg, Some(Color::Yellow));
+        assert_eq!(visual.blocked_hint, Some("waiting for your approval above"));
+        // Body style dims user input while a permission modal is open.
+        assert_eq!(visual.body_style.and_then(|s| s.fg), Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn composer_blocked_state_renders_yellow_hint_line() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(text.contains("waiting for your approval above"));
+        assert!(text.contains("Permission required"));
+    }
+
+    #[test]
+    fn composer_working_mini_spinner_matches_active_role_frame() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 4,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        let vm = state.composer.view_model();
+        let visual = super::composer_visual(&state, &vm);
+        let glyph = visual.prompt_prefix_spans[0].content.as_ref();
+        // Spinner frames are 10-wide; frame 4 ⇒ "⠼".
+        assert_eq!(glyph, SPINNER_FRAMES[4]);
+    }
+
+    #[test]
+    fn footer_no_longer_carries_project_path() {
+        let state = test_state();
+        let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        // The project path is identity material and now lives only in
+        // the top status row. It must not appear in the footer text.
+        assert!(!text.contains(" path "));
+        // Project path appears at most once anywhere in the rendered
+        // frame (top chrome only).
+        let project_path = state.project_root.display().to_string();
+        // Truncation can chop characters in the chrome; just assert
+        // the literal full path is not duplicated.
+        assert!(text.matches(project_path.as_str()).count() <= 1);
+    }
+
+    fn binding_pairs(bindings: &[FooterBinding]) -> Vec<(&'static str, &'static str)> {
+        bindings.iter().map(|b| (b.keys, b.action)).collect()
+    }
+
+    #[test]
+    fn footer_idle_empty_shows_help_and_exit_only() {
+        let state = test_state();
+        let bindings = super::footer_bindings(&state);
+        assert_eq!(
+            binding_pairs(&bindings),
+            vec![("?", "help"), ("ctrl-d", "exit")]
+        );
+    }
+
+    #[test]
+    fn footer_idle_typed_swaps_in_send_and_drops_exit() {
+        let mut state = test_state();
+        state.composer.insert_char('a');
+        let bindings = super::footer_bindings(&state);
+        assert_eq!(
+            binding_pairs(&bindings),
+            vec![
+                ("enter", "send"),
+                ("shift+enter", "newline"),
+                ("esc", "clear"),
+                ("?", "help"),
+            ]
+        );
+    }
+
+    #[test]
+    fn footer_working_shows_halt_and_help() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        let bindings = super::footer_bindings(&state);
+        assert_eq!(
+            binding_pairs(&bindings),
+            vec![("ctrl-c", "halt"), ("?", "help")]
+        );
+    }
+
+    #[test]
+    fn footer_working_with_typed_input_includes_enter_send() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        state.composer.insert_char('q');
+        let bindings = super::footer_bindings(&state);
+        assert!(bindings
+            .iter()
+            .any(|b| b.keys == "enter" && b.action == "send"));
+        assert!(bindings.iter().any(|b| b.keys == "ctrl-c"));
+    }
+
+    #[test]
+    fn footer_blocked_shows_permission_keys_only() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let bindings = super::footer_bindings(&state);
+        assert_eq!(
+            binding_pairs(&bindings),
+            vec![("y", "allow"), ("n", "deny"), ("esc", "cancel")]
+        );
+    }
+
+    #[test]
+    fn footer_drops_secondary_actions_first_when_narrow() {
+        let mut state = test_state();
+        state.composer.insert_char('a');
+        let bindings = super::footer_bindings(&state);
+        let full_width = super::bindings_render_width(&bindings);
+        // Force a width that removes the lowest-priority chip but
+        // keeps enter+send and the help chip.
+        let fitted = super::fit_bindings_to_width(&bindings, full_width - 4);
+        let pairs = binding_pairs(&fitted);
+        // The primary chip is never dropped.
+        assert!(pairs.contains(&("enter", "send")));
+        // A priority-3 binding (newline or clear) has been dropped.
+        let priority3_remaining = fitted.iter().filter(|b| b.priority == 3).count();
+        assert!(priority3_remaining < 2);
+    }
+
+    #[test]
+    fn cheatsheet_opens_on_question_mark_and_closes_on_question_mark() {
+        let mut state = test_state();
+        assert!(!state.show_cheatsheet);
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::empty()),
+            &mut state,
+            &mpsc::unbounded_channel().0,
+        )
+        .unwrap();
+        assert!(state.show_cheatsheet);
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::empty()),
+            &mut state,
+            &mpsc::unbounded_channel().0,
+        )
+        .unwrap();
+        assert!(!state.show_cheatsheet);
+    }
+
+    #[test]
+    fn cheatsheet_closes_on_escape() {
+        let mut state = test_state();
+        state.show_cheatsheet = true;
+        super::handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+            &mut state,
+            &mpsc::unbounded_channel().0,
+        )
+        .unwrap();
+        assert!(!state.show_cheatsheet);
+    }
+
+    #[test]
+    fn question_mark_is_typed_when_composer_has_input() {
+        let mut state = test_state();
+        state.composer.insert_char('h');
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::empty()),
+            &mut state,
+            &mpsc::unbounded_channel().0,
+        )
+        .unwrap();
+        assert!(!state.show_cheatsheet);
+        assert!(state.composer.view_model().input.contains('?'));
+    }
+
+    #[test]
+    fn cheatsheet_overlay_renders_when_flag_is_set() {
+        let mut state = test_state();
+        state.show_cheatsheet = true;
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(text.contains("Help"));
+        assert!(text.contains("toggle this help"));
+        assert!(text.contains("? / esc to close"));
     }
 
     #[test]
@@ -987,13 +1994,127 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("@backend"));
         assert!(text.contains("Run validation"));
+        // Spinner line carries the role avatar glyph before the braille
+        // frame. Backend uses ◇ in the safe pack.
+        assert!(text.contains("◇"));
+    }
+
+    #[test]
+    fn spinner_line_prepends_role_glyph_and_keeps_status_text() {
+        let snapshot = SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        };
+        let line = spinner_line(&snapshot, "host");
+        let rendered: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(rendered.starts_with("◇ "));
+        assert!(rendered.contains("@backend"));
+        assert!(rendered.contains("thinking"));
+    }
+
+    #[test]
+    fn spinner_line_role_glyph_and_role_token_share_color() {
+        let snapshot = SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        };
+        let line = spinner_line(&snapshot, "host");
+        let glyph_fg = line.spans[0].style.fg;
+        let token_idx = line
+            .spans
+            .iter()
+            .position(|span| span.content.as_ref() == "@backend")
+            .expect("@backend span present");
+        let token_fg = line.spans[token_idx].style.fg;
+        assert!(glyph_fg.is_some());
+        assert_eq!(glyph_fg, token_fg);
+    }
+
+    #[test]
+    fn work_cards_render_a_role_identity_header_per_card() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // The identity header line is `◇ @backend` (glyph + token).
+        // The card body that follows still contains the title.
+        assert!(text.contains("◇ @backend"));
+        assert!(text.contains("Run validation"));
+    }
+
+    #[test]
+    fn composer_candidate_menu_styles_role_mentions_with_role_color() {
+        use crate::console_composer::ComposerCandidate;
+        let candidate = ComposerCandidate {
+            label: "@backend".to_owned(),
+            description: String::new(),
+            selected: false,
+        };
+        let spans = super::candidate_spans(&candidate, "host");
+        assert_eq!(spans.len(), 1);
+        let fg = spans[0].style.fg.expect("role mention has fg color");
+        let expected = crate::tui_style::role_color("backend", "host");
+        assert_eq!(fg, expected);
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn composer_candidate_menu_keeps_slash_commands_neutral() {
+        use crate::console_composer::ComposerCandidate;
+        let candidate = ComposerCandidate {
+            label: "/help".to_owned(),
+            description: String::new(),
+            selected: false,
+        };
+        let spans = super::candidate_spans(&candidate, "host");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].style.fg, Some(Color::DarkGray));
+        assert!(!spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn composer_candidate_selection_brackets_label() {
+        use crate::console_composer::ComposerCandidate;
+        let candidate = ComposerCandidate {
+            label: "@backend".to_owned(),
+            description: String::new(),
+            selected: true,
+        };
+        let spans = super::candidate_spans(&candidate, "host");
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content.as_ref(), "[");
+        assert_eq!(spans[1].content.as_ref(), "@backend");
+        assert_eq!(spans[2].content.as_ref(), "]");
     }
 
     fn test_state() -> RoomRuntimeState {
+        let team = vec![
+            TeamMember {
+                role: "host".to_owned(),
+                engine: Engine::Cc,
+            },
+            TeamMember {
+                role: "backend".to_owned(),
+                engine: Engine::Cc,
+            },
+        ];
         RoomRuntimeState::new(
             PathBuf::from("/tmp/CoreRoom"),
             "host".to_owned(),
             vec!["host".to_owned(), "backend".to_owned()],
+            team,
         )
     }
 

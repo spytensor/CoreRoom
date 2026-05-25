@@ -7,6 +7,7 @@ use crate::adapter::{Engine, PermissionMode};
 use crate::config::Config;
 use crate::output;
 use crate::priors;
+use crate::role_avatar::{role_avatar, RoleAvatarPack};
 
 use super::text::truncate_inline;
 
@@ -142,7 +143,7 @@ pub(super) fn splash_columns(width: usize, role_floor: usize) -> (usize, usize) 
 
 /// Visible width of the longest role row that will be rendered.
 /// Mirrors the layout used in `splash_role_cell`:
-///   `● ␠@{role:<role_pad+1}␠␠{engine:<6}␠·␠{ctx}␠·␠{perm}[␠·␠authority:...]`
+///   `{glyph} ␠@{role:<role_pad+1}␠␠{engine:<6}␠·␠{ctx}␠·␠{perm}[␠·␠authority:...]`
 fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usize {
     role_names
         .iter()
@@ -170,8 +171,8 @@ fn splash_role_floor(cfg: &Config, role_names: &[&str], role_pad: usize) -> usiz
                         crate::role::authority_summary(&entry.authority).replace(", ", ",")
                     )
                 });
-            // ● + ' ' + '@' + role_pad + ' ' + ' ' + engine_pad(6) + ' ' + '·' + ' ' + ctx
-            //   + ' ' + '·' + ' ' + perm
+            // glyph(1) + ' ' + '@' + role_pad + ' ' + ' ' + engine_pad(6) + ' ' + '·' + ' '
+            //   + ctx + ' ' + '·' + ' ' + perm
             1 + 1
                 + 1
                 + role_pad
@@ -299,9 +300,12 @@ fn home_relative_display(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Build the styled "● @role  engine · ctx" cell, padded to fit the
-/// left column. The bullet and role name pick up the role's stable
-/// color; engine and context render in muted neutral tones.
+/// Build the styled "{glyph} @role  engine · ctx" cell, padded to fit
+/// the left column. The avatar glyph and role name pick up the role's
+/// stable identity color; engine and context render in muted neutral
+/// tones. Host roles render with the host glyph (◉ in safe pack);
+/// every other role renders with a glyph that is stable across
+/// sessions.
 fn splash_role_cell(
     cfg: &Config,
     coreroom_dir: &Path,
@@ -334,15 +338,16 @@ fn splash_role_cell(
             )
         });
     let role_paint = output::role_color(name, &cfg.host_role);
+    let glyph = role_avatar(name, &cfg.host_role, RoleAvatarPack::from_env()).glyph;
     let role_token = format!("@{name}");
     let role_padded = format!("{role_token:<width$}", width = role_pad + 1);
     let plain = if let Some(authority) = &authority {
-        format!("● {role_padded}  {engine_short:<6} · {ctx} · {perm_label} · {authority}")
+        format!("{glyph} {role_padded}  {engine_short:<6} · {ctx} · {perm_label} · {authority}")
     } else {
-        format!("● {role_padded}  {engine_short:<6} · {ctx} · {perm_label}")
+        format!("{glyph} {role_padded}  {engine_short:<6} · {ctx} · {perm_label}")
     };
     let mut parts = vec![
-        styled_cell("●", "●".with(role_paint)),
+        styled_cell(glyph, glyph.with(role_paint)),
         plain_cell(" "),
         styled_cell(&role_padded, role_padded.as_str().with(role_paint).bold()),
         plain_cell("  "),
@@ -452,9 +457,39 @@ pub(super) fn render_home(
         first_run,
         splash_width(),
         user_name.as_deref(),
+        SplashFrame::Framed,
     )
 }
 
+/// Frameless boot splash for the live-room TUI. The Room panel and the
+/// top status bar already carry the box border and the `CoreRoom v{x}`
+/// title + project path, so this variant drops both to keep identity
+/// single-sourced inside the runtime.
+pub(super) fn render_home_in_room(
+    cfg: &Config,
+    coreroom_dir: &Path,
+    project_root: &Path,
+    first_run: bool,
+) -> String {
+    let user_name = git_user_name();
+    render_home_at_width(
+        cfg,
+        coreroom_dir,
+        project_root,
+        first_run,
+        splash_width(),
+        user_name.as_deref(),
+        SplashFrame::Frameless,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SplashFrame {
+    Framed,
+    Frameless,
+}
+
+#[allow(clippy::too_many_lines)]
 pub(super) fn render_home_at_width(
     cfg: &Config,
     coreroom_dir: &Path,
@@ -462,6 +497,7 @@ pub(super) fn render_home_at_width(
     first_run: bool,
     width: usize,
     user_name: Option<&str>,
+    frame_mode: SplashFrame,
 ) -> String {
     let mut role_names: Vec<&str> = cfg.role_names().collect();
     role_names.sort_unstable();
@@ -527,7 +563,13 @@ pub(super) fn render_home_at_width(
         role_pad,
         left_w,
     ));
-    left.extend([empty_cell(), token_cell, path_cell]);
+    left.extend([empty_cell(), token_cell]);
+    // The project path is identity material. The live-room TUI puts it
+    // in the top status bar, so we omit the duplicate here in
+    // frameless mode.
+    if matches!(frame_mode, SplashFrame::Framed) {
+        left.push(path_cell);
+    }
     if let Some(gate_cell) = gate_phase_cell(project_root, left_w) {
         left.extend([empty_cell(), gate_cell]);
     }
@@ -600,31 +642,46 @@ pub(super) fn render_home_at_width(
     let rows = left.len().max(right.len());
     let mut out = String::new();
     let _ = writeln!(out);
-    let _ = writeln!(out, "{}", splash_top(width, &title));
-    // One blank line of breathing room inside the frame top.
-    let _ = writeln!(
-        out,
-        "{}",
-        splash_pair(&empty_cell(), &empty_cell(), left_w, right_w)
-    );
-    for idx in 0..rows {
-        let lc = left.get(idx).cloned().unwrap_or_else(empty_cell);
-        let rc = right.get(idx).cloned().unwrap_or_else(empty_cell);
-        let _ = writeln!(out, "{}", splash_pair(&lc, &rc, left_w, right_w));
+    match frame_mode {
+        SplashFrame::Framed => {
+            let _ = writeln!(out, "{}", splash_top(width, &title));
+            // One blank line of breathing room inside the frame top.
+            let _ = writeln!(
+                out,
+                "{}",
+                splash_pair(&empty_cell(), &empty_cell(), left_w, right_w)
+            );
+            for idx in 0..rows {
+                let lc = left.get(idx).cloned().unwrap_or_else(empty_cell);
+                let rc = right.get(idx).cloned().unwrap_or_else(empty_cell);
+                let _ = writeln!(out, "{}", splash_pair(&lc, &rc, left_w, right_w));
+            }
+            let _ = writeln!(
+                out,
+                "{}",
+                splash_pair(&empty_cell(), &empty_cell(), left_w, right_w)
+            );
+            let _ = writeln!(out, "{}", splash_bottom(width));
+            let _ = writeln!(
+                out,
+                "  {}",
+                "type a task · @role · /help · /exit"
+                    .with(output::DIM)
+                    .italic()
+            );
+        }
+        SplashFrame::Frameless => {
+            // The live-room Room panel provides the outer frame; the
+            // top status bar already carries the `CoreRoom v{x}` title.
+            // Here we emit only the two-column body, separated by the
+            // same gap the framed layout uses.
+            for idx in 0..rows {
+                let lc = left.get(idx).cloned().unwrap_or_else(empty_cell);
+                let rc = right.get(idx).cloned().unwrap_or_else(empty_cell);
+                let _ = writeln!(out, "{}  {}", pad_cell(&lc, left_w), pad_cell(&rc, right_w));
+            }
+        }
     }
-    let _ = writeln!(
-        out,
-        "{}",
-        splash_pair(&empty_cell(), &empty_cell(), left_w, right_w)
-    );
-    let _ = writeln!(out, "{}", splash_bottom(width));
-    let _ = writeln!(
-        out,
-        "  {}",
-        "type a task · @role · /help · /exit"
-            .with(output::DIM)
-            .italic()
-    );
     out
 }
 
