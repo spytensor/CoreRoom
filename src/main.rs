@@ -748,13 +748,7 @@ fn main() -> Result<()> {
         return coreroom::permissions::run_claude_hook(*mode, policy_file.as_deref());
     }
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .try_init();
+    init_tracing(cli.command.as_ref());
     coreroom::output::print_terminal_probe();
 
     // Engine-binary check up front. `cr config`, `cr update`, and
@@ -1357,6 +1351,61 @@ fn run_start(
         };
         coreroom::repl::run_with_options(&project_root, options).await
     })
+}
+
+/// Configure tracing. The live-room TUI (default `cr` and
+/// `cr console --live-room`) takes over the terminal in alternate
+/// screen mode, so any `tracing::warn!` write to stderr would land on
+/// top of the rendered frames and corrupt the visual. Route those
+/// runs to a log file under the user's cache dir instead. Every other
+/// entrypoint (`cr start`, `cr console` snapshot view, `cr config`,
+/// etc.) keeps the stderr writer so warnings reach the user directly.
+fn init_tracing(command: Option<&Cmd>) {
+    let goes_to_tui = matches!(
+        command,
+        None | Some(Cmd::Console {
+            live_room: true,
+            ..
+        })
+    );
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
+    };
+    if !goes_to_tui {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter())
+            .with_writer(std::io::stderr)
+            .try_init();
+        return;
+    }
+    // Path: $XDG_CACHE_HOME/coreroom/cr.log or $HOME/.cache/coreroom/cr.log
+    // on Linux; ~/Library/Caches/coreroom/cr.log on macOS. If we can't
+    // resolve a cache dir or the open fails, fall back to a silent
+    // subscriber so the TUI stays clean. We append, not truncate, so
+    // back-to-back sessions keep their context.
+    let log_path = dirs::cache_dir().map(|dir| dir.join("coreroom").join("cr.log"));
+    if let Some(path) = log_path {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(filter())
+                .with_writer(std::sync::Mutex::new(file))
+                .with_ansi(false)
+                .try_init();
+            return;
+        }
+    }
+    // Fallback: silent.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("off"))
+        .try_init();
 }
 
 fn run_console_first_default() -> Result<()> {

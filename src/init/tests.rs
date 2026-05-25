@@ -113,7 +113,7 @@ detected: Cargo.toml (Rust) · .github/workflows/ · CLAUDE.md (42 lines)
     [ ] ◎ @reviewer    reviews plans and code for regressions
     [ ] ▣ @sre         runtime reliability, deploys, operations
   > [x] ◇ @backend     APIs, services, storage boundaries
-    [ ] ▱ @frontend    UI, components, routing, client-side state
+    [ ] ◧ @frontend    UI, components, routing, client-side state
     [x] ◆ @security    authn, authz, threat modeling
     [ ] ● @data        schemas, migrations, query patterns
     [ ] ▣ @devops      CI/CD, infra, deploys, runtime health
@@ -146,7 +146,7 @@ CoreRoom found only @host. Choose the specialists to add:
     [ ] ◎ @reviewer    reviews plans and code for regressions
     [ ] ▣ @sre         runtime reliability, deploys, operations
   > [x] ◇ @backend     APIs, services, storage boundaries
-    [ ] ▱ @frontend    UI, components, routing, client-side state
+    [ ] ◧ @frontend    UI, components, routing, client-side state
     [x] ◆ @security    authn, authz, threat modeling
     [ ] ● @data        schemas, migrations, query patterns
     [ ] ▣ @devops      CI/CD, infra, deploys, runtime health

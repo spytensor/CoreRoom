@@ -499,8 +499,20 @@ pub(super) fn render_home_at_width(
     user_name: Option<&str>,
     frame_mode: SplashFrame,
 ) -> String {
+    // Anchor the host role first so the splash roster matches the
+    // host-first ordering used by the live-room Team panel. Remaining
+    // roles stay in alphabetical order for stable scanning.
     let mut role_names: Vec<&str> = cfg.role_names().collect();
-    role_names.sort_unstable();
+    let host_role = cfg.host_role.as_str();
+    role_names.sort_unstable_by(|a, b| {
+        let a_host = *a == host_role;
+        let b_host = *b == host_role;
+        match (a_host, b_host) {
+            (true, true) | (false, false) => a.cmp(b),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+        }
+    });
     let total_tokens: u64 = role_names
         .iter()
         .map(|n| priors::estimate_role_tokens(coreroom_dir, n))

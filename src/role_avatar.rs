@@ -83,7 +83,7 @@ fn safe_glyph(role: &str, host_role: &str) -> &'static str {
         "security" => "◆",
         "qa" | "test" | "tester" => "△",
         "sre" | "ops" | "devops" => "▣",
-        "frontend" | "design" => "▱",
+        "frontend" | "design" => "◧",
         "product" | "pm" => "◌",
         _ => fallback_safe_glyph(role),
     }

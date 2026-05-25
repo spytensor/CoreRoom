@@ -51,6 +51,12 @@ pub struct RoomRuntimeState {
     last_seen: BTreeMap<String, Instant>,
     composer: ComposerState,
     scrollback: Vec<Line<'static>>,
+    /// Role of the most recent `RoleSpoke` / `RoleOutputDelta` event
+    /// pushed into scrollback. Used to suppress the redundant
+    /// `  @role` divider line that the markdown renderer emits at the
+    /// top of every chunk when consecutive chunks come from the same
+    /// speaker.
+    last_speaker: Option<String>,
     spinners: BTreeMap<String, SpinnerSnapshot>,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
@@ -114,6 +120,7 @@ impl RoomRuntimeState {
             last_seen: BTreeMap::new(),
             composer,
             scrollback: Vec::new(),
+            last_speaker: None,
             spinners: BTreeMap::new(),
             work_cards: BTreeMap::new(),
             permission: None,
@@ -132,11 +139,29 @@ impl RoomRuntimeState {
                         | CrepEvent::RoleStopped { .. }
                         | CrepEvent::TurnInterrupted { .. }
                 );
-                let rendered = StdoutSink::render_to_string(&RoomEvent::Crep { event, host_role });
-                self.push_rendered(&rendered);
-                if ends_turn && !self.has_active_work() {
-                    self.composer
-                        .set_submission_state(ComposerSubmissionState::Idle);
+                let speaker = speaker_of(event.as_ref());
+                let rendered = StdoutSink::render_to_string(&RoomEvent::Crep {
+                    event: event.clone(),
+                    host_role: host_role.clone(),
+                });
+                let cleaned = match (&speaker, &self.last_speaker) {
+                    (Some(role), Some(prev)) if role == prev => {
+                        strip_leading_role_header(&rendered, role)
+                    }
+                    _ => rendered,
+                };
+                self.push_rendered(&cleaned);
+                // Track the speaker so the next chunk from the same
+                // role can suppress its redundant header.
+                if let Some(role) = speaker {
+                    self.last_speaker = Some(role);
+                }
+                if ends_turn {
+                    self.last_speaker = None;
+                    if !self.has_active_work() {
+                        self.composer
+                            .set_submission_state(ComposerSubmissionState::Idle);
+                    }
                 }
             }
             RoomEvent::Notice { level, text } => self.push_notice(level, text),
@@ -213,7 +238,18 @@ impl RoomRuntimeState {
     }
 
     fn push_user_line(&mut self, line: &str) {
-        self.push_scrollback(Line::raw(format!("@user {line}")));
+        // Style the @user tag consistently with the colored role
+        // identities around it. Off-white bold reads as "you" without
+        // colliding with any role slot in the palette.
+        self.push_scrollback(Line::from(vec![
+            Span::styled(
+                "@user".to_owned(),
+                Style::default()
+                    .fg(USER_TAG_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(" {line}")),
+        ]));
     }
 
     fn push_notice(&mut self, level: NoticeLevel, text: impl Into<String>) {
@@ -263,13 +299,20 @@ impl RoomRuntimeState {
                 .any(|card| matches!(card.status, WorkStatus::Working { .. }))
     }
 
+    /// Number of distinct active roles. A role that has both a live
+    /// spinner snapshot and a working work card (the common case for a
+    /// turn in flight) is counted exactly once.
     fn active_work_count(&self) -> usize {
-        self.spinners.len()
-            + self
-                .work_cards
-                .values()
-                .filter(|card| matches!(card.status, WorkStatus::Working { .. }))
-                .count()
+        let mut roles: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for role in self.spinners.keys() {
+            roles.insert(role.as_str());
+        }
+        for card in self.work_cards.values() {
+            if matches!(card.status, WorkStatus::Working { .. }) {
+                roles.insert(card.role.as_str());
+            }
+        }
+        roles.len()
     }
 }
 
@@ -775,8 +818,11 @@ fn render_status_rail(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeStat
 
 fn render_role_lane(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let mut lines = Vec::new();
+    let pending_role = state.permission.as_ref().map(|p| p.request.role.as_str());
+    let pending_active = pending_role.is_some()
+        && pending_role.is_some_and(|role| !state.spinners.contains_key(role));
     let title;
-    if state.spinners.is_empty() {
+    if state.spinners.is_empty() && !pending_active {
         title = "Team";
         let now = Instant::now();
         for member in &state.team {
@@ -787,7 +833,17 @@ fn render_role_lane(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState)
         for snapshot in state.spinners.values() {
             lines.push(spinner_line(snapshot, &state.host_role));
         }
-        let inactive = state.team.len().saturating_sub(state.spinners.len());
+        // If a permission overlay is open for a role that no longer has
+        // a live spinner (because the kernel cleared it before/while
+        // the prompt arrived), synthesize a `waiting approval` row so
+        // the rail and the modal point at the same role.
+        if let Some(role) = pending_role {
+            if !state.spinners.contains_key(role) {
+                lines.push(waiting_approval_line(role, &state.host_role));
+            }
+        }
+        let visible_active = state.spinners.len() + usize::from(pending_active);
+        let inactive = state.team.len().saturating_sub(visible_active);
         if inactive > 0 {
             lines.push(Line::from(vec![Span::styled(
                 format!("+ {inactive} standby"),
@@ -801,6 +857,27 @@ fn render_role_lane(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState)
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+/// Synthesised row for a role that is blocked on a permission prompt
+/// but has no live spinner of its own. Uses the same yellow paint as
+/// [`SpinnerPaint::WaitingApproval`] and keeps the role identity color
+/// on the glyph and `@role` token so the rail stays coherent with the
+/// permission overlay above it.
+fn waiting_approval_line(role: &str, host_role: &str) -> Line<'static> {
+    let role_color = tui_style::role_color(role, host_role);
+    let glyph = tui_style::role_avatar_glyph(role, host_role);
+    Line::from(vec![
+        Span::styled(glyph.to_owned(), Style::default().fg(role_color)),
+        Span::raw(" "),
+        Span::styled("⏸", Style::default().fg(Color::Yellow)),
+        Span::raw(" "),
+        Span::styled(
+            format!("@{role}"),
+            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · waiting approval", Style::default().fg(Color::Yellow)),
+    ])
 }
 
 /// One row in the Team roster. Identity (glyph + role token) uses
@@ -891,6 +968,47 @@ fn build_team(cfg: Option<&Config>, host_role: &str) -> Vec<TeamMember> {
 
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// Role that a CREP event represents as a "speaker". Used to dedupe
+/// consecutive headers from the same role.
+fn speaker_of(event: &CrepEvent) -> Option<String> {
+    match event {
+        CrepEvent::RoleSpoke { role, .. } | CrepEvent::RoleOutputDelta { role, .. } => {
+            Some(role.clone())
+        }
+        _ => None,
+    }
+}
+
+/// Strip the leading `  @role` header line that
+/// `render_role_markdown` emits at the top of every chunk. Used when
+/// the previous push to scrollback was already a chunk from the same
+/// role, so the header would just repeat.
+fn strip_leading_role_header(rendered: &str, role: &str) -> String {
+    let Some(newline) = rendered.find('\n') else {
+        return rendered.to_owned();
+    };
+    let first = &rendered[..newline];
+    let plain = strip_ansi(first);
+    let trimmed = plain.trim();
+    let role_token = format!("@{role}");
+    // The header is just the role token (optionally followed by a
+    // single space + suffix). Any actual body line either starts with
+    // four spaces of body_prefix or contains characters beyond the
+    // role token.
+    if trimmed == role_token || trimmed.starts_with(&format!("{role_token} ")) {
+        rendered[newline + 1..].to_owned()
+    } else {
+        rendered.to_owned()
+    }
+}
+
+/// Display color for the `@user` tag in scrollback. Picked to read as
+/// "you" without collding with any role slot in the palette (host
+/// lavender, engineer/backend sky, reviewer blossom, security coral,
+/// qa honey, sre teal, frontend rose, product jade). `EM` from the
+/// crossterm palette is `RGB(0xf0, 0xf0, 0xf0)` — warm off-white.
+const USER_TAG_COLOR: Color = Color::Rgb(0xf0, 0xf0, 0xf0);
+
 fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {
     let frame = SPINNER_FRAMES[snapshot.frame % SPINNER_FRAMES.len()];
     let state = snapshot
@@ -932,13 +1050,10 @@ fn render_work_cards(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
     let mut lines = Vec::new();
     let width = usize::from(area.width.saturating_sub(4)).max(28);
     for card in state.work_cards.values().rev().take(3) {
-        // Identity header line — gives each card a colored role label
-        // up front, then the work card body keeps its own border and
-        // step colors via the ANSI → ratatui bridge.
-        lines.push(Line::from(tui_style::role_label_spans(
-            &card.role,
-            &card.host_role,
-        )));
+        // The card body's border title already carries the colored
+        // `@role` token via the v0.9.10 ANSI bridge, so no separate
+        // identity header is needed — adding one printed the role
+        // mention twice on every card.
         for line in crate::ansi::ansi_to_lines(&card.render(width)) {
             lines.push(line);
         }
@@ -1989,6 +2104,209 @@ mod tests {
             .find(|span| span.content.as_ref() == "@backend")
             .expect("@backend span survived scrollback");
         assert_eq!(coloured.style.fg, Some(expected));
+    }
+
+    #[test]
+    fn work_card_renders_role_label_exactly_once_per_card() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // The card's own border title already carries `@backend`. The
+        // pre-v0.9.11 identity-header prefix line above the card is
+        // gone. Count `@backend` only inside the card body region
+        // (the lines between the top and bottom box-drawing borders).
+        // Work-card borders use rounded corners (╭ ╰); ratatui panel
+        // borders use square corners (┌ └). Match rounded only so the
+        // Team panel's `◇ @backend cc standby` row doesn't bleed in.
+        let mut inside_card = false;
+        let mut card_lines: Vec<&str> = Vec::new();
+        for line in text.lines() {
+            if line.contains('╭') {
+                inside_card = true;
+            }
+            if inside_card {
+                card_lines.push(line);
+            }
+            if line.contains('╰') {
+                inside_card = false;
+            }
+        }
+        let card_section = card_lines.join("\n");
+        assert_eq!(
+            card_section.matches("@backend").count(),
+            1,
+            "expected exactly one @backend in card body, got:\n{card_section}"
+        );
+        // There must be no bare identity-header row above the card.
+        let above_card_top = text
+            .lines()
+            .take_while(|line| !line.contains("Run validation"))
+            .filter(|line| line.contains("◇ @backend") && !line.contains("standby"))
+            .count();
+        assert_eq!(
+            above_card_top, 0,
+            "expected no `◇ @backend` identity prefix above the card"
+        );
+    }
+
+    #[test]
+    fn active_work_count_treats_spinner_plus_card_as_one_role() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        assert_eq!(state.active_work_count(), 1);
+    }
+
+    #[test]
+    fn active_work_count_sums_distinct_roles() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "host".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: None,
+            paint: SpinnerPaint::Painting,
+        }));
+        assert_eq!(state.active_work_count(), 2);
+    }
+
+    #[test]
+    fn user_line_is_styled_with_user_identity_color() {
+        let mut state = test_state();
+        state.push_user_line("write some tests");
+        let span = state
+            .scrollback
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == "@user")
+            .expect("@user span present");
+        assert_eq!(span.style.fg, Some(USER_TAG_COLOR));
+        assert!(span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn permission_overlay_keeps_role_in_roles_rail_without_team_fallback() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // While permission is pending, the rail must show Roles, not
+        // the idle Team roster. The requesting role surfaces with a
+        // "waiting approval" label.
+        assert!(text.contains("Roles"));
+        assert!(!text.contains("Team─") && !text.contains("─Team"));
+        assert!(text.contains("waiting approval"));
+        assert!(text.contains("@backend"));
+    }
+
+    #[test]
+    fn consecutive_role_chunks_only_render_one_header() {
+        let mut state = test_state();
+        // Two RoleOutputDelta chunks from the same role.
+        let event1 = RoomEvent::Crep {
+            event: Box::new(CrepEvent::RoleOutputDelta {
+                role: "host".to_owned(),
+                priors_hash: String::new(),
+                text_delta: "first chunk\n".to_owned(),
+                sequence: 1,
+                turn_id: String::new(),
+                thread_id: String::new(),
+            }),
+            host_role: "host".to_owned(),
+        };
+        let event2 = RoomEvent::Crep {
+            event: Box::new(CrepEvent::RoleOutputDelta {
+                role: "host".to_owned(),
+                priors_hash: String::new(),
+                text_delta: "second chunk\n".to_owned(),
+                sequence: 2,
+                turn_id: String::new(),
+                thread_id: String::new(),
+            }),
+            host_role: "host".to_owned(),
+        };
+        state.apply_event(event1);
+        state.apply_event(event2);
+        let text = state
+            .scrollback
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        // The role token `@host` appears exactly once — the second
+        // chunk's header is suppressed.
+        assert_eq!(
+            text.matches("@host").count(),
+            1,
+            "expected one @host divider, got:\n{text}"
+        );
+        assert!(text.contains("first chunk"));
+        assert!(text.contains("second chunk"));
+    }
+
+    #[test]
+    fn role_chunks_from_different_roles_each_keep_their_header() {
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Crep {
+            event: Box::new(CrepEvent::RoleOutputDelta {
+                role: "host".to_owned(),
+                priors_hash: String::new(),
+                text_delta: "host says\n".to_owned(),
+                sequence: 1,
+                turn_id: String::new(),
+                thread_id: String::new(),
+            }),
+            host_role: "host".to_owned(),
+        });
+        state.apply_event(RoomEvent::Crep {
+            event: Box::new(CrepEvent::RoleOutputDelta {
+                role: "backend".to_owned(),
+                priors_hash: String::new(),
+                text_delta: "backend says\n".to_owned(),
+                sequence: 2,
+                turn_id: String::new(),
+                thread_id: String::new(),
+            }),
+            host_role: "host".to_owned(),
+        });
+        let text = state
+            .scrollback
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.matches("@host").count(), 1);
+        assert_eq!(text.matches("@backend").count(), 1);
     }
 
     #[test]
