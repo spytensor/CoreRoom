@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.9"
+items = [
+  "live room chrome consolidates into one identity bar + one hint row",
+  "every role has a stable color + glyph across splash, rail, and cards",
+  "right rail keeps a Team roster when idle and a roles+work view when busy",
+]
+
+[[whats_new]]
 version = "0.9.8"
 items = [
   "plain cr now opens the executable full-screen TUI room",
