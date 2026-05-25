@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-05-25
+
+### Changed
+
+- **Role activity is now inline at the bottom of Room, chat-style.**
+  v0.9.14 framed live role activity as a `──[ team working ]──` card
+  pinned at the top of the Room panel, sitting above splash and the
+  conversation flow. Dogfood: that reads as a banner, not part of the
+  conversation. The card now appears at the **bottom** of the
+  scrollback (just above the composer), the surrounding divider /
+  trailing blank are gone, and each active role is a compact single
+  line — the same shape Claude.ai / ChatGPT use to surface inline
+  tool calls in chat. Permission-pending rows keep the
+  `⏸ · waiting approval` style.
+- **Status panel drops the Current section.** The same active-role
+  detail was rendered twice — once in the Room inline indicator and
+  once in the rail's Status > Current section. The rail is now
+  strictly project-level: Work / Blockers / Evidence. Active-role
+  detail lives only in the conversation context.
+
 ## [0.9.14] - 2026-05-25
 
 ### Changed

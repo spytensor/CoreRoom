@@ -782,10 +782,14 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
 
 fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let visible_rows = area.height.saturating_sub(2) as usize;
-    let mut current_lines = current_turn_lines(state);
-    let scroll_rows = visible_rows.saturating_sub(current_lines.len());
+    // Activity rows are appended at the BOTTOM of the Room so they
+    // read like an inline tool-call indicator on the most recent
+    // turn, sitting just above the composer — not as a banner pinned
+    // to the top above the conversation.
+    let activity_lines = current_turn_lines(state);
+    let scroll_rows = visible_rows.saturating_sub(activity_lines.len());
     let start = state.scrollback.len().saturating_sub(scroll_rows);
-    let scroll_items = if state.scrollback.is_empty() {
+    let mut items: Vec<Line<'static>> = if state.scrollback.is_empty() {
         vec![Line::from(vec![Span::styled(
             "Submit a task below. Runtime output appears here.",
             Style::default().fg(Color::DarkGray),
@@ -793,11 +797,8 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
     } else {
         state.scrollback[start..].to_vec()
     };
-    current_lines.extend(scroll_items);
-    let items = current_lines
-        .into_iter()
-        .map(ListItem::new)
-        .collect::<Vec<_>>();
+    items.extend(activity_lines);
+    let items = items.into_iter().map(ListItem::new).collect::<Vec<_>>();
     frame.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title("Room")),
         area,
@@ -933,71 +934,12 @@ fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {
     ])
 }
 
-#[derive(Debug, Clone)]
-struct CurrentActivity {
-    role: String,
-    state: String,
-    detail: Option<String>,
-}
-
-fn current_activity(state: &RoomRuntimeState) -> Option<CurrentActivity> {
-    if let Some(permission) = &state.permission {
-        return Some(CurrentActivity {
-            role: permission.request.role.clone(),
-            state: "waiting approval".to_owned(),
-            detail: Some(permission.request.tool.clone()),
-        });
-    }
-    state
-        .spinners
-        .values()
-        .next()
-        .map(|snapshot| {
-            // Prefer the work card's `current_step` over the spinner's
-            // generic `current_state` so the rail shows what tool is
-            // actually running (e.g. `cargo test`) instead of a
-            // perpetual `thinking` placeholder.
-            let card_step =
-                state
-                    .work_cards
-                    .get(&snapshot.role)
-                    .and_then(|card| match &card.status {
-                        WorkStatus::Working { current_step, .. } => current_step.clone(),
-                        _ => None,
-                    });
-            let state_label = card_step
-                .or_else(|| snapshot.current_state.clone())
-                .unwrap_or_else(|| "thinking".to_owned());
-            let mut detail = format!("{}s", snapshot.started_at.elapsed().as_secs());
-            if snapshot.tools_seen > 0 {
-                use std::fmt::Write as _;
-                let plural = if snapshot.tools_seen == 1 { "" } else { "s" };
-                let _ = write!(detail, " · {} tool{plural}", snapshot.tools_seen);
-            }
-            CurrentActivity {
-                role: snapshot.role.clone(),
-                state: state_label,
-                detail: Some(detail),
-            }
-        })
-        .or_else(|| {
-            state
-                .work_cards
-                .values()
-                .find(|card| matches!(card.status, WorkStatus::Working { .. }))
-                .map(|card| CurrentActivity {
-                    role: card.role.clone(),
-                    state: "working".to_owned(),
-                    detail: Some(work_card_detail(card)),
-                })
-        })
-}
-
-/// Card pinned to the top of the Room scrollback showing live role
-/// activity. Empty when no role is working and no permission is open;
-/// otherwise renders one styled row per active role with its current
-/// step, elapsed time, and tool count, framed with a thin divider so
-/// the card reads as a distinct artifact above the conversation flow.
+/// Inline activity rows appended at the bottom of the Room
+/// scrollback, just above the composer. Style matches a chat-style
+/// tool-call indicator (one row per active role; no surrounding
+/// frame) so the live status reads as part of the conversation flow
+/// instead of a banner. Empty when no role is working and no
+/// permission overlay is open.
 fn current_turn_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
     let active_roles: Vec<&str> = state.spinners.keys().map(String::as_str).collect();
     let pending_role = state.permission.as_ref().map(|p| p.request.role.as_str());
@@ -1007,19 +949,6 @@ fn current_turn_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
     }
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    // Top divider with an embedded label so the card has a clear
-    // identity above the scrollback.
-    lines.push(Line::from(vec![
-        Span::styled("──[ ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            "team working",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" ]──", Style::default().fg(Color::DarkGray)),
-    ]));
-
     for snapshot in state.spinners.values() {
         lines.push(activity_card_row(snapshot, state));
     }
@@ -1028,11 +957,6 @@ fn current_turn_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
             lines.push(activity_card_waiting_row(role, &state.host_role));
         }
     }
-    lines.push(Line::from(vec![Span::styled(
-        "────────",
-        Style::default().fg(Color::DarkGray),
-    )]));
-    lines.push(Line::raw(""));
     lines
 }
 
@@ -1116,27 +1040,12 @@ fn activity_card_waiting_row(role: &str, host_role: &str) -> Line<'static> {
 }
 
 fn status_panel_lines(state: &RoomRuntimeState, width: u16) -> Vec<Line<'static>> {
+    // The Status panel is the project-level snapshot. Active-role
+    // detail (owner + step + elapsed + tools) is rendered inline at
+    // the bottom of the Room scrollback as a chat-style indicator,
+    // so the rail does not duplicate that information. Sections
+    // here: Work / Blockers / Evidence.
     let mut lines = Vec::new();
-    lines.push(section_header("Current"));
-    if let Some(activity) = current_activity(state) {
-        lines.push(role_metadata_line(
-            "owner",
-            &activity.role,
-            &state.host_role,
-            Some(activity.state.as_str()),
-        ));
-        if let Some(detail) = activity.detail {
-            lines.push(status_kv_line("detail", &detail, Color::DarkGray));
-        }
-    } else {
-        lines.push(status_kv_line("state", "idle", Color::DarkGray));
-        lines.push(status_kv_line(
-            "next",
-            "type a task or @role",
-            Color::DarkGray,
-        ));
-    }
-    lines.push(Line::raw(""));
     lines.push(section_header("Work"));
     let active = state.active_work_count();
     lines.push(status_kv_line(
@@ -2016,20 +1925,17 @@ mod tests {
     fn rail_shows_work_status_when_no_spinners_and_no_cards() {
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // The right rail is purely the project-level Status panel.
-        // Team / roster info lives in the Room activity card now, not
-        // here.
+        // The right rail is the project-level Status panel only. The
+        // Current section is gone — active-role detail lives inline
+        // at the bottom of Room. Rail keeps Work/Blockers/Evidence.
         assert!(text.contains("Status"));
         assert!(!text.contains("Roles"));
+        assert!(!text.contains("Current"));
         assert!(!text.contains("no work cards yet"));
-        assert!(text.contains("Current"));
-        assert!(text.contains("state: idle"));
         assert!(text.contains("Work"));
         assert!(text.contains("active: 0"));
+        assert!(text.contains("Blockers"));
         assert!(text.contains("validation: not observed"));
-        // No Team section in the rail. The Room activity card is also
-        // empty when no role is working — no "team working" header.
-        assert!(!text.contains("team working"));
     }
 
     #[test]
@@ -2046,11 +1952,12 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("Status"));
         assert!(!text.contains("Roles"));
+        // Status panel keeps only project-level counts; the Current
+        // section is gone.
+        assert!(!text.contains("Current"));
         assert!(text.contains("active: 1"));
-        // The Room activity card surfaces the working role with its
-        // current step. Role identity lives in the Room area now,
-        // not the rail.
-        assert!(text.contains("team working"));
+        // Inline activity row appears in the Room area (no "team
+        // working" framing anymore — just the role row).
         assert!(text.contains("@backend"));
         assert!(text.contains("thinking"));
     }
@@ -2527,8 +2434,10 @@ mod tests {
     fn room_activity_card_is_empty_when_no_role_is_working() {
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
-        // No "team working" header on the Room area when idle.
+        // The Room shows clean scrollback when idle — no activity
+        // indicator row, no framing.
         assert!(!text.contains("team working"));
+        assert!(!text.contains("@host · "));
     }
 
     #[test]
@@ -2545,13 +2454,13 @@ mod tests {
         // sample_work_card carries current_step = Some("cargo test").
         state.apply_event(RoomEvent::WorkCard(sample_work_card()));
         let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
-        assert!(text.contains("team working"));
-        // The card row mentions the role, the tool count, and the
-        // running step taken from the work card.
+        // No framing — just the inline row carrying role, tool count,
+        // and the running step from the work card.
+        assert!(!text.contains("team working"));
         let activity_row = text
             .lines()
             .find(|line| line.contains("@backend") && line.contains("cargo test"))
-            .expect("activity card row");
+            .expect("inline activity row");
         assert!(activity_row.contains("2 tools"));
     }
 
@@ -2575,7 +2484,6 @@ mod tests {
             paint: SpinnerPaint::Painting,
         }));
         let text = render_room_runtime_to_text(&state, 120, 40).expect("render");
-        assert!(text.contains("team working"));
         assert!(text
             .lines()
             .any(|line| line.contains("@host") && line.contains("1 tool")));
@@ -2647,9 +2555,9 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("Status"));
         assert!(!text.contains("Roles"));
-        // The Room activity card surfaces the role waiting on a
-        // permission prompt even when its spinner has been cleared.
-        assert!(text.contains("team working"));
+        // Inline activity row in the Room surfaces the role waiting
+        // on a permission prompt even when its spinner has been
+        // cleared.
         assert!(text.contains("waiting approval"));
         assert!(text.contains("@backend"));
     }

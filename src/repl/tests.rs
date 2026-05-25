@@ -640,17 +640,17 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.9.14 ───────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.9.15 ───────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
 │ ◉ @host      cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
 │ ◇ @backend   cc     · 1M · ask          • /journal <role> captures today's … │
 │ ◆ @security  codex  · default · bypass                                       │
-│                                         what's new in 0.9.14                 │
-│  3.3k  base tokens loaded               • live role activity now appears as… │
-│ /repo/CoreRoom                          • card shows tool count and the act… │
-│                                         • right rail stays project-focused … │
+│                                         what's new in 0.9.15                 │
+│  3.3k  base tokens loaded               • role activity moves to inline row… │
+│ /repo/CoreRoom                          • right rail drops the duplicate Cu… │
+│                                         • no more banner framing; the indic… │
 │                                                                              │
 │                                         /help for commands                   │
 │                                                                              │
