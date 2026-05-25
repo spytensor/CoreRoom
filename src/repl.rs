@@ -67,8 +67,33 @@ use splash::{render_help, render_home};
 pub(crate) fn render_event_line_for_sink(event: &CrepEvent, host_role: &str) -> String {
     render::render_event_line(event, host_role)
 }
+pub(crate) fn render_work_card_for_sink(card: &crate::output::work_card::WorkCard) -> String {
+    work::render_card_for_stdout(card)
+}
+
+#[cfg(test)]
+pub(crate) fn render_work_card_at_terminal_width_for_sink(
+    card: &crate::output::work_card::WorkCard,
+    columns: usize,
+) -> String {
+    work::render_card_at_terminal_width(card, columns)
+}
+
+pub(crate) fn render_spinner_snapshot_for_sink(
+    snapshot: &crate::room_io::SpinnerSnapshot,
+) -> String {
+    status::render_spinner_snapshot_for_stdout(snapshot)
+}
+
+#[cfg(test)]
+pub(crate) fn render_spinner_snapshot_at_width_for_sink(
+    snapshot: &crate::room_io::SpinnerSnapshot,
+    width: usize,
+) -> String {
+    status::render_spinner_snapshot_at_width(snapshot, width)
+}
 use turn::{drain_one_turn, CapturedTurn};
-use work::{render_card, TurnWork};
+use work::TurnWork;
 
 const DEFAULT_MAX_HOP_DEPTH: usize = 5;
 const DEFAULT_MAX_ROUTE_FAN_OUT: usize = 8;
@@ -1806,7 +1831,7 @@ async fn drain_one_turn_handling_ctrl_c(
                     .lock()
                     .expect("turn work mutex poisoned")
                     .interrupted_card("Ctrl-C twice — exiting REPL");
-                render_card(&card);
+                work::render_card(sink.as_ref(), card);
                 room_io::emit_system(sink.as_ref(), "Ctrl-C twice; stopping all roles");
                 shutdown_all_roles(roles, StopReason::Crashed);
                 anyhow::bail!("interrupted");
@@ -1832,7 +1857,7 @@ async fn drain_one_turn_handling_ctrl_c(
                             "halt SLO ({}s) elapsed; killing @{role}",
                             CANCEL_SLO.as_secs()
                         ));
-                    render_card(&card);
+                    work::render_card(sink.as_ref(), card);
                     room_io::emit_bad(sink.as_ref(), format!(
                         "@{role} did not respond to halt within {}s; killing role",
                         CANCEL_SLO.as_secs()

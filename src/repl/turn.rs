@@ -232,7 +232,7 @@ pub(super) async fn drain_one_turn(
     let mut captured: Option<CapturedTurn> = None;
     let mut activity = TurnActivity::default();
     let turn_started = Instant::now();
-    let mut status = StatusRegion::start(role);
+    let mut status = StatusRegion::start(role, Arc::clone(&sink));
     let mut printed_working_card = false;
     let mut stream_filter = StreamFilter::default();
     let mut streamed_rendered_text = String::new();
@@ -261,7 +261,6 @@ pub(super) async fn drain_one_turn(
                     room_io::emit_bad(sink.as_ref(), format!("permission prompt failed: {error:#}"));
                 }
                 status.clear_waiting_approval(&request_role);
-                status.repaint();
             }
             recv = live_rx.recv() => match recv {
                 Ok(event) => {
@@ -334,13 +333,12 @@ pub(super) async fn drain_one_turn(
                         // the full event log.
                         status.clear();
                         if let Some(card) = maybe_card {
-                            work::render_card(&card);
+                            work::render_card(sink.as_ref(), card);
                         }
                         if verbose_tools {
                             render_event(&event, host_role, sink.as_ref());
                         }
                         status.update_from_event(&event);
-                        status.repaint();
                         continue;
                     }
 
@@ -384,7 +382,7 @@ pub(super) async fn drain_one_turn(
                             streamed_rendered_text.push_str(&rendered);
                         }
                             if printed_working_card || cleaned.text.trim().is_empty() {
-                                work::render_card(&card);
+                                work::render_card(sink.as_ref(), card);
                             }
                             let already_streamed = !streamed_rendered_text.trim().is_empty()
                                 && same_streamed_text(&streamed_rendered_text, &cleaned.text);
@@ -411,7 +409,7 @@ pub(super) async fn drain_one_turn(
                                     .lock()
                                     .expect("turn work mutex poisoned")
                                     .interrupted_card("role stopped before replying");
-                                work::render_card(&card);
+                                work::render_card(sink.as_ref(), card);
                             }
                             render_event(&event, host_role, sink.as_ref());
                             true
@@ -434,7 +432,7 @@ pub(super) async fn drain_one_turn(
                                 .lock()
                                 .expect("turn work mutex poisoned")
                                 .interrupted_card("halted by user");
-                            work::render_card(&card);
+                            work::render_card(sink.as_ref(), card);
                             render_event(&event, host_role, sink.as_ref());
                             if !partial_mentions.is_empty() {
                                 let names = partial_mentions

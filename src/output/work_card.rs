@@ -20,6 +20,9 @@ const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "�
 pub struct WorkCard {
     /// Configured role name, without a leading `@`.
     pub role: String,
+    /// Host role name at emit time. Kept with the card so a sink can
+    /// render role-relative colors without consulting mutable REPL state.
+    pub host_role: String,
     /// Stable display color for the role.
     pub role_color: Color,
     /// One-line task summary.
@@ -463,6 +466,7 @@ mod tests {
     fn sample_card() -> WorkCard {
         WorkCard {
             role: "security".into(),
+            host_role: "host".into(),
             role_color: Color::Rgb {
                 r: 0x5c,
                 g: 0xd6,

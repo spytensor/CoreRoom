@@ -18,9 +18,12 @@
 //! actually emits today. Variants are added as call sites are migrated;
 //! the trait stays additive so an in-progress port never breaks `cr start`.
 
+use std::io::{IsTerminal, Write as _};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::crep::CrepEvent;
+use crate::output::work_card::WorkCard;
 
 /// One observable event from the runtime headed for the user.
 ///
@@ -57,6 +60,41 @@ pub enum RoomEvent {
     /// byte-for-byte; a TUI sink may parse or place it as preformatted
     /// scrollback until structured variants replace each surface.
     Banner(String),
+    /// A structured role work-card update. The stdout sink renders it
+    /// with the legacy boxed card layout; a TUI sink can place the same
+    /// card in a work/status pane.
+    WorkCard(WorkCard),
+    /// A structured in-place status spinner update.
+    Spinner(SpinnerSnapshot),
+}
+
+/// Point-in-time state for the in-flight role spinner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpinnerSnapshot {
+    /// Role whose turn is currently being surfaced.
+    pub role: String,
+    /// Index into the ten-frame braille spinner set.
+    pub frame: usize,
+    /// Wall-clock instant when the role turn started.
+    pub started_at: Instant,
+    /// Number of tool proposals seen during this turn.
+    pub tools_seen: usize,
+    /// Best-effort current state label, or `None` for "thinking".
+    pub current_state: Option<String>,
+    /// Whether the spinner line should be painted, cleared, or marked
+    /// as paused behind an approval prompt.
+    pub paint: SpinnerPaint,
+}
+
+/// Rendering mode for a [`SpinnerSnapshot`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpinnerPaint {
+    /// Clear the in-place status row.
+    Cleared,
+    /// Paint the status row with the current frame/state.
+    Painting,
+    /// The role is blocked behind a permission approval prompt.
+    WaitingApproval,
 }
 
 /// Categorical level for a one-line system notice. Sinks may map these
@@ -98,7 +136,11 @@ pub struct StdoutSink;
 
 impl RoomSink for StdoutSink {
     fn emit(&self, event: RoomEvent) {
+        let flush = matches!(&event, RoomEvent::Spinner(_));
         print!("{}", Self::render_to_string(&event));
+        if flush {
+            let _ = std::io::stdout().flush();
+        }
     }
 }
 
@@ -123,6 +165,14 @@ impl StdoutSink {
                 NoticeLevel::System => crate::output::system_line(text),
             },
             RoomEvent::Banner(text) => text.clone(),
+            RoomEvent::WorkCard(card) => crate::repl::render_work_card_for_sink(card),
+            RoomEvent::Spinner(snapshot) => {
+                if std::io::stdout().is_terminal() {
+                    crate::repl::render_spinner_snapshot_for_sink(snapshot)
+                } else {
+                    String::new()
+                }
+            }
         }
     }
 }
@@ -186,6 +236,10 @@ pub fn stdout_sink() -> Arc<dyn RoomSink> {
 mod tests {
     use super::*;
     use crate::crep::{CrepEvent, StopReason};
+    use crate::output;
+    use crate::output::work_card::{Step, StepKind, WorkStatus};
+    use crossterm::style::{Color, Stylize};
+    use std::time::Duration;
 
     /// In-memory sink used by tests to capture emitted events without
     /// touching stdout. Not exposed outside the crate.
@@ -283,5 +337,118 @@ mod tests {
             StdoutSink::render_to_string(&RoomEvent::Banner(banner.clone())),
             banner
         );
+    }
+
+    #[test]
+    fn stdout_sink_work_card_matches_legacy_bytes() {
+        let card = sample_work_card();
+        let actual = crate::repl::render_work_card_at_terminal_width_for_sink(&card, 80);
+        let mut expected = String::new();
+        for line in card.render(78).lines() {
+            expected.push_str("  ");
+            expected.push_str(line);
+            expected.push('\n');
+        }
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn stdout_sink_spinner_transition_matches_legacy_bytes() {
+        let started_at = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(12))
+            .unwrap_or_else(std::time::Instant::now);
+        let snapshots = [
+            spinner_snapshot(started_at, 0, 0, None, SpinnerPaint::Painting),
+            spinner_snapshot(started_at, 1, 0, None, SpinnerPaint::Painting),
+            spinner_snapshot(
+                started_at,
+                1,
+                1,
+                Some("running Bash `cargo test --locked`"),
+                SpinnerPaint::Painting,
+            ),
+            spinner_snapshot(
+                started_at,
+                1,
+                1,
+                Some("waiting approval · Bash `cargo test --locked`"),
+                SpinnerPaint::WaitingApproval,
+            ),
+            spinner_snapshot(started_at, 1, 1, Some("thinking"), SpinnerPaint::Cleared),
+        ];
+        let actual = snapshots
+            .iter()
+            .map(|snapshot| crate::repl::render_spinner_snapshot_at_width_for_sink(snapshot, 120))
+            .collect::<String>();
+        let expected = [
+            format!(
+                "\r\x1b[2K{}",
+                "  1 role working · ⠋ @security · 12s · thinking".with(output::DIM)
+            ),
+            format!(
+                "\r\x1b[2K{}",
+                "  1 role working · ⠙ @security · 12s · thinking".with(output::DIM)
+            ),
+            format!(
+                "\r\x1b[2K{}",
+                "  1 role working · ⠙ @security · 12s · 1 tool · running Bash `cargo test --locked`"
+                    .with(output::DIM)
+            ),
+            format!(
+                "\r\x1b[2K{}",
+                "  1 role working · ⠙ @security · 12s · 1 tool · waiting approval · Bash `cargo test --locked`"
+                    .with(output::DIM)
+            ),
+            "\r\x1b[2K".to_owned(),
+        ]
+        .concat();
+        assert_eq!(actual, expected);
+    }
+
+    fn sample_work_card() -> WorkCard {
+        WorkCard {
+            role: "security".to_owned(),
+            host_role: "host".to_owned(),
+            role_color: Color::Rgb {
+                r: 0x5c,
+                g: 0xd6,
+                b: 0xcc,
+            },
+            title: "Check permission bridge".to_owned(),
+            status: WorkStatus::Done {
+                duration: Duration::from_secs(12),
+                steps_count: 2,
+            },
+            steps: vec![
+                Step {
+                    kind: StepKind::Done,
+                    text: "Read src/repl/status.rs".to_owned(),
+                    time: None,
+                },
+                Step {
+                    kind: StepKind::Done,
+                    text: "Run cargo test".to_owned(),
+                    time: Some("12s".to_owned()),
+                },
+            ],
+            collapsed: false,
+        }
+    }
+
+    fn spinner_snapshot(
+        started_at: std::time::Instant,
+        frame: usize,
+        tools_seen: usize,
+        current_state: Option<&str>,
+        paint: SpinnerPaint,
+    ) -> SpinnerSnapshot {
+        SpinnerSnapshot {
+            role: "security".to_owned(),
+            frame,
+            started_at,
+            tools_seen,
+            current_state: current_state.map(str::to_owned),
+            paint,
+        }
     }
 }
