@@ -37,6 +37,9 @@ host_role = "pm"
     assert_eq!(cfg.roles.len(), 2);
     assert!(cfg.is_host("pm"));
     assert!(!cfg.is_host("backend"));
+    assert_eq!(cfg.roles["backend"].access, None);
+    assert_eq!(cfg.effective_role_access("pm"), RoleAccess::HostControl);
+    assert_eq!(cfg.effective_role_access("backend"), RoleAccess::ReadReview);
 }
 
 #[test]
@@ -100,7 +103,7 @@ permission_mode = "bypass"
 }
 
 #[test]
-fn role_entry_parses_owner_and_authority() {
+fn role_entry_parses_owner_access_and_authority() {
     let tmp = fixture(
         r#"
 default_engine = "cc"
@@ -110,6 +113,7 @@ host_role = "pm"
 
 [roles.backend]
 owner = "alice@example.com"
+access = "write"
 authority = ["deployment", "infra", "secrets"]
 "#,
     );
@@ -117,6 +121,8 @@ authority = ["deployment", "infra", "secrets"]
     let cfg = Config::load_test(tmp.path()).unwrap();
     let backend = cfg.roles.get("backend").unwrap();
     assert_eq!(backend.owner.as_deref(), Some("alice@example.com"));
+    assert_eq!(backend.access, Some(RoleAccess::Write));
+    assert_eq!(cfg.effective_role_access("backend"), RoleAccess::Write);
     assert_eq!(
         backend.authority,
         vec![
@@ -125,6 +131,81 @@ authority = ["deployment", "infra", "secrets"]
             AuthorityScope::Secrets,
         ]
     );
+}
+
+#[test]
+fn effective_role_access_defaults_host_engineer_and_specialists() {
+    let tmp = fixture(
+        r#"
+default_engine = "cc"
+host_role = "host"
+
+[roles.host]
+
+[roles.engineer]
+
+[roles.backend]
+
+[roles.reviewer]
+access = "write"
+"#,
+    );
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    fs::write(coreroom.join(ROLES_DIR).join("host.md"), "host\n").unwrap();
+    fs::write(coreroom.join(ROLES_DIR).join("engineer.md"), "engineer\n").unwrap();
+    fs::write(coreroom.join(ROLES_DIR).join("reviewer.md"), "reviewer\n").unwrap();
+
+    let cfg = Config::load_test(tmp.path()).unwrap();
+    assert_eq!(cfg.effective_role_access("host"), RoleAccess::HostControl);
+    assert_eq!(cfg.effective_role_access("engineer"), RoleAccess::Write);
+    assert_eq!(cfg.effective_role_access("backend"), RoleAccess::ReadReview);
+    assert_eq!(cfg.effective_role_access("reviewer"), RoleAccess::Write);
+}
+
+#[test]
+fn role_access_is_separate_from_permission_mode() {
+    let tmp = fixture(
+        r#"
+default_engine = "cc"
+permission_mode = "bypass"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.backend]
+access = "read-review"
+permission_mode = "ask"
+"#,
+    );
+    let coreroom = tmp.path().join(COREROOM_DIR);
+    let cfg = Config::load_test(tmp.path()).unwrap();
+    let backend = cfg.role_config("backend", &coreroom).unwrap();
+
+    assert_eq!(backend.permission_mode, PermissionMode::Ask);
+    assert_eq!(cfg.effective_role_access("backend"), RoleAccess::ReadReview);
+}
+
+#[test]
+fn unknown_role_access_is_rejected_loudly() {
+    let tmp = fixture(
+        r#"
+default_engine = "cc"
+host_role = "pm"
+
+[roles.pm]
+
+[roles.backend]
+access = "superuser"
+"#,
+    );
+
+    let err = Config::load_test(tmp.path()).expect_err("unknown access should fail parse");
+    match err {
+        ConfigError::Parse { source, .. } => {
+            assert!(source.to_string().contains("superuser"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[test]

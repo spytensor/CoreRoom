@@ -1,5 +1,6 @@
 //! Console snapshot contract fixtures.
 
+use coreroom::config::{AuthorityScope, RoleAccess};
 use coreroom::console_snapshot::{
     CoreRoomSnapshot, HealthSeverity, SessionFreshness, StatusState, WorkLifecycle,
     CONSOLE_SNAPSHOT_SCHEMA_VERSION,
@@ -17,6 +18,29 @@ fn console_snapshot_fixture_roundtrips_and_validates() {
     assert_eq!(snapshot.github.tracker_issue, 238);
     assert_eq!(snapshot.runtime.session_state, SessionFreshness::Resumed);
     assert!(snapshot.runtime.roles.len() >= 4);
+    let host = snapshot
+        .runtime
+        .roles
+        .iter()
+        .find(|role| role.role == "host")
+        .expect("host role");
+    assert_eq!(host.effective_access, Some(RoleAccess::HostControl));
+    let engineer = snapshot
+        .runtime
+        .roles
+        .iter()
+        .find(|role| role.role == "engineer")
+        .expect("engineer role");
+    assert_eq!(engineer.effective_access, Some(RoleAccess::Write));
+    let reviewer = snapshot
+        .runtime
+        .roles
+        .iter()
+        .find(|role| role.role == "reviewer")
+        .expect("reviewer role");
+    assert_eq!(reviewer.configured_access, Some(RoleAccess::ReadReview));
+    assert_eq!(reviewer.effective_access, Some(RoleAccess::ReadReview));
+    assert_eq!(reviewer.authority, vec![AuthorityScope::Dependencies]);
     assert!(snapshot.conversation.internal_delegation_count > 0);
     assert!(snapshot
         .conversation

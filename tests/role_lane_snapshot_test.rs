@@ -45,18 +45,22 @@ fn console_snapshot_fixture_covers_role_lane_states() {
 }
 
 #[test]
-fn role_lane_snapshot_does_not_expose_session_ids_or_secrets() {
+fn role_lane_snapshot_does_not_expose_session_ids_or_credential_material() {
     let snapshot: CoreRoomSnapshot =
         toml::from_str(include_str!("fixtures/console_snapshot_v08.toml")).expect("snapshot");
     let encoded = toml::to_string_pretty(&RoleLaneWrapper {
         roles: &snapshot.runtime.roles,
     })
     .expect("encode roles");
+    let lower = encoded.to_ascii_lowercase();
 
     assert!(!encoded.contains("session_id"));
     assert!(!encoded.contains("sessionId"));
-    assert!(!encoded.to_ascii_lowercase().contains("secret"));
-    assert!(!encoded.to_ascii_lowercase().contains("api_key"));
+    assert!(encoded.contains("authority = [\"secrets\"]"));
+    assert!(!lower.contains("secret_key"));
+    assert!(!lower.contains("api_key"));
+    assert!(!lower.contains("apikey"));
+    assert!(!lower.contains("token"));
 }
 
 #[test]

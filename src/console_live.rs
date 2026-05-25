@@ -130,16 +130,25 @@ fn role_snapshots(project_root: &Path, cfg: &Config) -> Result<Vec<RoleRuntimeSn
     names
         .into_iter()
         .map(|name| {
+            let entry = cfg
+                .roles
+                .get(&name)
+                .with_context(|| format!("resolving role entry `{name}`"))?;
             let role = cfg
                 .role_config(&name, &coreroom_dir)
                 .with_context(|| format!("resolving role `{name}`"))?;
             let is_host = cfg.is_host(&name);
+            let effective_access = cfg.effective_role_access(&name);
             Ok(RoleRuntimeSnapshot {
                 role: name,
                 enabled: true,
                 engine: role.engine.as_str().to_owned(),
                 model: role.model,
                 permission_mode: Some(role.permission_mode.as_str().to_owned()),
+                configured_access: entry.access,
+                effective_access: Some(effective_access),
+                owner: entry.owner.clone(),
+                authority: entry.authority.clone(),
                 session_state: SessionFreshness::Unknown,
                 priors_freshness: None,
                 knowledge_freshness: None,
@@ -318,6 +327,30 @@ mod tests {
         assert_eq!(snapshot.project.dirty_state, DirtyState::Clean);
         assert_eq!(snapshot.runtime.host_role, "host");
         assert_eq!(snapshot.runtime.roles.len(), 2);
+        let host = snapshot
+            .runtime
+            .roles
+            .iter()
+            .find(|role| role.role == "host")
+            .expect("host");
+        assert_eq!(
+            host.effective_access,
+            Some(crate::config::RoleAccess::HostControl)
+        );
+        let reviewer = snapshot
+            .runtime
+            .roles
+            .iter()
+            .find(|role| role.role == "reviewer")
+            .expect("reviewer");
+        assert_eq!(
+            reviewer.configured_access,
+            Some(crate::config::RoleAccess::ReadReview)
+        );
+        assert_eq!(
+            reviewer.effective_access,
+            Some(crate::config::RoleAccess::ReadReview)
+        );
         assert_eq!(snapshot.work[0].id, "WO-0000");
         assert_eq!(snapshot.work[0].lifecycle, WorkLifecycle::Closed);
         assert!(snapshot.conversation.public_turns.is_empty());
@@ -395,6 +428,7 @@ host_role = "host"
 [roles.reviewer]
 engine = "codex"
 permission_mode = "bypass"
+access = "read-review"
 "#,
         )
         .unwrap();
