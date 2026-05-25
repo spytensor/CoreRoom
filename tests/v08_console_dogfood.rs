@@ -101,9 +101,16 @@ fn assert_layout_and_image_are_available(snapshot: &CoreRoomSnapshot) {
         );
     }
 
-    let image = include_bytes!("../docs/images/control-room-console.png");
+    // The README hero swapped from three synthetic Pillow mockups to
+    // a single real terminal capture in v0.9.13. The basic shape of
+    // the assertion stays the same: the file is a PNG and has the
+    // bulk a real screenshot has.
+    let image = include_bytes!("../docs/images/live-room.png");
     assert!(image.starts_with(b"\x89PNG\r\n\x1a\n"));
-    assert!(image.len() > 500_000, "unexpectedly small generated image");
+    assert!(
+        image.len() > 500_000,
+        "unexpectedly small README hero image"
+    );
 }
 
 fn assert_health_signals_keep_negative_cases_visible(snapshot: &CoreRoomSnapshot) {

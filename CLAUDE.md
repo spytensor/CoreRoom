@@ -2,29 +2,21 @@
 
 ## README Images
 
-The README screenshots are generated assets, not manual desktop captures.
+The README hero image is a **real terminal capture** of the live room,
+not a synthetic mockup. As of v0.9.13:
 
-Use this exact command from the repository root:
+- `docs/images/live-room.png` is the single README hero image.
+- Take captures from a real `cr` session on macOS (iTerm2 / Terminal)
+  at retina resolution. Crop with the alt-screen content only — no
+  surrounding window chrome or shell scrollback.
+- Use the v0.9.12+ binary so the visual reflects the current
+  identity colors, top status bar, Team rail, footer hints, and
+  mouse-captured sandbox.
 
-```bash
-make readme-images
-```
-
-That runs `python3 scripts/render-readme-images.py` and rewrites:
-
-- `docs/images/boot-dashboard.png`
-- `docs/images/work-cards.png`
-
-The renderer is a Pillow-based synthetic terminal composition. Do not use VHS,
-freeze, silicon, or ad hoc interactive screenshots for these README images
-unless the renderer itself is being replaced in the same change.
-
-If Pillow is missing:
-
-```bash
-python3 -m pip install --user pillow
-```
-
-After changing splash copy, WorkCard copy, colors, role names, or release
-version, run `make readme-images`, inspect both PNGs, and commit the script/doc
-changes together with the regenerated images.
+The Pillow-based renderer (`scripts/render-readme-images.py` +
+`make readme-images`) is **deprecated** and not used by CI or the
+release flow. It is kept on disk for archival reference and for
+producing one-off design mockups when a real capture is impractical.
+Do not regenerate `live-room.png` from the script — replace it with a
+fresh real capture instead, and add new screenshots only when there is
+a real product state worth showing.
