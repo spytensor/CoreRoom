@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-05-25
+
+### Changed
+
+- **README hero is now a real terminal capture.** The README used to
+  embed three Pillow-rendered synthetic terminal mockups
+  (`boot-dashboard.png`, `work-cards.png`, `control-room-console.png`).
+  After several rounds of identity-color / chrome / sandbox work the
+  mockups had drifted from the real product: they kept the bordered
+  pre-v0.9.9 chrome, didn't reflect the host-first roster, and never
+  showed the v0.9.12 mouse-captured sandbox. The README now embeds a
+  single real iTerm2 capture from a v0.9.12 session at
+  `docs/images/live-room.png`. The three synthetic PNGs are removed.
+
+### Deprecated
+
+- **Pillow renderer (`scripts/render-readme-images.py`, `make
+  readme-images`)** is no longer driven by CI or the release flow. A
+  deprecation banner sits at the top of the script and the Makefile
+  target prints a redirect to the new policy and exits non-zero. The
+  script is kept on disk for archival reference and one-off design
+  mockups; the README hero must come from a real `cr` capture.
+- **`CLAUDE.md > README Images`** flipped from "use the Pillow
+  renderer" to "use a real terminal capture; do not regenerate the
+  hero from the script". The renderer carve-out remains for design
+  exploration only.
+
 ## [0.9.12] - 2026-05-25
 
 ### Fixed

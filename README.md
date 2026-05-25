@@ -6,11 +6,12 @@
 [![CI](https://github.com/spytensor/CoreRoom/actions/workflows/ci.yml/badge.svg)](https://github.com/spytensor/CoreRoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![CoreRoom startup dashboard](docs/images/boot-dashboard.png)
+![CoreRoom live room — real terminal capture, v0.9.12](docs/images/live-room.png)
 
-![CoreRoom role work cards](docs/images/work-cards.png)
-
-![CoreRoom full-screen engineering console preview](docs/images/control-room-console.png)
+> Real terminal capture (iTerm2 on macOS, v0.9.12). The image is what
+> `cr` looks like on a fresh project: the live room takes over the
+> full screen K9s-style, the right rail shows the standby Team
+> roster, and the bottom hint row stays context-aware.
 
 > **Status: v0.9.8 — user-runnable, still pre-1.0.** Claude Code,
 > Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom

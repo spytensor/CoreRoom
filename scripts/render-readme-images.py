@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Render the PNG screenshots embedded in README.md.
+"""DEPRECATED since v0.9.13.
+
+This Pillow-based renderer used to generate the README screenshots
+(`docs/images/boot-dashboard.png`, `work-cards.png`,
+`control-room-console.png`). As of v0.9.13 the README hero is a real
+terminal capture at `docs/images/live-room.png` and this script is no
+longer driven by CI, `make readme-images`, or the release flow.
+
+The renderer is kept on disk for archival reference and for producing
+one-off design mockups when a real capture is impractical. Do not run
+it for the README — replace `live-room.png` with a fresh real capture
+from a current `cr` session instead. See CLAUDE.md > "README Images".
+
+Original docstring follows:
+
+Render the PNG screenshots embedded in README.md.
 
 The images are intentionally synthetic terminal compositions. They keep the
 README stable and reproducible without requiring a live TUI, VHS, freeze, or a
