@@ -31,8 +31,8 @@ use crate::console_layout::{compute_console_layout, RightRailSection};
 use crate::console_navigation::{visible_rows, ConsoleNavigator, ConsoleView, ConsoleVisibleRow};
 use crate::console_overview::{build_console_overview, ConsoleOverview, OverviewPulse};
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, StatusState,
-    WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, HealthSeverity, InternalDelegationState, RoleLaneState,
+    StatusState, WorkLifecycle,
 };
 use crate::role_avatar::{role_label, RoleAvatarPack};
 
@@ -289,13 +289,7 @@ fn render_body(
 
     render_center(frame, chunks[0], snapshot, navigator, avatar_pack);
     if let Some(rail) = right_rail.filter(|_| has_rail) {
-        render_right_rail(
-            frame,
-            chunks[1],
-            rail,
-            &snapshot.runtime.host_role,
-            avatar_pack,
-        );
+        render_right_rail(frame, chunks[1], rail);
     }
 }
 
@@ -509,6 +503,8 @@ fn render_room_workspace(
 ) {
     let panel = build_live_room_conversation(snapshot);
     let mut lines = Vec::new();
+    lines.extend(current_turn_lines(snapshot, avatar_pack));
+    lines.push(Line::raw(""));
     lines.push(Line::from(vec![
         Span::styled("Public transcript: ", label_style()),
         Span::raw("@user <-> @"),
@@ -585,25 +581,19 @@ fn render_right_rail(
     frame: &mut Frame<'_>,
     area: Rect,
     rail: &crate::console_layout::RightRailViewModel,
-    host_role: &str,
-    avatar_pack: RoleAvatarPack,
 ) {
     let items = rail
         .sections
         .iter()
-        .flat_map(|section| section_to_items(section, host_role, avatar_pack))
+        .flat_map(section_to_items)
         .collect::<Vec<_>>();
     frame.render_widget(
-        List::new(items).block(Block::default().borders(Borders::ALL).title("Control Rail")),
+        List::new(items).block(Block::default().borders(Borders::ALL).title("Status")),
         area,
     );
 }
 
-fn section_to_items(
-    section: &RightRailSection,
-    host_role: &str,
-    avatar_pack: RoleAvatarPack,
-) -> Vec<ListItem<'static>> {
+fn section_to_items(section: &RightRailSection) -> Vec<ListItem<'static>> {
     let mut items = vec![ListItem::new(Line::from(vec![Span::styled(
         section.title.clone(),
         Style::default()
@@ -611,9 +601,11 @@ fn section_to_items(
             .add_modifier(Modifier::BOLD),
     )]))];
     for row in &section.rows {
-        let label = row_label_with_avatar(section, &row.label, host_role, avatar_pack);
         let mut spans = vec![
-            Span::styled(format!("  {label}"), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("  {}", row.label),
+                Style::default().fg(Color::White),
+            ),
             Span::raw(": "),
             status_value_span(&row.value, row.status),
         ];
@@ -627,6 +619,62 @@ fn section_to_items(
     }
     items.push(ListItem::new(Line::raw("")));
     items
+}
+
+fn current_turn_lines(
+    snapshot: &CoreRoomSnapshot,
+    avatar_pack: RoleAvatarPack,
+) -> Vec<Line<'static>> {
+    let Some(active_role) = snapshot.runtime.active_role.as_deref() else {
+        return vec![Line::from(vec![
+            Span::styled("Current turn: ", label_style()),
+            Span::styled("none", Style::default().fg(Color::DarkGray)),
+        ])];
+    };
+    let role = snapshot
+        .runtime
+        .roles
+        .iter()
+        .find(|role| role.role == active_role);
+    let mut header = vec![
+        Span::styled("Current turn: ", label_style()),
+        Span::styled(
+            role_label(active_role, &snapshot.runtime.host_role, avatar_pack),
+            Style::default().fg(Color::Cyan),
+        ),
+    ];
+    if let Some(role) = role {
+        header.push(Span::styled(
+            format!(" · {}", role_lane_state_label(role.state)),
+            status_style(status_for_role_lane(role.state, role.waiting_approval)),
+        ));
+        if let Some(work_order) = &role.current_work_order {
+            header.push(Span::styled(
+                format!(" · {work_order}"),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        if let Some(gate) = &role.current_gate_phase {
+            header.push(Span::styled(
+                format!(" · gate: {gate}"),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        if role.waiting_approval {
+            header.push(Span::styled(
+                " · approval pending",
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+    }
+    let mut lines = vec![Line::from(header)];
+    if let Some(activity) = role.and_then(|role| role.last_activity.as_ref()) {
+        lines.push(Line::from(vec![
+            Span::styled("Next signal: ", label_style()),
+            Span::raw(activity.clone()),
+        ]));
+    }
+    lines
 }
 
 fn render_footer(
@@ -768,20 +816,6 @@ fn row_primary_with_avatar(
     }
 }
 
-fn row_label_with_avatar(
-    section: &RightRailSection,
-    label: &str,
-    host_role: &str,
-    avatar_pack: RoleAvatarPack,
-) -> String {
-    if section.kind == crate::console_layout::RightRailSectionKind::ActiveRoles {
-        if let Some(role) = label.strip_prefix('@') {
-            return role_label(role, host_role, avatar_pack);
-        }
-    }
-    label.to_owned()
-}
-
 fn wrap_body(body: &str) -> Vec<Line<'_>> {
     body.lines()
         .map(|line| Line::from(vec![Span::raw(format!("  {line}"))]))
@@ -792,6 +826,33 @@ fn label_style() -> Style {
     Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD)
+}
+
+fn role_lane_state_label(state: RoleLaneState) -> &'static str {
+    match state {
+        RoleLaneState::Enabled => "enabled",
+        RoleLaneState::Idle => "idle",
+        RoleLaneState::Working => "working",
+        RoleLaneState::Reviewing => "reviewing",
+        RoleLaneState::Blocked => "blocked",
+        RoleLaneState::WaitingUser => "waiting-user",
+        RoleLaneState::WaitingApproval => "waiting-approval",
+        RoleLaneState::StaleSession => "stale-session",
+    }
+}
+
+fn status_for_role_lane(state: RoleLaneState, waiting_approval: bool) -> StatusState {
+    if waiting_approval {
+        return StatusState::Warn;
+    }
+    match state {
+        RoleLaneState::Blocked | RoleLaneState::StaleSession => StatusState::Blocking,
+        RoleLaneState::Working
+        | RoleLaneState::Reviewing
+        | RoleLaneState::WaitingUser
+        | RoleLaneState::WaitingApproval => StatusState::Warn,
+        RoleLaneState::Enabled | RoleLaneState::Idle => StatusState::Ok,
+    }
 }
 
 fn is_exit_key(code: KeyCode) -> bool {

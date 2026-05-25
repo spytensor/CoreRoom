@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::console_health::overview_health_signals;
 use crate::console_snapshot::{
-    CoreRoomSnapshot, DirtyState, EvidenceClosureState, HealthSeverity, RoleLaneState,
-    SourceHealthState, StatusState, WorkLifecycle,
+    CoreRoomSnapshot, DirtyState, EvidenceClosureState, HealthSeverity, SourceHealthState,
+    StatusState, WorkLifecycle,
 };
 
 /// Supported console breakpoint.
@@ -139,8 +139,8 @@ pub enum RightRailSectionKind {
     Environment,
     /// Dirty state, PRs, issues, and failing checks.
     Changes,
-    /// Active/attention-needing role lanes.
-    ActiveRoles,
+    /// Project-level blockers and gated next actions.
+    Blockers,
     /// Evidence closure status.
     Evidence,
     /// Source health status.
@@ -156,7 +156,7 @@ impl RightRailSectionKind {
             Self::ProgressWork => "progress-work",
             Self::Environment => "environment",
             Self::Changes => "changes",
-            Self::ActiveRoles => "active-roles",
+            Self::Blockers => "blockers",
             Self::Evidence => "evidence",
             Self::Sources => "sources",
             Self::Alerts => "alerts",
@@ -502,12 +502,12 @@ fn right_rail_sections(
 ) -> Vec<RightRailSection> {
     let mut sections = Vec::new();
     push_if_nonempty(&mut sections, progress_section(snapshot, breakpoint));
-    push_if_nonempty(&mut sections, environment_section(snapshot));
-    push_if_nonempty(&mut sections, changes_section(snapshot));
-    push_if_nonempty(&mut sections, active_roles_section(snapshot, breakpoint));
+    push_if_nonempty(&mut sections, blockers_section(snapshot, breakpoint));
     push_if_nonempty(&mut sections, evidence_section(snapshot, breakpoint));
     push_if_nonempty(&mut sections, sources_section(snapshot, breakpoint));
     push_if_nonempty(&mut sections, alerts_section(snapshot, breakpoint));
+    push_if_nonempty(&mut sections, environment_section(snapshot));
+    push_if_nonempty(&mut sections, changes_section(snapshot));
     sections
 }
 
@@ -657,51 +657,77 @@ fn changes_section(snapshot: &CoreRoomSnapshot) -> RightRailSection {
     }
 }
 
-fn active_roles_section(
+fn blockers_section(
     snapshot: &CoreRoomSnapshot,
     breakpoint: ConsoleBreakpoint,
 ) -> RightRailSection {
-    let mut rows = vec![row(
-        "enabled",
-        snapshot
-            .runtime
-            .roles
-            .iter()
-            .filter(|role| role.enabled)
-            .count()
-            .to_string(),
-        None,
-        None,
-        Some(format!("@{}", snapshot.runtime.host_role)),
-    )];
+    let mut rows = snapshot
+        .work
+        .iter()
+        .filter(|work| {
+            matches!(
+                work.lifecycle,
+                WorkLifecycle::Blocked
+                    | WorkLifecycle::FailedCi
+                    | WorkLifecycle::MergedTrackerStale
+            )
+        })
+        .map(|work| {
+            row(
+                work.id.clone(),
+                work.title.clone(),
+                Some(StatusState::Blocking),
+                Some(blocking_work_action(work.lifecycle).to_owned()),
+                work.github_issue.map(|issue| format!("issue:#{issue}")),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    rows.extend(snapshot.gates.iter().filter_map(|gate| {
+        gate.blocked_reason.as_ref().map(|reason| {
+            row(
+                gate.work_order.clone(),
+                reason.clone(),
+                Some(StatusState::Blocking),
+                Some(format!("clear {} gate", gate.current_phase)),
+                (!gate.missing_reviews.is_empty())
+                    .then(|| format!("missing reviews: {}", gate.missing_reviews.join(", "))),
+            )
+        })
+    }));
+
     rows.extend(
         snapshot
             .runtime
             .roles
             .iter()
             .filter(|role| {
-                role.role == snapshot.runtime.host_role
-                    || !matches!(role.state, RoleLaneState::Enabled | RoleLaneState::Idle)
-                    || role.waiting_approval
+                role.waiting_approval || role.permission_mode.as_deref() == Some("bypass")
             })
-            .take(row_limit(breakpoint))
             .map(|role| {
+                let label = role
+                    .current_work_order
+                    .clone()
+                    .unwrap_or_else(|| "role policy".to_owned());
+                let value = if role.waiting_approval {
+                    format!("@{} waiting approval", role.role)
+                } else {
+                    format!("@{} bypass enabled", role.role)
+                };
                 row(
-                    format!("@{}", role.role),
-                    role_state_label(role.state),
-                    Some(role_status(
-                        role.state,
-                        role.waiting_approval,
-                        role.permission_mode.as_deref(),
-                    )),
+                    label,
+                    value,
+                    Some(StatusState::Warn),
                     role.last_activity.clone(),
-                    role.current_work_order.clone(),
+                    role.current_gate_phase.clone(),
                 )
             }),
     );
+
+    rows.truncate(row_limit(breakpoint));
     RightRailSection {
-        kind: RightRailSectionKind::ActiveRoles,
-        title: "Roles".to_owned(),
+        kind: RightRailSectionKind::Blockers,
+        title: "Blockers".to_owned(),
         rows,
     }
 }
@@ -876,34 +902,12 @@ fn dirty_state(state: DirtyState) -> StatusState {
     }
 }
 
-fn role_state_label(state: RoleLaneState) -> &'static str {
-    match state {
-        RoleLaneState::Enabled => "enabled",
-        RoleLaneState::Idle => "idle",
-        RoleLaneState::Working => "working",
-        RoleLaneState::Reviewing => "reviewing",
-        RoleLaneState::Blocked => "blocked",
-        RoleLaneState::WaitingUser => "waiting-user",
-        RoleLaneState::WaitingApproval => "waiting-approval",
-        RoleLaneState::StaleSession => "stale-session",
-    }
-}
-
-fn role_status(
-    state: RoleLaneState,
-    waiting_approval: bool,
-    permission_mode: Option<&str>,
-) -> StatusState {
-    if permission_mode == Some("bypass") || waiting_approval {
-        return StatusState::Warn;
-    }
-    match state {
-        RoleLaneState::Blocked | RoleLaneState::StaleSession => StatusState::Blocking,
-        RoleLaneState::WaitingUser
-        | RoleLaneState::WaitingApproval
-        | RoleLaneState::Working
-        | RoleLaneState::Reviewing => StatusState::Warn,
-        RoleLaneState::Enabled | RoleLaneState::Idle => StatusState::Ok,
+fn blocking_work_action(lifecycle: WorkLifecycle) -> &'static str {
+    match lifecycle {
+        WorkLifecycle::FailedCi => "fix failing checks before review can proceed",
+        WorkLifecycle::Blocked => "clear blocker before claiming progress",
+        WorkLifecycle::MergedTrackerStale => "update tracker evidence before closure",
+        _ => "advance WorkOrder status",
     }
 }
 
