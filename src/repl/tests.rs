@@ -4,7 +4,7 @@ use super::render::{render_event_line, render_event_line_at_width, summarize_too
 use super::show::{filter_show_events, normalize_show_event};
 use super::splash::{
     join_cells, load_splash_content, pick_release, plain_cell, render_home_at_width, splash_bottom,
-    splash_columns, splash_pair, splash_top, styled_cell,
+    splash_columns, splash_pair, splash_top, styled_cell, SplashFrame,
 };
 use super::status::{StatusRegion, StatusSlot, SPINNER_FRAMES};
 use super::text::truncate_inline;
@@ -632,6 +632,7 @@ fn snapshot_boot_dashboard_at_80() {
         false,
         80,
         Some("Ada"),
+        SplashFrame::Framed,
     ))
     .trim_start_matches('\n')
     .to_owned();
@@ -640,9 +641,9 @@ fn snapshot_boot_dashboard_at_80() {
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
-│ ● @backend   cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
-│ ● @host      cc     · 1M · ask          • /journal <role> captures today's … │
-│ ● @security  codex  · default · bypass                                       │
+│ ◇ @backend   cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
+│ ◉ @host      cc     · 1M · ask          • /journal <role> captures today's … │
+│ ◆ @security  codex  · default · bypass                                       │
 │                                         what's new in 0.9.8                  │
 │  3.3k  base tokens loaded               • plain cr now opens the executable… │
 │ /repo/CoreRoom                          • fake-engine dogfood proves stream… │
@@ -678,9 +679,45 @@ fn boot_dashboard_shows_active_gate_phase() {
         false,
         80,
         Some("Ada"),
+        SplashFrame::Framed,
     ));
 
     assert!(rendered.contains("gate thread-1 · phase plan"));
+}
+
+#[test]
+fn snapshot_boot_dashboard_frameless_at_80() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = splash_snapshot_config();
+    let rendered = strip_ansi(&render_home_at_width(
+        &cfg,
+        tmp.path(),
+        Path::new("/repo/CoreRoom"),
+        false,
+        80,
+        Some("Ada"),
+        SplashFrame::Frameless,
+    ))
+    .trim_start_matches('\n')
+    .to_owned();
+    // Frameless splash has neither a box border nor the
+    // `CoreRoom v{x}` title (the live-room chrome owns both).
+    assert!(!rendered.contains('┌'), "rendered:\n{rendered}");
+    assert!(!rendered.contains('└'), "rendered:\n{rendered}");
+    assert!(!rendered.contains('│'), "rendered:\n{rendered}");
+    assert!(!rendered.contains("CoreRoom v"), "rendered:\n{rendered}");
+    // The path is also identity material owned by chrome.
+    assert!(
+        !rendered.contains("/repo/CoreRoom"),
+        "rendered:\n{rendered}"
+    );
+    // The role roster and tips still appear.
+    assert!(rendered.contains("◇ @backend"), "rendered:\n{rendered}");
+    assert!(rendered.contains("◉ @host"), "rendered:\n{rendered}");
+    assert!(
+        rendered.contains("tips for getting started"),
+        "rendered:\n{rendered}"
+    );
 }
 
 #[test]

@@ -1353,6 +1353,7 @@ fn run_start(
             permission_mode_override: yolo.then_some(PermissionMode::Bypass),
             fresh,
             allow_large_priors,
+            frameless_splash: false,
         };
         coreroom::repl::run_with_options(&project_root, options).await
     })

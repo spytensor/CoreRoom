@@ -60,6 +60,7 @@ pub mod room_io_tui;
 pub mod source_graph;
 pub mod source_registry;
 pub mod tracker;
+pub mod tui_style;
 pub mod turn;
 pub mod update;
 mod work;
