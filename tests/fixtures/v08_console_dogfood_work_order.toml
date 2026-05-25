@@ -31,3 +31,24 @@ requiredEvidence = [
 ]
 trackerIssue = 238
 trackerCheckbox = "#251 - v0.8: End-to-end console data plane dogfood validation"
+
+[[roleGrants]]
+role = "backend"
+access = "write"
+scopes = ["src/console_snapshot.rs", "src/console_projection.rs"]
+source = "issue:#362"
+reason = "Scoped implementation grant for WorkOrder grant data-plane changes."
+
+[[roleGrants]]
+role = "frontend"
+access = "write"
+scopes = ["src/console_views.rs"]
+source = "issue:#362"
+reason = "Scoped implementation grant for status view projection changes."
+
+[[roleGrants]]
+role = "reviewer"
+access = "read-review"
+scopes = ["schema-review", "evidence-review"]
+source = "issue:#362"
+reason = "Reviewer-only participation; no write access."

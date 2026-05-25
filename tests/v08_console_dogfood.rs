@@ -4,7 +4,7 @@ use coreroom::console_health::overview_health_signals;
 use coreroom::console_layout::{compute_console_layout, RightRailSectionKind};
 use coreroom::console_snapshot::{ConversationVisibility, CoreRoomSnapshot, WorkLifecycle};
 use coreroom::evidence_packet::{EvidencePacket, EvidenceStatus};
-use coreroom::work_order::{WorkOrder, WorkOrderStatus};
+use coreroom::work_order::{WorkOrder, WorkOrderRoleAccess, WorkOrderStatus};
 
 #[test]
 fn v08_console_dogfood_flow_is_structurally_complete() {
@@ -24,6 +24,14 @@ fn v08_console_dogfood_flow_is_structurally_complete() {
     assert_eq!(work_order.status, WorkOrderStatus::Closed);
     assert_eq!(work_order.acceptance_criteria.len(), 8);
     assert_eq!(work_order.pull_request, Some(280));
+    assert!(work_order
+        .role_grants
+        .iter()
+        .any(|grant| grant.role == "backend" && grant.access == WorkOrderRoleAccess::Write));
+    assert!(work_order
+        .role_grants
+        .iter()
+        .any(|grant| grant.role == "reviewer" && grant.access == WorkOrderRoleAccess::ReadReview));
 
     snapshot.validate().expect("snapshot validates");
     assert_eq!(snapshot.project.tracker_issue, 238);

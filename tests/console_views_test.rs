@@ -74,6 +74,13 @@ fn workorders_view_preserves_issue_branch_pr_status_and_owner_roles() {
     assert_eq!(row.tracker_state, StatusState::Warn);
     assert!(row.owner_roles.contains(&"@host".to_owned()));
     assert!(row.owner_roles.contains(&"@reviewer".to_owned()));
+    assert!(row.escalated_roles.contains(&"@backend".to_owned()));
+    assert!(row.escalated_roles.contains(&"@frontend".to_owned()));
+    assert!(!row.escalated_roles.contains(&"@reviewer".to_owned()));
+    assert!(row
+        .role_grants
+        .iter()
+        .any(|grant| grant.role == "reviewer" && grant.access.label() == "read-review"));
     assert!(row.citations.contains(&"tracker:#238".to_owned()));
 }
 

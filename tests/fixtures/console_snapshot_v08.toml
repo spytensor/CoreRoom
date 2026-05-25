@@ -174,6 +174,34 @@ trackerState = "warn"
 lifecycle = "in-progress"
 sourceCitations = ["tracker:#238", "issue:#242", "amendment:A-019"]
 
+[[work.roleGrants]]
+role = "backend"
+access = "write"
+scopes = ["src/console_snapshot.rs", "tests/console_snapshot_test.rs"]
+source = "issue:#362"
+reason = "Scoped implementation grant for snapshot model changes."
+
+[[work.roleGrants]]
+role = "frontend"
+access = "write"
+scopes = ["src/console_views.rs"]
+source = "issue:#362"
+reason = "Scoped implementation grant for status view changes."
+
+[[work.roleGrants]]
+role = "security"
+access = "read-review"
+scopes = ["security-review"]
+source = "issue:#362"
+reason = "Default specialist read/review participation; no write grant."
+
+[[work.roleGrants]]
+role = "reviewer"
+access = "read-review"
+scopes = ["schema-review"]
+source = "issue:#362"
+reason = "Reviewer-only participant; no implementation access."
+
 [[work]]
 id = "WO-0241"
 title = "Update AI worker protocol and tracker evidence rules"

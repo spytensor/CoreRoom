@@ -76,6 +76,7 @@ pub fn snapshot_from_project(project_root: &Path) -> Result<CoreRoomSnapshot> {
                 "local:.coreroom/config.toml".to_owned(),
                 "git:HEAD".to_owned(),
             ],
+            role_grants: Vec::new(),
         }],
         gates: vec![GateSnapshot {
             work_order: "WO-0000".to_owned(),

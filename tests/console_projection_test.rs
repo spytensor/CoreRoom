@@ -15,7 +15,9 @@ use coreroom::github_status::{
 use coreroom::source_graph::{SourceGraphFinding, SourceGraphFindingKind};
 use coreroom::source_registry::SourceTrustLevel;
 use coreroom::tracker::TrackerEntryState;
-use coreroom::work_order::{RequiredEvidence, WorkOrder, WorkOrderStatus};
+use coreroom::work_order::{
+    RequiredEvidence, WorkOrder, WorkOrderRoleAccess, WorkOrderRoleGrant, WorkOrderStatus,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +54,9 @@ fn work_projection_preserves_status_fields_across_fixture_cases() {
         assert_eq!(row.tracker_state, case.expected_tracker, "{}", case.name);
         assert_eq!(row.phase.as_deref(), Some("v0.8"));
         assert_eq!(row.epic.as_deref(), Some("console-projections"));
+        assert_eq!(row.role_grants.len(), 1);
+        assert_eq!(row.role_grants[0].role, "backend");
+        assert_eq!(row.role_grants[0].access, WorkOrderRoleAccess::Write);
         assert!(!row.source_citations.is_empty());
     }
 }
@@ -136,6 +141,13 @@ fn work_order(name: &str) -> WorkOrder {
         status: WorkOrderStatus::InReview,
         acceptance_criteria: vec!["project facts".to_owned()],
         required_evidence: vec![RequiredEvidence::Validation],
+        role_grants: vec![WorkOrderRoleGrant {
+            role: "backend".to_owned(),
+            access: WorkOrderRoleAccess::Write,
+            scopes: vec!["src/console_projection.rs".to_owned()],
+            source: "issue:#362".to_owned(),
+            reason: "Projection implementation grant.".to_owned(),
+        }],
         tracker_issue: Some(238),
         tracker_checkbox: Some("#247".to_owned()),
     }

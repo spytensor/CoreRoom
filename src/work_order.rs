@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::COREROOM_DIR;
+use crate::config::{Config, COREROOM_DIR};
 
 /// Subdirectory inside `.coreroom/` that stores project WorkOrders.
 pub const WORK_ORDERS_DIR: &str = "work-orders";
@@ -124,6 +124,62 @@ impl RequiredEvidence {
     }
 }
 
+/// WorkOrder-scoped role access granted by `@host`/tracker evidence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkOrderRoleAccess {
+    /// Role may read, review, and advise without mutating project files.
+    ReadReview,
+    /// Role may make scoped implementation changes for this WorkOrder.
+    Write,
+}
+
+impl WorkOrderRoleAccess {
+    /// Stable label used in persisted files and status cards.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ReadReview => "read-review",
+            Self::Write => "write",
+        }
+    }
+}
+
+/// Explicit role grant for one WorkOrder.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkOrderRoleGrant {
+    /// Role name without leading `@`.
+    pub role: String,
+    /// Access level granted for this WorkOrder.
+    pub access: WorkOrderRoleAccess,
+    /// Scoped paths, areas, or capabilities covered by the grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    /// Auditable source/reference for the grant.
+    pub source: String,
+    /// Human reason for the grant.
+    pub reason: String,
+}
+
+impl WorkOrderRoleGrant {
+    /// Validate grant structure without consulting project config.
+    pub fn validate(&self) -> Result<()> {
+        ensure_nonempty("roleGrants.role", &self.role)?;
+        if self.role.starts_with('@') {
+            bail!("roleGrants.role must omit leading `@`");
+        }
+        ensure_nonempty("roleGrants.source", &self.source)?;
+        ensure_nonempty("roleGrants.reason", &self.reason)?;
+        for scope in &self.scopes {
+            ensure_nonempty("roleGrants.scopes[]", scope)?;
+        }
+        if self.access == WorkOrderRoleAccess::Write && self.scopes.is_empty() {
+            bail!("write role grants require at least one scope");
+        }
+        Ok(())
+    }
+}
+
 /// Input that `@host` uses to draft a WorkOrder after intent classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkOrderDraft {
@@ -214,6 +270,9 @@ pub struct WorkOrder {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub required_evidence: Vec<RequiredEvidence>,
+    /// Explicit role grants scoped to this WorkOrder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_grants: Vec<WorkOrderRoleGrant>,
     /// Tracker issue number, if this WorkOrder belongs to a milestone tracker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracker_issue: Option<u64>,
@@ -259,6 +318,7 @@ impl WorkOrder {
             status: WorkOrderStatus::Draft,
             acceptance_criteria: draft.acceptance_criteria,
             required_evidence,
+            role_grants: Vec::new(),
             tracker_issue: draft.tracker_issue,
             tracker_checkbox: draft.tracker_checkbox,
         };
@@ -287,8 +347,26 @@ impl WorkOrder {
         if self.required_evidence.is_empty() {
             bail!("WorkOrder requiredEvidence cannot be empty");
         }
+        for grant in &self.role_grants {
+            grant.validate()?;
+        }
         if self.tracker_checkbox.is_some() && self.tracker_issue.is_none() {
             bail!("trackerCheckbox requires trackerIssue");
+        }
+        Ok(())
+    }
+
+    /// Validate role grants against project role configuration.
+    pub fn validate_with_config(&self, config: &Config) -> Result<()> {
+        self.validate()?;
+        for grant in &self.role_grants {
+            if grant.role != config.host_role && !config.roles.contains_key(&grant.role) {
+                bail!(
+                    "roleGrants role `{}` is not configured for WorkOrder {}",
+                    grant.role,
+                    self.id
+                );
+            }
         }
         Ok(())
     }
@@ -343,6 +421,24 @@ impl WorkOrder {
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(out, "requiredEvidence: {evidence}");
+        let grants = if self.role_grants.is_empty() {
+            "none".to_owned()
+        } else {
+            self.role_grants
+                .iter()
+                .map(|grant| {
+                    format!(
+                        "@{} {} scopes=[{}] source={}",
+                        grant.role,
+                        grant.access.label(),
+                        grant.scopes.join(", "),
+                        grant.source
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+        let _ = writeln!(out, "roleGrants: {grants}");
         out
     }
 }
