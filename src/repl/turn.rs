@@ -257,7 +257,9 @@ pub(super) async fn drain_one_turn(
                 let request_input = request_sink.request.input.clone();
                 status.mark_waiting_approval(&request_role, &request_tool, &request_input);
                 status.clear();
-                if let Err(error) = permission_prompt::handle_request(request_sink, host_role).await {
+                if let Err(error) =
+                    permission_prompt::handle_request(request_sink, host_role, sink.as_ref()).await
+                {
                     room_io::emit_bad(sink.as_ref(), format!("permission prompt failed: {error:#}"));
                 }
                 status.clear_waiting_approval(&request_role);

@@ -29,7 +29,6 @@
 //! for the same tool — `crate::permissions::decide_tool` short-circuits
 //! via the persisted policy before the bridge fires.
 
-use std::io::Write as _;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -45,6 +44,7 @@ use crate::output;
 use crate::permissions::{
     BridgeRequest, BridgeRequestSink, BridgeResponse, DecisionScope, PermissionDecision,
 };
+use crate::room_io::{RoomEvent, RoomSink};
 
 /// Largest input preview length, in displayable characters, before we
 /// truncate with `…`. Chosen to fit comfortably on an 80-col terminal
@@ -60,9 +60,13 @@ const KEYPRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Paint the prompt for `request`, read one keypress, and send the
 /// decision back through `request.responder`. Always sends a response —
 /// either the parsed decision or a deny — even if rendering fails.
-pub(super) async fn handle_request(sink: BridgeRequestSink, host_role: &str) -> Result<()> {
-    let BridgeRequestSink { request, responder } = sink;
-    paint_prompt(&request, host_role);
+pub(super) async fn handle_request(
+    request_sink: BridgeRequestSink,
+    host_role: &str,
+    room_sink: &dyn RoomSink,
+) -> Result<()> {
+    let BridgeRequestSink { request, responder } = request_sink;
+    paint_prompt(room_sink, &request, host_role);
 
     let response = match read_decision_keypress().await {
         Ok(Some(response)) => response,
@@ -72,7 +76,7 @@ pub(super) async fn handle_request(sink: BridgeRequestSink, host_role: &str) -> 
             BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
         }
     };
-    paint_outcome(&request.role, host_role, &response);
+    paint_outcome(room_sink, &request.role, host_role, &response);
     responder.respond(response);
     Ok(())
 }
@@ -82,9 +86,13 @@ pub(super) async fn handle_request(sink: BridgeRequestSink, host_role: &str) -> 
 /// reads the keypress on the current thread. The terminal must already
 /// be in raw mode — both the input loop's [`super::input::RawModeGuard`]
 /// and this prompt's keypress reader share the same raw-mode session.
-pub(super) fn handle_request_blocking(sink: BridgeRequestSink, host_role: &str) {
-    let BridgeRequestSink { request, responder } = sink;
-    paint_prompt(&request, host_role);
+pub(super) fn handle_request_blocking(
+    request_sink: BridgeRequestSink,
+    host_role: &str,
+    room_sink: &dyn RoomSink,
+) {
+    let BridgeRequestSink { request, responder } = request_sink;
+    paint_prompt(room_sink, &request, host_role);
     let response = match read_decision_keypress_blocking_in_raw() {
         Ok(Some(response)) => response,
         Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
@@ -93,7 +101,7 @@ pub(super) fn handle_request_blocking(sink: BridgeRequestSink, host_role: &str) 
             BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
         }
     };
-    paint_outcome(&request.role, host_role, &response);
+    paint_outcome(room_sink, &request.role, host_role, &response);
     responder.respond(response);
 }
 
@@ -104,14 +112,11 @@ fn read_decision_keypress_blocking_in_raw() -> Result<Option<BridgeResponse>> {
     read_decision_keypress_loop(|| true)
 }
 
-fn paint_prompt(request: &BridgeRequest, host_role: &str) {
-    // print + flush, NOT println — the outcome line uses `\r\x1b[2K` to
-    // overwrite this row in place. A trailing newline here would move
-    // the cursor to the next row and the outcome would land *below*
-    // the prompt instead of replacing it.
-    let width = crossterm::terminal::size().map_or(80, |(c, _)| usize::from(c));
-    print!("{}", format_prompt_line(request, host_role, width));
-    let _ = std::io::stdout().flush();
+fn paint_prompt(sink: &dyn RoomSink, request: &BridgeRequest, host_role: &str) {
+    sink.emit(RoomEvent::PermissionPrompt {
+        request: request.clone(),
+        host_role: host_role.to_owned(),
+    });
 }
 
 /// Pure formatter for the one-line prompt — used by paint_prompt and
@@ -127,7 +132,7 @@ fn paint_prompt(request: &BridgeRequest, host_role: &str) {
 /// inside one row: when the choices ribbon plus the role/tool prefix
 /// crowd the terminal, the tool-input summary is shortened so the
 /// total stays under the budget.
-fn format_prompt_line(request: &BridgeRequest, host_role: &str, width: usize) -> String {
+pub(super) fn format_prompt_line(request: &BridgeRequest, host_role: &str, width: usize) -> String {
     let role_paint = output::role_color(&request.role, host_role);
     let gutter = "▎".with(role_paint);
     let role_label = format!("@{}", request.role).with(role_paint).bold();
@@ -174,18 +179,12 @@ fn format_prompt_line(request: &BridgeRequest, host_role: &str, width: usize) ->
     )
 }
 
-fn paint_outcome(role: &str, host_role: &str, response: &BridgeResponse) {
-    if let Some(line) = format_outcome_line(role, host_role, response) {
-        // `\r\x1b[2K` returns to col 0 and clears the prompt line;
-        // denials then write a self-attributing event and advance.
-        println!("\r\x1b[2K{line}");
-    } else {
-        // Allow decisions are deliberately silent in the live stream.
-        // Clear the pending prompt row and let the surrounding status
-        // repaint fill the line if a role is still working.
-        print!("\r\x1b[2K");
-        let _ = std::io::stdout().flush();
-    }
+fn paint_outcome(sink: &dyn RoomSink, role: &str, host_role: &str, response: &BridgeResponse) {
+    sink.emit(RoomEvent::PermissionOutcome {
+        role: role.to_owned(),
+        host_role: host_role.to_owned(),
+        response: response.clone(),
+    });
 }
 
 /// Pure formatter for the one-line outcome echo — same testability
@@ -193,7 +192,11 @@ fn paint_outcome(role: &str, host_role: &str, response: &BridgeResponse) {
 /// return `None` because the default live surface keeps them audit-only;
 /// session-scoped decisions and denials remain visible and self-attributing in
 /// plain-text capture (`cr ... | tee`) and on terminals without truecolor.
-fn format_outcome_line(role: &str, host_role: &str, response: &BridgeResponse) -> Option<String> {
+pub(super) fn format_outcome_line(
+    role: &str,
+    host_role: &str,
+    response: &BridgeResponse,
+) -> Option<String> {
     if response.decision == PermissionDecision::Allow && response.scope == DecisionScope::Once {
         return None;
     }

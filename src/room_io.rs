@@ -18,12 +18,13 @@
 //! actually emits today. Variants are added as call sites are migrated;
 //! the trait stays additive so an in-progress port never breaks `cr start`.
 
-use std::io::{IsTerminal, Write as _};
+use std::io::{self, IsTerminal, Write as _};
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::crep::CrepEvent;
 use crate::output::work_card::WorkCard;
+use crate::permissions::{BridgeRequest, BridgeResponse};
 
 /// One observable event from the runtime headed for the user.
 ///
@@ -66,6 +67,26 @@ pub enum RoomEvent {
     WorkCard(WorkCard),
     /// A structured in-place status spinner update.
     Spinner(SpinnerSnapshot),
+    /// A permission prompt that asks the user to approve one tool call.
+    /// The keystroke read remains owned by `permission_prompt`; this
+    /// event only models the visible prompt row.
+    PermissionPrompt {
+        /// Tool approval request received through the permission bridge.
+        request: BridgeRequest,
+        /// Host role name at emit time, used to color the requesting role.
+        host_role: String,
+    },
+    /// The visible result of a permission prompt decision. Allow-once
+    /// decisions intentionally clear the pending row without printing
+    /// durable text; other decisions render an attributed outcome line.
+    PermissionOutcome {
+        /// Role whose tool request was answered.
+        role: String,
+        /// Host role name at emit time, used to color the requesting role.
+        host_role: String,
+        /// User decision returned to the permission bridge.
+        response: BridgeResponse,
+    },
 }
 
 /// Point-in-time state for the in-flight role spinner.
@@ -136,7 +157,12 @@ pub struct StdoutSink;
 
 impl RoomSink for StdoutSink {
     fn emit(&self, event: RoomEvent) {
-        let flush = matches!(&event, RoomEvent::Spinner(_));
+        let flush = matches!(
+            &event,
+            RoomEvent::Spinner(_)
+                | RoomEvent::PermissionPrompt { .. }
+                | RoomEvent::PermissionOutcome { .. }
+        );
         print!("{}", Self::render_to_string(&event));
         if flush {
             let _ = std::io::stdout().flush();
@@ -172,6 +198,22 @@ impl StdoutSink {
                 } else {
                     String::new()
                 }
+            }
+            RoomEvent::PermissionPrompt { request, host_role } => {
+                let mut out = Vec::new();
+                write_permission_prompt(&mut out, request, host_role, terminal_width())
+                    .expect("writing permission prompt to memory cannot fail");
+                String::from_utf8(out).expect("permission prompt is valid utf-8")
+            }
+            RoomEvent::PermissionOutcome {
+                role,
+                host_role,
+                response,
+            } => {
+                let mut out = Vec::new();
+                write_permission_outcome(&mut out, role, host_role, response)
+                    .expect("writing permission outcome to memory cannot fail");
+                String::from_utf8(out).expect("permission outcome is valid utf-8")
             }
         }
     }
@@ -224,6 +266,38 @@ pub fn emit_line(sink: &dyn RoomSink, text: impl Into<String>) {
     emit_banner(sink, text);
 }
 
+fn terminal_width() -> usize {
+    crossterm::terminal::size().map_or(80, |(columns, _)| usize::from(columns))
+}
+
+fn write_permission_prompt(
+    writer: &mut impl io::Write,
+    request: &BridgeRequest,
+    host_role: &str,
+    width: usize,
+) -> io::Result<()> {
+    write!(
+        writer,
+        "{}",
+        crate::repl::format_permission_prompt_line_for_sink(request, host_role, width)
+    )
+}
+
+fn write_permission_outcome(
+    writer: &mut impl io::Write,
+    role: &str,
+    host_role: &str,
+    response: &BridgeResponse,
+) -> io::Result<()> {
+    if let Some(line) =
+        crate::repl::format_permission_outcome_line_for_sink(role, host_role, response)
+    {
+        writeln!(writer, "\r\x1b[2K{line}")
+    } else {
+        write!(writer, "\r\x1b[2K")
+    }
+}
+
 /// Convenience constructor for an `Arc<dyn RoomSink>` pointing at
 /// `stdout`. Use this from `cr start` and any other code path that
 /// wants the legacy renderer.
@@ -238,7 +312,9 @@ mod tests {
     use crate::crep::{CrepEvent, StopReason};
     use crate::output;
     use crate::output::work_card::{Step, StepKind, WorkStatus};
+    use crate::permissions::{DecisionScope, PermissionDecision};
     use crossterm::style::{Color, Stylize};
+    use serde_json::json;
     use std::time::Duration;
 
     /// In-memory sink used by tests to capture emitted events without
@@ -450,5 +526,100 @@ mod tests {
             current_state: current_state.map(str::to_owned),
             paint,
         }
+    }
+
+    fn representative_permission_request() -> BridgeRequest {
+        BridgeRequest {
+            v: 1,
+            role: "backend".to_owned(),
+            tool: "Bash".to_owned(),
+            input: json!({
+                "command": "こんにちは世界 cargo test --workspace --all-features --locked -- --test-threads=4"
+            }),
+            reason: "Bash requires approval under permission_mode=ask".to_owned(),
+        }
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for inner in chars.by_ref() {
+                    if inner.is_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn stdout_sink_permission_prompt_matches_legacy_formatter_bytes() {
+        let request = representative_permission_request();
+        let host_role = "host";
+        let width = 80;
+        let expected =
+            crate::repl::format_permission_prompt_line_for_sink(&request, host_role, width);
+        let plain = strip_ansi(&expected);
+        let mut bytes = Vec::new();
+
+        write_permission_prompt(&mut bytes, &request, host_role, width)
+            .expect("write permission prompt bytes");
+
+        assert_eq!(bytes, expected.as_bytes());
+        assert!(plain.contains("▎"));
+        assert!(plain.contains("@backend"));
+        assert!(plain.contains("Bash"));
+        assert!(plain.contains("こんにちは世界"));
+        assert!(plain.contains('…'));
+        assert!(plain.contains("[a]llow once"));
+        assert!(plain.contains("[s]ession"));
+        assert!(plain.contains("[d]eny"));
+        assert!(plain.contains("[n]ever"));
+    }
+
+    #[test]
+    fn stdout_sink_permission_outcome_denied_matches_legacy_formatter_bytes() {
+        let response = BridgeResponse {
+            v: 1,
+            decision: PermissionDecision::Deny,
+            scope: DecisionScope::Once,
+            reason: "user denied (once)".to_owned(),
+        };
+        let expected_line =
+            crate::repl::format_permission_outcome_line_for_sink("backend", "host", &response)
+                .expect("denied outcome renders");
+        let expected = format!("\r\x1b[2K{expected_line}\n");
+        let plain = strip_ansi(&expected);
+        let mut bytes = Vec::new();
+
+        write_permission_outcome(&mut bytes, "backend", "host", &response)
+            .expect("write permission outcome bytes");
+
+        assert_eq!(bytes, expected.as_bytes());
+        assert!(plain.contains("▎"));
+        assert!(plain.contains("⊘"));
+        assert!(plain.contains("@backend"));
+        assert!(plain.contains("denied (once)"));
+    }
+
+    #[test]
+    fn stdout_sink_permission_allow_once_clears_prompt_without_echo() {
+        let response = BridgeResponse {
+            v: 1,
+            decision: PermissionDecision::Allow,
+            scope: DecisionScope::Once,
+            reason: "user allowed (once)".to_owned(),
+        };
+        let mut bytes = Vec::new();
+
+        write_permission_outcome(&mut bytes, "backend", "host", &response)
+            .expect("write permission allow-once outcome bytes");
+
+        assert_eq!(bytes, b"\r\x1b[2K");
     }
 }
