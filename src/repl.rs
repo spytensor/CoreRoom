@@ -57,6 +57,15 @@ use input::InputLine;
 use render::render_event;
 pub use show::{show_log, ShowOptions};
 use splash::{print_help, print_home};
+
+/// Crate-internal accessor used by [`crate::room_io::StdoutSink`] to
+/// render one CREP event into the same single-line string the legacy
+/// `cr start` path produces. Kept as a thin wrapper so the formatter
+/// itself stays `pub(super)` inside [`render`] and the only sanctioned
+/// caller outside `repl` is the sink layer.
+pub(crate) fn render_event_line_for_sink(event: &CrepEvent, host_role: &str) -> String {
+    render::render_event_line(event, host_role)
+}
 use turn::{drain_one_turn, CapturedTurn};
 use work::{render_card, TurnWork};
 
@@ -291,6 +300,19 @@ fn maybe_note_resumed_role(pending: &mut BTreeSet<String>, role: &str) {
 /// REPL entry point with explicit runtime options.
 #[allow(clippy::too_many_lines)]
 pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Result<()> {
+    run_with_options_and_sink(project_root, options, crate::room_io::stdout_sink()).await
+}
+
+/// REPL entry point with an explicit sink for visible events. `cr start`
+/// uses [`run_with_options`] which defaults to [`crate::room_io::StdoutSink`];
+/// a future TUI host calls this directly with its own sink so the same
+/// runtime drives the full-screen room without duplicated logic.
+#[allow(clippy::too_many_lines)]
+pub async fn run_with_options_and_sink(
+    project_root: &Path,
+    options: RunOptions,
+    sink: Arc<dyn crate::room_io::RoomSink>,
+) -> Result<()> {
     let coreroom_dir = project_root.join(COREROOM_DIR);
     let interactive_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if !coreroom_dir.exists() {
@@ -580,6 +602,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &role,
                     &cfg.host_role,
                     &last_ctrl_c,
+                    &sink,
                 )
                 .await;
             }
@@ -644,6 +667,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &cfg.host_role,
                     &last_ctrl_c,
                     &mut resumed_notice_pending,
+                    &sink,
                 )
                 .await?;
             }
@@ -677,6 +701,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                         &cfg.host_role,
                         &last_ctrl_c,
                         &mut resumed_notice_pending,
+                        &sink,
                     )
                     .await?;
                 }
@@ -695,6 +720,7 @@ pub async fn run_with_options(project_root: &Path, options: RunOptions) -> Resul
                     &cfg.host_role,
                     &last_ctrl_c,
                     &mut resumed_notice_pending,
+                    &sink,
                 )
                 .await?;
             }
@@ -889,6 +915,7 @@ async fn send_and_drain(
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
     resumed_notice_pending: &mut BTreeSet<String>,
+    sink: &Arc<dyn crate::room_io::RoomSink>,
 ) -> Result<()> {
     // Pre-flight: validate any `@./img.png` style image refs the user
     // typed. Missing files, oversized images, or unsupported formats
@@ -924,6 +951,7 @@ async fn send_and_drain(
             &current.thread_id,
             host_role,
             last_ctrl_c,
+            sink,
         )
         .await?
         else {
@@ -1645,6 +1673,7 @@ async fn drain_one_turn_handling_ctrl_c(
     thread_id: &str,
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
+    sink: &Arc<dyn crate::room_io::RoomSink>,
 ) -> Result<Option<CapturedTurn>> {
     let Some((dispatcher, interrupt_tx, authority_badges)) = roles.get(role).map(|running| {
         (
@@ -1670,6 +1699,7 @@ async fn drain_one_turn_handling_ctrl_c(
         host_role,
         &authority_badges,
         Arc::clone(&work_state),
+        Arc::clone(sink),
     );
     tokio::pin!(drain);
 
@@ -1857,6 +1887,7 @@ async fn write_journal(
     role: &str,
     host_role: &str,
     last_ctrl_c: &Arc<Mutex<Option<std::time::Instant>>>,
+    sink: &Arc<dyn crate::room_io::RoomSink>,
 ) {
     if !roles.contains_key(role) {
         output::bad(format!("no such role: @{role}"));
@@ -1897,6 +1928,7 @@ async fn write_journal(
         &turn.thread_id,
         host_role,
         last_ctrl_c,
+        sink,
     )
     .await
     else {
@@ -1969,8 +2001,13 @@ async fn show_transcript(coreroom_dir: &Path, role: &str, host_role: &str) {
                 )
                 .with(output::DIM)
             );
+            // `/transcript` always writes to stdout — it is a slash
+            // command that exists to print history to the user. The
+            // runtime's pluggable sink (`run_with_options_and_sink`)
+            // does not apply here.
+            let sink = crate::room_io::StdoutSink;
             for event in &filtered[start..] {
-                render_event(event, host_role);
+                render_event(event, host_role, &sink);
             }
         }
         Err(error) => {

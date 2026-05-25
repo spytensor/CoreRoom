@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::crep::{CrepEvent, TurnOutcome};
 use crate::output;
 use crate::permissions::BridgeRequestSink;
+use crate::room_io::RoomSink;
 
 use super::permission_prompt;
 use super::render::render_event;
@@ -213,6 +214,7 @@ pub(super) async fn drain_one_turn(
     host_role: &str,
     authority_badges: &str,
     work: Arc<Mutex<TurnWork>>,
+    sink: Arc<dyn RoomSink>,
 ) -> Result<Option<CapturedTurn>> {
     let role_prompt = format!(
         "{}{}",
@@ -335,7 +337,7 @@ pub(super) async fn drain_one_turn(
                             work::render_card(&card);
                         }
                         if verbose_tools {
-                            render_event(&event, host_role);
+                            render_event(&event, host_role, sink.as_ref());
                         }
                         status.update_from_event(&event);
                         status.repaint();
@@ -410,7 +412,7 @@ pub(super) async fn drain_one_turn(
                                     .interrupted_card("role stopped before replying");
                                 work::render_card(&card);
                             }
-                            render_event(&event, host_role);
+                            render_event(&event, host_role, sink.as_ref());
                             true
                         }
                         // `TurnInterrupted` is a turn boundary in v0.2:
@@ -432,7 +434,7 @@ pub(super) async fn drain_one_turn(
                                 .expect("turn work mutex poisoned")
                                 .interrupted_card("halted by user");
                             work::render_card(&card);
-                            render_event(&event, host_role);
+                            render_event(&event, host_role, sink.as_ref());
                             if !partial_mentions.is_empty() {
                                 let names = partial_mentions
                                     .iter()
@@ -447,7 +449,7 @@ pub(super) async fn drain_one_turn(
                         }
                         _ => {
                             status.clear();
-                            render_event(&event, host_role);
+                            render_event(&event, host_role, sink.as_ref());
                             false
                         }
                     };

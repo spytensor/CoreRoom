@@ -9,11 +9,21 @@ use crate::output;
 
 use super::text::{one_line, truncate_inline};
 
-pub(super) fn render_event(event: &CrepEvent, host_role: &str) {
-    let rendered = render_event_line(event, host_role);
-    if !rendered.trim().is_empty() {
-        println!("{rendered}");
-    }
+pub(super) fn render_event(
+    event: &CrepEvent,
+    host_role: &str,
+    sink: &dyn crate::room_io::RoomSink,
+) {
+    // Route every CREP event through the caller-supplied sink. `cr
+    // start` passes `StdoutSink`, which formats and prints the line —
+    // output is byte-for-byte the same as the legacy direct-println
+    // path. A TUI host passes its own sink and the runtime emits
+    // identical `RoomEvent`s into the renderer's queue with no other
+    // change to this function.
+    sink.emit(crate::room_io::RoomEvent::Crep {
+        event: Box::new(event.clone()),
+        host_role: host_role.to_owned(),
+    });
     if let CrepEvent::RoleSpoke { role, cost_usd, .. } = event {
         debug!(role, cost_usd, "RoleSpoke rendered");
     }

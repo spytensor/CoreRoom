@@ -55,6 +55,7 @@ pub mod rename;
 pub mod repl;
 pub mod role;
 pub mod role_avatar;
+pub mod room_io;
 pub mod source_graph;
 pub mod source_registry;
 pub mod tracker;
