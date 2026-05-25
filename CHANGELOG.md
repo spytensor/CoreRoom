@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-05-25
+
+### Fixed
+
+- **Live-room scrollback ate role colors.** The splash and CREP renderer
+  emit crossterm-styled strings into the room sink. `push_rendered` was
+  stripping all SGR escapes and pushing plain `Line::raw` rows into the
+  ratatui scrollback, so the boot splash, role tags, frame strokes, and
+  permission notices all rendered in default gray — even though the
+  right-rail Team panel (which builds spans directly) showed the right
+  identity colors. Now the scrollback is `Vec<Line<'static>>` and a new
+  `src/ansi.rs` SGR parser converts incoming ANSI strings into styled
+  spans, so identity color survives the boundary.
+
+### Internal
+
+- **`ansi` module.** Minimal SGR parser focused on the codes crossterm
+  emits via `Stylize`: 24-bit RGB and 256-indexed foreground/background,
+  bold/italic/underline + their resets, the named 30–37 / 90–97 / 40–47
+  / 100–107 ranges, and full reset. Unknown escapes are dropped
+  silently; carriage returns are stripped. Twelve unit tests cover the
+  round-trip from `crossterm::style::Stylize` and the edge cases.
+- **Notice styling.** `push_notice` now writes a colored, bold label
+  (`ok` green, `warn` yellow, `error` red, `hint` gray, `system` dim)
+  followed by the message body, instead of a plain `"<label>: <text>"`
+  string.
+
 ## [0.9.9] - 2026-05-25
 
 ### Added

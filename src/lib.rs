@@ -4,11 +4,12 @@
 //! primary consumer. See `docs/architecture.md` for the v0.1 constitution and
 //! `docs/v0.2-trust-and-interrupt.md` for the v0.2 amendment.
 
-#![doc(html_root_url = "https://docs.rs/coreroom/0.9.9")]
+#![doc(html_root_url = "https://docs.rs/coreroom/0.9.10")]
 #![warn(missing_debug_implementations)]
 #![warn(rust_2018_idioms)]
 
 pub mod adapter;
+pub mod ansi;
 pub mod bus;
 pub mod config;
 pub mod config_cmd;

@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.10"
+items = [
+  "splash role colors now reach the live room — no more white-on-black @roles",
+  "scrollback preserves ANSI styling so frame strokes and badges keep their hue",
+  "permission notices and CREP traces keep their color through the runtime sink",
+]
+
+[[whats_new]]
 version = "0.9.9"
 items = [
   "live room chrome consolidates into one identity bar + one hint row",
