@@ -61,6 +61,22 @@ use render::render_event;
 pub use show::{show_log, ShowOptions};
 use splash::{render_help, render_home};
 
+/// Slash-command metadata for external composers. Dispatch remains
+/// owned by [`parse_line`]; this is only the completion catalogue.
+#[must_use]
+pub fn composer_command_specs() -> Vec<crate::console_composer::ComposerCommandSpec> {
+    command::SLASH_COMMANDS
+        .iter()
+        .map(|cmd| {
+            crate::console_composer::ComposerCommandSpec::new(
+                cmd.name,
+                cmd.description,
+                cmd.takes_args,
+            )
+        })
+        .collect()
+}
+
 /// Crate-internal accessor used by [`crate::room_io::StdoutSink`] to
 /// render one CREP event into the same single-line string the legacy
 /// `cr start` path produces. Kept as a thin wrapper so the formatter
@@ -244,6 +260,27 @@ pub struct RunOptions {
     pub allow_large_priors: bool,
 }
 
+/// One raw input action submitted to the executable room runtime.
+///
+/// The full-screen room sends `Line` values from its composer; the REPL
+/// still owns parsing and dispatch through [`parse_line`], so TUI and
+/// legacy line-mode stay on the same command path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeInput {
+    /// A submitted composer line.
+    Line(String),
+    /// End the runtime input stream.
+    Eof,
+    /// Prompt-level interrupt, equivalent to Ctrl-C with no turn in flight.
+    Interrupted,
+}
+
+#[derive(Debug)]
+enum RuntimeInputSource {
+    Terminal,
+    Channel(tokio::sync::mpsc::UnboundedReceiver<RuntimeInput>),
+}
+
 /// REPL entry point. Loads config, spawns every declared role, forwards
 /// each role's events into the bus, then enters the line-mode loop.
 ///
@@ -373,8 +410,40 @@ pub async fn run_with_options_and_sink(
     options: RunOptions,
     sink: Arc<dyn crate::room_io::RoomSink>,
 ) -> Result<()> {
+    run_with_options_and_sink_source(project_root, options, sink, RuntimeInputSource::Terminal)
+        .await
+}
+
+/// REPL entry point hosted by an external input surface. The caller
+/// supplies raw submitted lines and receives visible runtime output
+/// through `sink`.
+#[allow(clippy::too_many_lines)]
+pub async fn run_with_options_and_sink_input(
+    project_root: &Path,
+    options: RunOptions,
+    sink: Arc<dyn crate::room_io::RoomSink>,
+    input_rx: tokio::sync::mpsc::UnboundedReceiver<RuntimeInput>,
+) -> Result<()> {
+    run_with_options_and_sink_source(
+        project_root,
+        options,
+        sink,
+        RuntimeInputSource::Channel(input_rx),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_with_options_and_sink_source(
+    project_root: &Path,
+    options: RunOptions,
+    sink: Arc<dyn crate::room_io::RoomSink>,
+    mut input_source: RuntimeInputSource,
+) -> Result<()> {
     let coreroom_dir = project_root.join(COREROOM_DIR);
-    let interactive_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let interactive_tty = matches!(&input_source, RuntimeInputSource::Terminal)
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal();
     if !coreroom_dir.exists() {
         let opts = if interactive_tty {
             crate::init::InitOptions::manual()
@@ -521,10 +590,10 @@ pub async fn run_with_options_and_sink(
 
     let mut renderer_rx = bus.subscribe();
     let mut live_renderer_rx = bus.subscribe_live();
-    let mut stdin = if interactive_tty {
-        None
-    } else {
+    let mut stdin = if matches!(&input_source, RuntimeInputSource::Terminal) && !interactive_tty {
         Some(BufReader::new(tokio::io::stdin()).lines())
+    } else {
+        None
     };
     let mut stdout = tokio::io::stdout();
     let ctrl_c = tokio::signal::ctrl_c();
@@ -546,34 +615,42 @@ pub async fn run_with_options_and_sink(
     let mut resumed_notice_pending = resumed_roles.clone();
 
     loop {
-        let input = if interactive_tty {
-            // Snapshot role names per iteration so /stop and /refresh
-            // additions are reflected in the next prompt's `@`-completer.
-            let mut role_names: Vec<String> = roles.keys().cloned().collect();
-            role_names.sort();
-            let host_role = cfg.host_role.clone();
-            let bridge_rx_taken = bridge_rx_holder.take();
-            let (line, bridge_rx_back) =
-                input::read_tty_line(role_names, bridge_rx_taken, host_role, Arc::clone(&sink))
-                    .await?;
-            bridge_rx_holder = bridge_rx_back;
-            line
-        } else {
-            prompt(&mut stdout).await?;
-            let stdin = stdin.as_mut().expect("non-tty stdin reader");
-            tokio::select! {
-                biased;
-                signal = &mut ctrl_c => {
-                    signal.context("installing Ctrl-C handler")?;
-                    InputLine::Interrupted
-                }
-                line = stdin.next_line() => {
-                    match line? {
-                        Some(line) => InputLine::Line(line),
-                        None => InputLine::Eof,
+        let input = match &mut input_source {
+            RuntimeInputSource::Terminal if interactive_tty => {
+                // Snapshot role names per iteration so /stop and /refresh
+                // additions are reflected in the next prompt's `@`-completer.
+                let mut role_names: Vec<String> = roles.keys().cloned().collect();
+                role_names.sort();
+                let host_role = cfg.host_role.clone();
+                let bridge_rx_taken = bridge_rx_holder.take();
+                let (line, bridge_rx_back) =
+                    input::read_tty_line(role_names, bridge_rx_taken, host_role, Arc::clone(&sink))
+                        .await?;
+                bridge_rx_holder = bridge_rx_back;
+                line
+            }
+            RuntimeInputSource::Terminal => {
+                prompt(&mut stdout).await?;
+                let stdin = stdin.as_mut().expect("non-tty stdin reader");
+                tokio::select! {
+                    biased;
+                    signal = &mut ctrl_c => {
+                        signal.context("installing Ctrl-C handler")?;
+                        InputLine::Interrupted
+                    }
+                    line = stdin.next_line() => {
+                        match line? {
+                            Some(line) => InputLine::Line(line),
+                            None => InputLine::Eof,
+                        }
                     }
                 }
             }
+            RuntimeInputSource::Channel(input_rx) => match input_rx.recv().await {
+                Some(RuntimeInput::Line(line)) => InputLine::Line(line),
+                Some(RuntimeInput::Interrupted) => InputLine::Interrupted,
+                Some(RuntimeInput::Eof) | None => InputLine::Eof,
+            },
         };
         let line = match input {
             InputLine::Line(line) => line,
