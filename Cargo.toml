@@ -2,7 +2,7 @@
 name = "coreroom"
 version = "0.9.7"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 authors = ["Charlie Zhu <chaojie.zhu.cn@gmail.com>"]
 license = "MIT"
 description = "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control."

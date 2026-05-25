@@ -112,8 +112,13 @@ fn event_role(event: &CrepEvent) -> &str {
 }
 
 fn render_show_event(event: &CrepEvent, host_role: &str) {
+    // `cr show` is a diagnostic replay command that always writes to
+    // stdout, so the sink is constructed inline rather than threaded
+    // through. The runtime path (`run_with_options_and_sink`) is the
+    // one that takes a pluggable sink.
+    let sink = crate::room_io::StdoutSink;
     for event in normalize_show_event(event) {
-        render_event(&event, host_role);
+        render_event(&event, host_role, &sink);
     }
 }
 

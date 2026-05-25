@@ -295,7 +295,7 @@ pub fn render_snapshot_to_text_with_action_overlay(
                 navigator,
                 RoleAvatarPack::from_env(),
             );
-            render_action_overlay(frame, frame.size(), overlay);
+            render_action_overlay(frame, frame.area(), overlay);
         })
         .context("draw test console frame")?;
     Ok(buffer_to_string(terminal.backend().buffer()))
@@ -332,7 +332,7 @@ fn render_console_frame_with_nav_and_avatar(
     navigator: &ConsoleNavigator,
     avatar_pack: RoleAvatarPack,
 ) {
-    let area = frame.size();
+    let area = frame.area();
     let layout_model = compute_console_layout(snapshot, area.width);
     let root = Layout::default()
         .direction(Direction::Vertical)
@@ -364,7 +364,7 @@ fn render_live_room_frame_with_nav_and_avatar(
     composer: &ComposerState,
     bridge: &LiveRoomBridge,
 ) {
-    let area = frame.size();
+    let area = frame.area();
     let layout_model = compute_console_layout(snapshot, area.width);
     let root = Layout::default()
         .direction(Direction::Vertical)
@@ -1317,7 +1317,7 @@ fn buffer_to_string(buffer: &Buffer) -> String {
     for y in 0..buffer.area.height {
         let mut line = String::new();
         for x in 0..buffer.area.width {
-            line.push_str(buffer.get(x, y).symbol());
+            line.push_str(buffer[(x, y)].symbol());
         }
         lines.push(line.trim_end().to_owned());
     }
