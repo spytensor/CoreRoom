@@ -68,13 +68,19 @@ pub enum RoomEvent {
     /// A structured in-place status spinner update.
     Spinner(SpinnerSnapshot),
     /// A permission prompt that asks the user to approve one tool call.
-    /// The keystroke read remains owned by `permission_prompt`; this
-    /// event only models the visible prompt row.
+    /// Legacy stdout rendering still reads the decision directly from
+    /// the terminal. Event-driven sinks receive `response_tx` so their
+    /// UI can send the user's decision back into the same bridge
+    /// responder path without reading from stdin in parallel.
     PermissionPrompt {
         /// Tool approval request received through the permission bridge.
         request: BridgeRequest,
         /// Host role name at emit time, used to color the requesting role.
         host_role: String,
+        /// Optional event-driven response channel. Sinks that render
+        /// their own permission overlay send a [`BridgeResponse`] here;
+        /// stdout sinks receive `None` and keep the legacy one-key read.
+        response_tx: Option<tokio::sync::mpsc::UnboundedSender<BridgeResponse>>,
     },
     /// The visible result of a permission prompt decision. Allow-once
     /// decisions intentionally clear the pending row without printing
@@ -144,6 +150,13 @@ pub trait RoomSink: Send + Sync {
     /// is slow (e.g. a TUI renderer behind a channel), they should drop
     /// or coalesce rather than back-pressure the runtime.
     fn emit(&self, event: RoomEvent);
+
+    /// Whether this sink owns permission-key input. Full-screen TUI
+    /// sinks return `true` so `permission_prompt` waits for the event
+    /// response channel instead of starting a second terminal reader.
+    fn handles_permission_decisions(&self) -> bool {
+        false
+    }
 }
 
 /// The legacy `cr start` sink: each event is formatted via the existing
@@ -199,7 +212,9 @@ impl StdoutSink {
                     String::new()
                 }
             }
-            RoomEvent::PermissionPrompt { request, host_role } => {
+            RoomEvent::PermissionPrompt {
+                request, host_role, ..
+            } => {
                 let mut out = Vec::new();
                 write_permission_prompt(&mut out, request, host_role, terminal_width())
                     .expect("writing permission prompt to memory cannot fail");

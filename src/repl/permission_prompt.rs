@@ -66,14 +66,21 @@ pub(super) async fn handle_request(
     room_sink: &dyn RoomSink,
 ) -> Result<()> {
     let BridgeRequestSink { request, responder } = request_sink;
-    paint_prompt(room_sink, &request, host_role);
-
-    let response = match read_decision_keypress().await {
-        Ok(Some(response)) => response,
-        Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
-        Err(error) => {
-            output::bad(format!("permission prompt failed: {error:#}"));
-            BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
+    let response = if room_sink.handles_permission_decisions() {
+        let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
+        paint_prompt(room_sink, &request, host_role, Some(response_tx));
+        response_rx.recv().await.unwrap_or_else(|| {
+            BridgeResponse::deny("CoreRoom permission overlay closed without a decision")
+        })
+    } else {
+        paint_prompt(room_sink, &request, host_role, None);
+        match read_decision_keypress().await {
+            Ok(Some(response)) => response,
+            Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
+            Err(error) => {
+                output::bad(format!("permission prompt failed: {error:#}"));
+                BridgeResponse::deny("CoreRoom prompt failed; defaulting to deny")
+            }
         }
     };
     paint_outcome(room_sink, &request.role, host_role, &response);
@@ -92,7 +99,7 @@ pub(super) fn handle_request_blocking(
     room_sink: &dyn RoomSink,
 ) {
     let BridgeRequestSink { request, responder } = request_sink;
-    paint_prompt(room_sink, &request, host_role);
+    paint_prompt(room_sink, &request, host_role, None);
     let response = match read_decision_keypress_blocking_in_raw() {
         Ok(Some(response)) => response,
         Ok(None) => BridgeResponse::deny("declined: cancelled at prompt"),
@@ -112,10 +119,16 @@ fn read_decision_keypress_blocking_in_raw() -> Result<Option<BridgeResponse>> {
     read_decision_keypress_loop(|| true)
 }
 
-fn paint_prompt(sink: &dyn RoomSink, request: &BridgeRequest, host_role: &str) {
+fn paint_prompt(
+    sink: &dyn RoomSink,
+    request: &BridgeRequest,
+    host_role: &str,
+    response_tx: Option<tokio::sync::mpsc::UnboundedSender<BridgeResponse>>,
+) {
     sink.emit(RoomEvent::PermissionPrompt {
         request: request.clone(),
         host_role: host_role.to_owned(),
+        response_tx,
     });
 }
 

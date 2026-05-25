@@ -120,7 +120,7 @@ enum Cmd {
         /// derives a live local snapshot from project config and git state.
         #[arg(long, conflicts_with = "live_room")]
         snapshot: Option<PathBuf>,
-        /// Exit with a rebuild notice for the removed staged live-room preview.
+        /// Open the executable full-screen room runtime.
         #[arg(long)]
         live_room: bool,
     },
@@ -1360,7 +1360,17 @@ fn run_console_first_default() -> Result<()> {
 
 fn run_console(project: Option<PathBuf>, snapshot: Option<PathBuf>, live_room: bool) -> Result<()> {
     if live_room {
-        bail!("cr console --live-room: full-screen runtime is being rebuilt — see #320");
+        let root = project_root_or_cwd(project)?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        return runtime.block_on(async move {
+            coreroom::console_room_runtime::run_live_room(
+                &root,
+                coreroom::repl::RunOptions::default(),
+            )
+            .await
+        });
     }
     if let Some(snapshot) = snapshot {
         return coreroom::console_tui::run_snapshot_console(&snapshot);
