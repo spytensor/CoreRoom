@@ -482,7 +482,14 @@ async fn run_with_options_and_sink_source(
         render_home(&cfg, &coreroom_dir, project_root, first_run)
     };
     room_io::emit_banner(sink.as_ref(), splash_text);
-    crate::update::maybe_notify_on_start();
+    // The notifier spawns a background thread and may `println!` an
+    // "update available" line directly to stdout. In the live-room
+    // TUI that bleed corrupts the alt-screen rendering, so suppress
+    // it when the splash was rendered for the TUI. `cr start` (stdout)
+    // keeps the notice.
+    if !frameless_splash {
+        crate::update::maybe_notify_on_start();
+    }
     if first_run {
         mark_welcomed(&coreroom_dir).await;
     }
