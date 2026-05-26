@@ -1,6 +1,6 @@
 {
   "name": "@spytensor/coreroom",
-  "version": "0.9.15",
+  "version": "0.9.16",
   "description": "CoreRoom is the Engineering Control Room for AI Agents: host-led, GitHub-gated AI-assisted software engineering control.",
   "keywords": [
     "cli",

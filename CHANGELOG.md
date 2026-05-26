@@ -10,6 +10,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.16] - 2026-05-26
+
+### Added
+
+- **Scroll Room history with mouse wheel / PgUp / PgDn (#371, PR
+  #375).** The live room transcript no longer pins to the latest
+  turn. Mouse wheel events (already captured since v0.9.12 to keep
+  the parent terminal scrollback sealed) now move a `scroll_offset`
+  from the bottom of Room, and `PgUp` / `PgDn` step half a viewport.
+  `Home` / `End` jump to the oldest visible row / return to the live
+  tail when the composer is empty — when the composer has text they
+  keep their existing cursor-to-start / cursor-to-end semantics.
+  When new turns arrive while scrolled, a yellow
+  `↓ N new · End to follow` indicator renders at the bottom of Room
+  (dim gray `↑ scrolled back · End to follow` when quiet). The `?`
+  cheatsheet documents the new bindings.
+- **`@frontend` defaults to a ratatui / terminal-UI specialist
+  (#373, PR #376).** A new
+  `src/init_defaults/roles/frontend.md` template frames `@frontend`
+  as the live-room TUI specialist (ratatui widgets, composer,
+  scrollback, mouse/keyboard, color/contrast, unicode-width) instead
+  of a generic web-frontend role. A small
+  `crate::init::role_priors_template(name)` dispatcher routes the
+  `frontend` name to the specialized body and falls back to
+  `role_template.md` for every other role. Existing
+  `.coreroom/roles/frontend/priors.md` files are not overwritten;
+  consumer projects override locally by editing them.
+
+### Fixed
+
+- **Composer caret is visible again in the live room Ask input
+  (#372, PR #374).** v0.9.12 added a one-shot `Hide` alongside the
+  alt-screen / mouse-capture setup, which raced ratatui's per-frame
+  cursor management and left the Ask field with no visible caret —
+  users could not tell which row they were typing on. Removing the
+  standalone `Hide` hands cursor visibility back to ratatui, which
+  shows the caret whenever the composer (idle or submitting) calls
+  `frame.set_cursor_position`, and hides it when the permission
+  overlay opens (`Blocked` state intentionally skips the call).
+  Mouse capture stays on so the parent terminal still cannot scroll
+  behind the room.
+
 ## [0.9.15] - 2026-05-25
 
 ### Changed
