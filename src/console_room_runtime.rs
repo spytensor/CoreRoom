@@ -49,7 +49,18 @@ pub struct RoomRuntimeState {
     project_root: PathBuf,
     project_name: String,
     host_role: String,
+    /// Configured roster (host + declared roles). Maintained for
+    /// back-compat with the v0.9.x snapshot API and future surfaces;
+    /// the v0.10 slim rail (#383) intentionally does NOT read it. The
+    /// `activity: K/N roles seen` field that consumed it moved to the
+    /// footer narration (#382).
+    #[allow(dead_code)]
     team: Vec<TeamMember>,
+    /// Last time each role emitted a spinner snapshot. The slim rail
+    /// (#383) no longer reads this; we keep the field populated as a
+    /// back-compat hook for upcoming surfaces that may want to surface
+    /// role staleness.
+    #[allow(dead_code)]
     last_seen: BTreeMap<String, Instant>,
     composer: ComposerState,
     scrollback: Vec<Line<'static>>,
@@ -1038,18 +1049,155 @@ fn scrollback_follow_indicator(unread: usize) -> Line<'static> {
     }
 }
 
+/// Slim `Status` rail per ADR `docs/v0.10-chat-stream-vs-dashboard.md` §Q5.
+///
+/// The rail surfaces only ambient project state that outlives any
+/// single turn — Work counts, Evidence validation, room-level Blockers.
+/// It deliberately does NOT read `state.spinners` or
+/// `state.spawn_lifecycle`; live sub-agent activity (tool calls,
+/// roles seen, latest step, assignee) belongs in the chat stream
+/// (#381) and the footer narration (#382), not on the rail. As a
+/// consequence the rail is byte-identical across tool-call ticks:
+/// it only re-renders when a `WorkCard`, permission prompt, or other
+/// project-level signal arrives.
 fn render_status_rail(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
-    let mut lines = status_panel_lines(state, area.width);
-    if !state.work_cards.is_empty() {
-        lines.push(Line::raw(""));
-        lines.extend(work_card_lines(area.width, state));
-    }
+    let lines = slim_status_rail_lines(state);
     frame.render_widget(
         Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL).title("Status"))
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+/// Build the slim Status card body. Pulled out so tests can call it
+/// directly without going through the ratatui pipeline.
+///
+/// Stability contract: this function MUST be a pure projection of
+/// project-level state (`work_cards`, `permission` flag). It must NOT
+/// read `state.spinners`, `state.spawn_lifecycle`, or anything that
+/// updates on every tool-call tick. Adding a spinner-derived field
+/// here regresses ADR §Q5 and #383 AC-2.
+fn slim_status_rail_lines(state: &RoomRuntimeState) -> Vec<Line<'static>> {
+    let mut lines = Vec::with_capacity(10);
+    lines.push(section_header("Work"));
+    let active = rail_work_active_count(state);
+    lines.push(status_kv_line(
+        "active",
+        &active.to_string(),
+        if active > 0 {
+            Color::Green
+        } else {
+            Color::DarkGray
+        },
+    ));
+    let cards = state.work_cards.len();
+    lines.push(status_kv_line(
+        "cards",
+        &cards.to_string(),
+        if cards == 0 {
+            Color::DarkGray
+        } else {
+            Color::Yellow
+        },
+    ));
+    lines.push(Line::raw(""));
+    lines.push(section_header("Blockers"));
+    let (blocker_text, blocker_color) = rail_blocker_status(state);
+    lines.push(status_kv_line("state", blocker_text, blocker_color));
+    lines.push(Line::raw(""));
+    lines.push(section_header("Evidence"));
+    let evidence = rail_evidence_status(state);
+    lines.push(status_kv_line("validation", evidence.label, evidence.color));
+    lines
+}
+
+/// `Work active: N` — count of WorkCards currently in the `Working`
+/// state. Per ADR §Q5 this proxies the project-level `WorkOrder`
+/// `Working` count: a WorkCard is opened when a project work item
+/// starts and closes when it ends, so the count is stable across
+/// tool-call ticks (which only update inner fields like
+/// `spinner_frame` and `current_step`, not the variant). Crucially,
+/// this does NOT read `state.spinners` or `state.spawn_lifecycle`,
+/// so a sub-agent making tool calls inside a single WorkCard does
+/// not change `active`.
+fn rail_work_active_count(state: &RoomRuntimeState) -> usize {
+    state
+        .work_cards
+        .values()
+        .filter(|card| matches!(card.status, WorkStatus::Working { .. }))
+        .count()
+}
+
+/// Room-level Blockers rollup per ADR §Q5. Reads only signals that
+/// last across tool-call ticks: an open permission prompt, or any
+/// WorkCard that has settled into the `Interrupted` state. Per-spawn
+/// blockers (a sub-agent failing a single tool call) are intentionally
+/// NOT counted here — they belong inline in the chat stream's working
+/// card, not on the rail.
+fn rail_blocker_status(state: &RoomRuntimeState) -> (&'static str, Color) {
+    if state.permission.is_some() {
+        return ("approval pending", Color::Yellow);
+    }
+    if state
+        .work_cards
+        .values()
+        .any(|card| matches!(card.status, WorkStatus::Interrupted { .. }))
+    {
+        return ("interrupted", Color::Red);
+    }
+    ("none", Color::DarkGray)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EvidenceStatus {
+    label: &'static str,
+    color: Color,
+}
+
+/// Evidence validation rollup per ADR §Q5. The runtime does not yet
+/// carry `EvidencePacket.validation_status` directly, so we project
+/// the closest stable signal: any settled WorkCard counts as `clean`,
+/// any in-flight WorkCard counts as `pending`, an Interrupted WorkCard
+/// or open permission counts as `blocking`. Nothing observed yet ⇒
+/// `not observed`. Critically, this rollup does NOT read
+/// `state.has_active_work()` (which inspects `spinners`); it only
+/// reads `work_cards` statuses and the `permission` flag.
+fn rail_evidence_status(state: &RoomRuntimeState) -> EvidenceStatus {
+    let has_working = state
+        .work_cards
+        .values()
+        .any(|card| matches!(card.status, WorkStatus::Working { .. }));
+    let has_interrupted = state
+        .work_cards
+        .values()
+        .any(|card| matches!(card.status, WorkStatus::Interrupted { .. }));
+    let has_done = state
+        .work_cards
+        .values()
+        .any(|card| matches!(card.status, WorkStatus::Done { .. }));
+
+    if has_interrupted || state.permission.is_some() {
+        EvidenceStatus {
+            label: "blocking",
+            color: Color::Red,
+        }
+    } else if has_working {
+        EvidenceStatus {
+            label: "pending",
+            color: Color::Yellow,
+        }
+    } else if has_done {
+        EvidenceStatus {
+            label: "clean",
+            color: Color::Green,
+        }
+    } else {
+        EvidenceStatus {
+            label: "not observed",
+            color: Color::DarkGray,
+        }
+    }
 }
 
 /// Build the configured room roster: host first, then declared roles in
@@ -1272,86 +1420,6 @@ fn activity_card_waiting_row(role: &str, host_role: &str) -> Line<'static> {
     ])
 }
 
-fn status_panel_lines(state: &RoomRuntimeState, width: u16) -> Vec<Line<'static>> {
-    // The Status panel is the project-level snapshot. Active-role
-    // detail (owner + step + elapsed + tools) is rendered inline at
-    // the bottom of the Room scrollback as a chat-style indicator,
-    // so the rail does not duplicate that information. Sections
-    // here: Work / Blockers / Evidence.
-    let mut lines = Vec::new();
-    lines.push(section_header("Work"));
-    let active = state.active_work_count();
-    lines.push(status_kv_line(
-        "active",
-        &active.to_string(),
-        if active > 0 {
-            Color::Green
-        } else {
-            Color::DarkGray
-        },
-    ));
-    lines.push(status_kv_line(
-        "cards",
-        &state.work_cards.len().to_string(),
-        if state.work_cards.is_empty() {
-            Color::DarkGray
-        } else {
-            Color::Yellow
-        },
-    ));
-    let known_roles = state.team.len();
-    let observed_roles = state.last_seen.len();
-    lines.push(status_kv_line(
-        "activity",
-        &format!("{observed_roles}/{known_roles} roles seen"),
-        Color::DarkGray,
-    ));
-    if let Some(card) = state.work_cards.values().next_back() {
-        lines.push(status_kv_line(
-            "latest",
-            &truncate_with_ellipsis(&card.title, usize::from(width.saturating_sub(12)).max(12)),
-            status_color_for_work(&card.status),
-        ));
-        lines.push(role_metadata_line(
-            "assignee",
-            &card.role,
-            &state.host_role,
-            Some(work_status_label(&card.status)),
-        ));
-    }
-    lines.push(Line::raw(""));
-    lines.push(section_header("Blockers"));
-    if let Some(permission) = &state.permission {
-        lines.push(role_metadata_line(
-            "approval",
-            &permission.request.role,
-            &state.host_role,
-            Some(permission.request.tool.as_str()),
-        ));
-    } else if let Some(card) = state
-        .work_cards
-        .values()
-        .find(|card| matches!(card.status, WorkStatus::Interrupted { .. }))
-    {
-        lines.push(role_metadata_line(
-            "interrupted",
-            &card.role,
-            &state.host_role,
-            Some(work_card_detail(card).as_str()),
-        ));
-    } else {
-        lines.push(status_kv_line("state", "none observed", Color::DarkGray));
-    }
-    lines.push(Line::raw(""));
-    lines.push(section_header("Evidence"));
-    lines.push(status_kv_line(
-        "validation",
-        evidence_status_text(state),
-        evidence_status_color(state),
-    ));
-    lines
-}
-
 fn section_header(label: &'static str) -> Line<'static> {
     Line::from(vec![Span::styled(label, label_style())])
 }
@@ -1361,107 +1429,6 @@ fn status_kv_line(label: &'static str, value: &str, value_color: Color) -> Line<
         Span::styled(format!("  {label}: "), Style::default().fg(Color::White)),
         Span::styled(value.to_owned(), Style::default().fg(value_color)),
     ])
-}
-
-fn role_metadata_line(
-    label: &'static str,
-    role: &str,
-    host_role: &str,
-    suffix: Option<&str>,
-) -> Line<'static> {
-    let mut spans = vec![Span::styled(
-        format!("  {label}: "),
-        Style::default().fg(Color::White),
-    )];
-    spans.extend(tui_style::role_label_spans(role, host_role));
-    if let Some(suffix) = suffix {
-        spans.push(Span::styled(
-            format!(" · {suffix}"),
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-    Line::from(spans)
-}
-
-fn work_card_lines(width: u16, state: &RoomRuntimeState) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let width = usize::from(width.saturating_sub(4)).max(28);
-    for card in state.work_cards.values().rev().take(3) {
-        // The card body's border title already carries the colored
-        // `@role` token via the v0.9.10 ANSI bridge, so no separate
-        // identity header is needed — adding one printed the role
-        // mention twice on every card.
-        for line in crate::ansi::ansi_to_lines(&card.render(width)) {
-            lines.push(line);
-        }
-        lines.push(Line::raw(""));
-    }
-    lines
-}
-
-fn work_status_label(status: &WorkStatus) -> &'static str {
-    match status {
-        WorkStatus::Working { .. } => "working",
-        WorkStatus::Done { .. } => "done",
-        WorkStatus::Interrupted { .. } => "interrupted",
-    }
-}
-
-fn status_color_for_work(status: &WorkStatus) -> Color {
-    match status {
-        WorkStatus::Working { .. } => Color::Yellow,
-        WorkStatus::Done { .. } => Color::Green,
-        WorkStatus::Interrupted { .. } => Color::Red,
-    }
-}
-
-fn work_card_detail(card: &WorkCard) -> String {
-    match &card.status {
-        WorkStatus::Working { current_step, .. } => {
-            current_step.clone().unwrap_or_else(|| card.title.clone())
-        }
-        WorkStatus::Done {
-            duration,
-            steps_count,
-        } => {
-            let step_word = if *steps_count == 1 { "step" } else { "steps" };
-            format!(
-                "done in {}s · {steps_count} {step_word}",
-                duration.as_secs()
-            )
-        }
-        WorkStatus::Interrupted { reason } => reason.clone(),
-    }
-}
-
-fn evidence_status_text(state: &RoomRuntimeState) -> &'static str {
-    if state.has_active_work() {
-        "pending"
-    } else if state
-        .work_cards
-        .values()
-        .any(|card| matches!(card.status, WorkStatus::Done { .. }))
-    {
-        "observed complete"
-    } else if state.permission.is_some()
-        || state
-            .work_cards
-            .values()
-            .any(|card| matches!(card.status, WorkStatus::Interrupted { .. }))
-    {
-        "blocked"
-    } else {
-        "not observed"
-    }
-}
-
-fn evidence_status_color(state: &RoomRuntimeState) -> Color {
-    match evidence_status_text(state) {
-        "observed complete" => Color::Green,
-        "pending" => Color::Yellow,
-        "blocked" => Color::Red,
-        _ => Color::DarkGray,
-    }
 }
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
@@ -2232,6 +2199,23 @@ fn buffer_to_string(buffer: &Buffer) -> String {
     lines.join("\n")
 }
 
+/// Flatten a vec of styled lines to a plain string, one `\n` per
+/// row. Used by the rail tests to compare bodies for the AC-2
+/// stability assertion without dragging in the ratatui pipeline.
+#[cfg(test)]
+fn lines_to_plain_string(lines: &[Line<'_>]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn write_enter_commands<W: Write>(mut writer: W) -> io::Result<()> {
     // `EnableMouseCapture` is what turns the live room into a true
     // K9S / tmux / vim style sandbox: the terminal stops scrolling its
@@ -2342,24 +2326,36 @@ mod tests {
     }
 
     #[test]
-    fn rail_shows_work_status_when_no_spinners_and_no_cards() {
+    fn rail_shows_locked_slim_status_when_idle() {
+        // ADR `docs/v0.10-chat-stream-vs-dashboard.md` §Q5 locks the
+        // slim Status rail content for the idle baseline: Work
+        // (active/cards), Blockers (state), Evidence (validation).
+        // Nothing else.
         let state = test_state();
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // The right rail is the project-level Status panel only. The
-        // Current section is gone — active-role detail lives inline
-        // at the bottom of Room. Rail keeps Work/Blockers/Evidence.
         assert!(text.contains("Status"));
-        assert!(!text.contains("Roles"));
-        assert!(!text.contains("Current"));
-        assert!(!text.contains("no work cards yet"));
         assert!(text.contains("Work"));
         assert!(text.contains("active: 0"));
+        assert!(text.contains("cards: 0"));
         assert!(text.contains("Blockers"));
+        assert!(text.contains("state: none"));
+        assert!(text.contains("Evidence"));
         assert!(text.contains("validation: not observed"));
+        // Removed v0.9.x rail sections must not reappear.
+        assert!(!text.contains("Roles"));
+        assert!(!text.contains("Current"));
+        assert!(!text.contains("activity:"));
+        assert!(!text.contains("latest:"));
+        assert!(!text.contains("assignee:"));
+        assert!(!text.contains("no work cards yet"));
     }
 
     #[test]
-    fn rail_shows_status_and_center_current_turn_when_spinning() {
+    fn rail_stays_byte_identical_across_spinner_ticks() {
+        // AC-2 of #383: a live sub-agent making tool calls must not
+        // flicker the rail. Two spinner snapshots that differ only on
+        // per-tick fields (`frame`, `tools_seen`, `current_state`)
+        // must produce the same rail body.
         let mut state = test_state();
         state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
             role: "backend".to_owned(),
@@ -2369,44 +2365,86 @@ mod tests {
             current_state: Some("thinking".to_owned()),
             paint: SpinnerPaint::Painting,
         }));
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        assert!(text.contains("Status"));
-        assert!(!text.contains("Roles"));
-        // Status panel keeps only project-level counts; the Current
-        // section is gone.
-        assert!(!text.contains("Current"));
-        assert!(text.contains("active: 1"));
-        // Inline activity row appears in the Room area (no "team
-        // working" framing anymore — just the role row).
-        assert!(text.contains("@backend"));
-        assert!(text.contains("thinking"));
+        let before = super::slim_status_rail_lines(&state);
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 5,
+            started_at: Instant::now(),
+            tools_seen: 4,
+            current_state: Some("running cargo test".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let after = super::slim_status_rail_lines(&state);
+        assert_eq!(
+            super::lines_to_plain_string(&before),
+            super::lines_to_plain_string(&after),
+            "slim rail must be byte-identical across tool-call ticks",
+        );
     }
 
     #[test]
-    fn rail_folds_work_panel_when_no_cards() {
-        let state = test_state();
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // No Work title and no placeholder copy when there are no
-        // cards. The Status panel owns the full rail height.
-        assert!(!text.contains("Work─"));
-        assert!(!text.contains("no work cards yet"));
+    fn rail_active_counts_working_work_cards_not_spinners() {
+        // ADR §Q5 locks `Work active: N` to the WorkCard count, not
+        // the spinner count. A spinner alone (no WorkCard) leaves
+        // `active` at 0; a Working WorkCard bumps it to 1.
+        let mut state = test_state();
+        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
+            role: "backend".to_owned(),
+            frame: 0,
+            started_at: Instant::now(),
+            tools_seen: 0,
+            current_state: Some("thinking".to_owned()),
+            paint: SpinnerPaint::Painting,
+        }));
+        let text_spinner_only =
+            render_room_runtime_to_text(&state, 120, 30).expect("render spinner-only");
+        assert!(text_spinner_only.contains("active: 0"));
+        assert!(text_spinner_only.contains("cards: 0"));
+        // The inline activity row still surfaces the role at the
+        // bottom of Room — that surface (#381 territory) is separate
+        // from the rail.
+        assert!(text_spinner_only.contains("@backend"));
+
+        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
+        let text_with_card =
+            render_room_runtime_to_text(&state, 120, 30).expect("render with card");
+        assert!(text_with_card.contains("active: 1"));
+        assert!(text_with_card.contains("cards: 1"));
     }
 
     #[test]
-    fn rail_renders_team_plus_work_when_card_present_but_no_spinner() {
+    fn rail_does_not_render_work_card_body() {
+        // The pre-v0.10 rail rendered the WorkCard's full body inside
+        // the Status panel. The slim rail (#383) drops that block —
+        // the WorkCard's title, current step, and inline @role label
+        // belong to the chat-stream working card (#381), not the rail.
         let mut state = test_state();
         state.apply_event(RoomEvent::WorkCard(sample_work_card()));
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        assert!(text.contains("Status"));
-        assert!(!text.contains("Roles"));
-        assert!(text.contains("latest"));
-        assert!(text.contains("assignee"));
-        assert!(text.contains("◇ @backend"));
-        assert!(text.contains("Run validation"));
-        // No live spinner means no Room activity card surfaces
-        // either — work-card-only state belongs in the Status panel
-        // assignee row.
-        assert!(!text.contains("team working"));
+        let lines = super::slim_status_rail_lines(&state);
+        let rendered = super::lines_to_plain_string(&lines);
+        assert!(!rendered.contains("Run validation"));
+        assert!(!rendered.contains("@backend"));
+        assert!(!rendered.contains("cargo test"));
+        // Only the slim counters change.
+        assert!(rendered.contains("active: 1"));
+        assert!(rendered.contains("cards: 1"));
+    }
+
+    #[test]
+    fn rail_blocker_state_reflects_permission_prompt() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let lines = super::slim_status_rail_lines(&state);
+        let rendered = super::lines_to_plain_string(&lines);
+        // Per-role detail (`approval: @backend · Bash`) is gone from
+        // the rail; the slim rail surfaces room-level state only.
+        assert!(rendered.contains("state: approval pending"));
+        assert!(!rendered.contains("@backend"));
     }
 
     #[test]
@@ -3074,46 +3112,12 @@ mod tests {
         assert_eq!(coloured.style.fg, Some(expected));
     }
 
-    #[test]
-    fn work_card_renders_role_label_exactly_once_per_card() {
-        let mut state = test_state();
-        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
-        // Use a tall render area so the Team + Status sections do not
-        // crowd the work card off the bottom of the rail.
-        let text = render_room_runtime_to_text(&state, 120, 60).expect("render");
-        // The card's own border title already carries `@backend`. The
-        // pre-v0.9.11 identity-header prefix line above the card is
-        // gone. Count `@backend` only inside the card body region
-        // (the lines between the top and bottom box-drawing borders).
-        // Work-card borders use rounded corners (╭ ╰); ratatui panel
-        // borders use square corners (┌ └). Match rounded only so
-        // Status metadata rows do not bleed in.
-        let mut inside_card = false;
-        let mut card_lines: Vec<&str> = Vec::new();
-        for line in text.lines() {
-            if line.contains('╭') {
-                inside_card = true;
-            }
-            if inside_card {
-                card_lines.push(line);
-            }
-            if line.contains('╰') {
-                inside_card = false;
-            }
-        }
-        let card_section = card_lines.join("\n");
-        assert_eq!(
-            card_section.matches("@backend").count(),
-            1,
-            "expected exactly one @backend in card body, got:\n{card_section}"
-        );
-        // The card body is the only place `@backend` should appear
-        // *inside* card borders. The Status panel may also mention
-        // `@backend` as the assignee, and the Team section may show
-        // other roles as standby — both are outside the card body
-        // and OK.
-        assert!(text.contains("assignee"));
-    }
+    // `work_card_renders_role_label_exactly_once_per_card` was a
+    // pre-v0.10 rail assertion: it counted `@backend` occurrences
+    // inside the WorkCard body that the rail used to render. The
+    // slim rail (#383) no longer renders the WorkCard body at all,
+    // so this assertion has no surface to verify. Per AC-4 the test
+    // is deleted, not adapted.
 
     #[test]
     fn current_section_surfaces_tools_count_when_above_zero() {
@@ -3429,25 +3433,12 @@ mod tests {
         assert_eq!(response.decision, PermissionDecision::Allow);
     }
 
-    #[test]
-    fn work_and_spinner_events_populate_status_rail() {
-        let mut state = test_state();
-        state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
-            role: "backend".to_owned(),
-            frame: 1,
-            started_at: Instant::now(),
-            tools_seen: 0,
-            current_state: Some("thinking".to_owned()),
-            paint: SpinnerPaint::Painting,
-        }));
-        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        assert!(text.contains("@backend"));
-        assert!(text.contains("Run validation"));
-        // Spinner line carries the role avatar glyph before the braille
-        // frame. Backend uses ◇ in the safe pack.
-        assert!(text.contains("◇"));
-    }
+    // `work_and_spinner_events_populate_status_rail` asserted the
+    // WorkCard body (title `Run validation`, role glyph `◇`) appeared
+    // on the right rail. Per ADR §Q5 and #383 AC-4 the slim rail no
+    // longer renders the WorkCard body, so this test is deleted
+    // rather than adapted. The chat-stream working card (#381) owns
+    // the role-glyph + title surface now.
 
     #[test]
     fn spinner_line_prepends_role_glyph_and_keeps_status_text() {
@@ -3493,16 +3484,12 @@ mod tests {
         assert_eq!(glyph_fg, token_fg);
     }
 
-    #[test]
-    fn work_cards_render_a_role_identity_header_per_card() {
-        let mut state = test_state();
-        state.apply_event(RoomEvent::WorkCard(sample_work_card()));
-        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
-        // The identity header line is `◇ @backend` (glyph + token).
-        // The card body that follows still contains the title.
-        assert!(text.contains("◇ @backend"));
-        assert!(text.contains("Run validation"));
-    }
+    // `work_cards_render_a_role_identity_header_per_card` asserted
+    // that the rail decorated each WorkCard with a `◇ @backend`
+    // identity header. The slim rail (#383) no longer renders the
+    // WorkCard body, so the header surface is gone. The chat-stream
+    // working card (#381) carries identity inline now. Per AC-4 the
+    // test is deleted, not adapted.
 
     #[test]
     fn composer_candidate_menu_styles_role_mentions_with_role_color() {
