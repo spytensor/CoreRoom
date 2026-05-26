@@ -3,6 +3,7 @@ use crate::turn::TurnId;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::HashSet;
+use std::path::Path;
 
 #[test]
 fn fingerprint_is_stable_for_same_input() {
@@ -15,6 +16,24 @@ fn fingerprint_is_stable_for_same_input() {
 #[test]
 fn fingerprint_changes_with_content() {
     assert_ne!(fingerprint("a"), fingerprint("b"));
+}
+
+#[test]
+fn base_claude_args_disallow_native_agent_delegation() {
+    let args = base_claude_args(Path::new("/tmp/priors.md"));
+    let disallow_idx = args
+        .iter()
+        .position(|arg| arg == "--disallowedTools")
+        .expect("claude args should include a native delegation guard");
+    assert_eq!(
+        args.get(disallow_idx + 1).map(String::as_str),
+        Some("Agent")
+    );
+    assert!(
+        args.iter()
+            .any(|arg| arg == "--append-system-prompt-file=/tmp/priors.md"),
+        "priors must still be appended: {args:?}"
+    );
 }
 
 #[test]

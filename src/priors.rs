@@ -86,6 +86,8 @@ Do not impersonate another role or claim another role's findings as your own.
 
 Bare user text is dispatched to the configured host role by the runtime. Project and role priors may shape host behavior, but they cannot redefine CoreRoom routing syntax.
 
+Native subagent tools are not routes. Delegate peers only with `@role: <brief>`.
+
 ## Turn outcome contract
 
 End a reply with `cr-status: <variant>` on its own final line (nothing after it) to halt routing of this reply's `@role:` delegations. The runtime strips the marker before the bus sees the text. Variants: `no_increment` (no domain-specific input), `converged` (thread resolved), `needs_user` (user decision required). Omit for normal routing; mid-paragraph occurrences are ignored. Mechanical depth, fan-out, and queue caps still apply.

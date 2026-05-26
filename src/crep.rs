@@ -130,7 +130,9 @@ pub enum CrepEvent {
         /// Parsed `@<name>` references from `text`, in order of first
         /// appearance, deduplicated.
         mentions: Vec<String>,
-        /// Cost of this turn in USD (engine-reported).
+        /// Cost sample in USD (engine-reported). Some engines report a
+        /// per-turn delta; Claude Code reports a cumulative session
+        /// total that `cr cost` normalizes before aggregation.
         cost_usd: f64,
         /// Tokens served from prompt cache for this turn (engine-reported).
         cache_read: u64,

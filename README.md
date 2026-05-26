@@ -61,6 +61,10 @@ delegation line like `@x: <brief>` in its reply.
   Claude Code is gated by a CoreRoom-injected PreToolUse hook; Codex and
   Gemini approval support follows each engine's native protocol and is shown
   only when CoreRoom can supervise it.
+- **Control-plane delegation.** CoreRoom disables Claude Code's native
+  `Agent` delegation tool inside managed roles. Peer work must route through
+  `@role: <brief>` so parent turns, lifecycle, cost, interrupts, and evidence
+  stay visible to `@host`.
 
 ## Design docs
 
@@ -119,7 +123,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.17
+TAG=v0.9.18
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -243,6 +247,9 @@ Useful commands:
   replays the full event log when you need to audit what happened. Set
   `COREROOM_VERBOSE_TOOLS=1` to opt the live REPL back into the full
   per-tool trace stream when you need it inline.
+- The live room leaves terminal mouse capture off by default so transcript
+  text can be selected and copied normally. Set `COREROOM_MOUSE_CAPTURE=1`
+  if you prefer mouse-wheel routing inside the TUI.
 - Permission prompts appear only while a decision is needed. Successful
   once-only allows clear the prompt and stay out of the chat stream; session
   approvals and denials remain visible because they change what the role can
@@ -254,9 +261,9 @@ Useful commands:
 | ---------- | ------------------ | ----- | ------ |
 | Prompt isolation | system-prompt file | MCP base instructions | requires `--system-instruction-file` |
 | Tool trace events | proposed + executed | exec notifications when emitted | stream-json tool_use/tool_result |
-| Cost reporting | per turn | — | — |
+| Cost reporting | normalized from session total | — | — |
 | Budget enforcement | native cap | — | — |
-| Permission gating | `ask` / `auto` / `bypass` via PreToolUse hook | `ask` / `auto` / `bypass` via MCP approval bridge in live REPL | explicit `bypass` only |
+| Permission gating | `ask` / `auto` / `bypass` via PreToolUse hook; native `Agent` delegation disabled | `ask` / `auto` / `bypass` via MCP approval bridge in live REPL | explicit `bypass` only |
 
 `cr cost` excludes unsupported engines from the numeric total and marks them
 with `—`. This is deliberate: older builds displayed `$0.00` for engines

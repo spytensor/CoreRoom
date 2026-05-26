@@ -285,9 +285,9 @@ partial scope coverage is a blocker.
 ### Claude Code adapter
 
 - Spawn: `claude --print --input-format=stream-json --output-format=stream-json
-  --verbose --dangerously-skip-permissions --append-system-prompt-file <priors>
-  --settings <hooks-config>` when permission mode is `ask` or `auto`;
-  `bypass` omits the hook settings.
+  --verbose --dangerously-skip-permissions --disallowedTools Agent
+  --append-system-prompt-file <priors> --settings <hooks-config>` when
+  permission mode is `ask` or `auto`; `bypass` omits the hook settings.
 - Input: stream-json messages on stdin. `content` must be array of blocks
   (`[{"type":"text","text":"…"}]`), not bare string.
 - Output: stream-json on stdout (`system`, `assistant`, `result`,
@@ -300,8 +300,13 @@ partial scope coverage is a blocker.
   `/deny <tool>` update the session policy file read by that hook. In
   Claude Code's non-interactive stream mode, `ask` is represented as a
   safe denial in `permission_denials`; the user can `/allow` and retry.
+- Native delegation guard: Claude Code's `Agent` tool is disabled for
+  managed CoreRoom roles. Peer work must use `@role: <brief>` so the
+  dispatcher owns parent turns, lifecycle, cost attribution, interrupts,
+  and tracker evidence.
 - Session ID: extracted from `system.subtype="init"` event at start.
-- Cost: per-turn `result.total_cost_usd`. Wrapper aggregates per role per day.
+- Cost: `result.total_cost_usd` is a cumulative Claude Code session sample;
+  `cr cost` normalizes monotonic samples before aggregating per role.
 
 ### Codex adapter
 
@@ -499,6 +504,7 @@ Raw CREP JSONL per role per session. Never auto-loaded — used for forensics,
 | Patch directory bloat                | Hard 50-cap per role + FIFO archive at v0.1               |
 | Routing loops (`@a` ↔ `@b` ↔ `@a`)   | Dispatcher-owned routing state. Auto-router only acts on explicit delegation lines that start with `@role:`, and skips self-delegation (`@a` delegating to itself), unknown roles (`@<not-running>`), and ungrounded turns (tool calls were systematically denied → reply is a guess). User-origin depth is 0; each auto-route child is parent depth + 1; default max hop depth is 5. Fan-out and queued-turn limits are separate; chains also end when the queue drains or the user halts (`Ctrl-C` × 2 or `/halt`). |
 | Permission gate fail-open            | Hook script defaults to deny on any error; wrapper supervises hook process and treats non-zero exit without decision-file as deny |
+| Engine-native delegation escape      | Claude Code `Agent` is disallowed at spawn time and denied by the CoreRoom hook so sub-work cannot bypass `@role` routing, lifecycle, cost, or host interrupts |
 | Concurrency / SIGINT mid-tool        | Each role's tool calls wrapped in `.coreroom/locks/<role>.inflight`. On startup, stale inflight markers put the role in recovery mode (no new tool calls until user acknowledges) |
 | Token cost runaway                   | User halts with `Ctrl-C` × 2 or `/halt`; cost per turn is surfaced in the WorkCard so runaway behavior is visible |
 | Role identity drift over months      | v0.2 `cr review` diffs journal-self vs priors-self and surfaces contradictions |

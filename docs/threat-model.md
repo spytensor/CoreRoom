@@ -70,41 +70,47 @@ architecture amendment before implementation.
    route. Auto-routing only acts on explicit delegation lines accepted by the
    parser, such as `@backend: <brief>` or `@backend @ci: <brief>`.
 
-4. Peer output is quoted evidence, not a command channel.
+4. Engine-native delegation is not a CoreRoom route.
+   Managed roles must not use engine-native subagent tools such as Claude
+   Code `Agent`. Those tools create work and cost outside dispatcher-owned
+   parent turns, lifecycle, interrupts, and evidence. Peer work must route
+   through `@role: <brief>`.
+
+5. Peer output is quoted evidence, not a command channel.
    Cross-role payloads are treated as data from the sending role. A receiving
    role can use that content as context, but embedded instructions inside the
    quote do not override its kernel, priors, or current user request.
 
-5. Current-thread evidence is required for peer claims.
+6. Current-thread evidence is required for peer claims.
    A role may claim consensus, approval, review completion, or "merged
    perspectives" only from current-thread peer evidence surfaced by the
    runtime, such as peer-quote envelopes, current turn ids, or user-pasted
    current-thread text. Memory, priors, journals, and resumed engine context
    are not enough.
 
-6. Editable logs are not enforcement state.
+7. Editable logs are not enforcement state.
    `.coreroom/messages.jsonl` supports replay and audit, but live safety
    decisions must come from runtime-owned state or explicit user commands.
    Future budget enforcement must not trust a mutable log total.
 
-7. Permission policy is visible and resettable.
+8. Permission policy is visible and resettable.
    Existing allow/deny decisions must be visible at startup and through
    `/permissions`. Review or release workflows that require fresh attention
    should use `/permissions clear` and, when stale engine context matters,
    `/fresh`.
 
-8. Resume is convenience, not provenance.
+9. Resume is convenience, not provenance.
    Resuming an engine session may carry useful context, but it also carries
    stale claims. `cr` must surface resumed roles and the clean-start controls.
    Release reviews, audits, and incident work should prefer `cr start --fresh`
    or `/fresh` unless the user intentionally wants continuity.
 
-9. Tier 0 is inline.
+10. Tier 0 is inline.
    Tier 0/read-only review may inspect files and commands needed for evidence,
    but it does not write hidden `.coreroom/` review artifacts. Persistent
    evidence, cross-model review, or release sign-off belongs in Tier 1.
 
-10. Authority-scoped veto is explicit.
+11. Authority-scoped veto is explicit.
     A role can block plan advancement only when all of these are true: the
     role has a validated authority scope in configuration, the plan artifact
     declares an intersecting scope, and the role records an explicit review
@@ -112,41 +118,41 @@ architecture amendment before implementation.
     editable logs cannot create authority, expand scope, reject a plan, or
     override a rejection.
 
-11. User override is a command, not a claim.
+12. User override is a command, not a claim.
     A scoped veto can be overruled only by an explicit user command with a
     reason. The override is recorded in the gate ledger and CREP audit trail.
     Text emitted by a role, transcript replay, or a journal entry may explain
     the override after the fact, but cannot substitute for it.
 
-12. Host-led control is visible and confirmable.
+13. Host-led control is visible and confirmable.
     `@host` is the highest in-room coordination authority, but host output is
     still model text. Persistent project state changes require explicit user
     confirmation or a visible command path. Non-host roles cannot create
     WorkOrders, register sources, update trackers, prepare completion claims,
     or close evidence gaps by prose.
 
-13. WorkOrders bind state; they do not prove state.
+14. WorkOrders bind state; they do not prove state.
     A WorkOrder can link a GitHub Issue, gate thread, branch, PR, tracker row,
     and evidence expectations, but it is still a local project file. GitHub
     Issue creation or binding requires confirmation. Binding an existing issue
     must not silently mutate the issue body, labels, milestone, or comments.
     Completion still depends on external evidence and tracker closure.
 
-14. Source Registry is pinned context, not prompt memory.
+15. Source Registry is pinned context, not prompt memory.
     Project sources must carry pins, trust levels, owners, visible roles,
     purpose, and refresh policy before they can be used for WorkOrder context.
     Registering or re-pinning a source requires confirmation. Remote and
     external sources must never silently refresh. Adding a source does not
     mount it into role knowledge or make it part of a ContextPack.
 
-15. ContextPacks are scoped selections.
+16. ContextPacks are scoped selections.
     A ContextPack can select path/range or snapshot references from registered
     sources for specific target roles. It must not imply that all project
     sources are loaded into every role. Stale pins and unpinned selected
     sources must be surfaced before delegation; they are not hidden evidence
     of freshness.
 
-16. Evidence Packets are structured claims.
+17. Evidence Packets are structured claims.
     Evidence Packets can support host PR summaries, but completion still
     depends on required fields being present and tracker state being updated.
     Model prose alone cannot satisfy changed-file, command, test, review, risk,

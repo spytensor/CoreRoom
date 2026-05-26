@@ -2597,16 +2597,30 @@ fn lines_to_plain_string(lines: &[Line<'_>]) -> String {
         .join("\n")
 }
 
-fn write_enter_commands<W: Write>(mut writer: W) -> io::Result<()> {
-    // `EnableMouseCapture` is what turns the live room into a true
-    // K9S / tmux / vim style sandbox: the terminal stops scrolling its
-    // own main-buffer scrollback in response to the wheel and forwards
-    // mouse events to us instead. Without this, alt-screen still lets
-    // the user surface prior shell history with the scroll wheel on
-    // iTerm2 / Terminal.app, which breaks the "this is its own app"
-    // impression. We don't act on the mouse events for now — the
-    // event loop ignores them — but the capture is enough to keep the
-    // viewport pinned to what the TUI rendered.
+fn write_enter_commands<W: Write>(writer: W) -> io::Result<()> {
+    write_enter_commands_with_mouse_capture(writer, mouse_capture_opt_in())
+}
+
+fn mouse_capture_opt_in() -> bool {
+    std::env::var("COREROOM_MOUSE_CAPTURE")
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn write_enter_commands_with_mouse_capture<W: Write>(
+    mut writer: W,
+    enable_mouse_capture: bool,
+) -> io::Result<()> {
+    // Mouse capture is intentionally opt-in. It lets the live room own
+    // wheel events, but it also prevents normal terminal text
+    // selection. Defaulting to copyable transcript text is the less
+    // surprising behavior; users who prefer mouse-wheel routing can
+    // run with `COREROOM_MOUSE_CAPTURE=1`.
     //
     // Cursor visibility is intentionally *not* set here. ratatui's
     // `Terminal::draw` shows or hides the cursor every frame based on
@@ -2614,12 +2628,11 @@ fn write_enter_commands<W: Write>(mut writer: W) -> io::Result<()> {
     // standalone `Hide` here would race with the composer's per-frame
     // `set_cursor_position` call and leave the Ask input without a
     // visible caret.
-    execute!(
-        writer,
-        EnterAlternateScreen,
-        EnableBracketedPaste,
-        EnableMouseCapture,
-    )
+    execute!(writer, EnterAlternateScreen, EnableBracketedPaste)?;
+    if enable_mouse_capture {
+        execute!(writer, EnableMouseCapture)?;
+    }
+    Ok(())
 }
 
 fn write_leave_commands<W: Write>(mut writer: W) -> io::Result<()> {
@@ -2950,16 +2963,28 @@ mod tests {
         // per-frame `set_cursor_position` call and leaves Ask without a
         // visible caret.
         let mut buf: Vec<u8> = Vec::new();
-        super::write_enter_commands(&mut buf).expect("write enter commands");
+        super::write_enter_commands_with_mouse_capture(&mut buf, false)
+            .expect("write enter commands");
         let text = String::from_utf8(buf).expect("enter commands are valid utf8");
         assert!(
             !text.contains("\x1b[?25l"),
             "enter commands must not hide the cursor: {text:?}"
         );
-        // Mouse capture must remain enabled (the v0.9.12 sandbox contract).
+        assert!(
+            !text.contains("\x1b[?1000h") && !text.contains("\x1b[?1003h"),
+            "mouse capture should default off so terminal selection works: {text:?}"
+        );
+    }
+
+    #[test]
+    fn write_enter_commands_can_opt_into_mouse_capture() {
+        let mut buf: Vec<u8> = Vec::new();
+        super::write_enter_commands_with_mouse_capture(&mut buf, true)
+            .expect("write enter commands");
+        let text = String::from_utf8(buf).expect("enter commands are valid utf8");
         assert!(
             text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
-            "enter commands should still enable mouse capture: {text:?}"
+            "opt-in enter commands should enable mouse capture: {text:?}"
         );
     }
 
@@ -3927,7 +3952,7 @@ mod tests {
                 priors_hash: String::new(),
                 turn_id: turn_id.to_owned(),
                 thread_id: format!("thread-{turn_id}"),
-                parent_turn_id: None,
+                parent_turn_id: Some("root".to_owned()),
                 queue_position: 0,
             }),
             host_role: state.host_role.clone(),
@@ -3956,7 +3981,7 @@ mod tests {
                 priors_hash: String::new(),
                 turn_id: turn_id.to_owned(),
                 thread_id: format!("thread-{turn_id}"),
-                parent_turn_id: None,
+                parent_turn_id: Some("root".to_owned()),
                 queue_position: 0,
             }),
             host_role: state.host_role.clone(),
@@ -4131,7 +4156,7 @@ mod tests {
             priors_hash: String::new(),
             turn_id: crate::turn::TurnId::from(turn.to_owned()),
             thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
-            parent_turn_id: None,
+            parent_turn_id: Some(crate::turn::TurnId::from("root".to_owned())),
             queue_position: 0,
         }
     }
