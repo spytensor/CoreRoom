@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.19"
+items = [
+  "stale Codex resume sessions retry fresh instead of printing Session not found",
+  "@user now has a visible identity color in scrollback",
+  "root host turns no longer double-print @host handoff banners",
+]
+
+[[whats_new]]
 version = "0.9.18"
 items = [
   "Claude Agent delegation is disabled inside CoreRoom roles; use @role routing",

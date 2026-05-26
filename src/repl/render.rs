@@ -167,9 +167,13 @@ pub(super) fn render_event_line_at_width(
         // with banners.
         CrepEvent::TurnDispatched {
             role,
+            parent_turn_id,
             queue_position,
             ..
         } => {
+            if parent_turn_id.is_none() && role == host_role {
+                return String::new();
+            }
             if *queue_position == 0 {
                 handoff_banner(role, host_role, "starting", width)
             } else {

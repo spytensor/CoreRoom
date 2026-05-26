@@ -1272,7 +1272,7 @@ async fn write_loop(
     let approval_policy = codex_approval_policy(permission_mode);
     let sandbox = codex_sandbox(permission_mode);
     let mut thread_id = initial_thread_id.filter(|id| !id.trim().is_empty());
-    while let Some(msg) = rx.recv().await {
+    'prompt_loop: while let Some(msg) = rx.recv().await {
         if runtime.base.stopping.load(Ordering::SeqCst) {
             break;
         }
@@ -1290,148 +1290,223 @@ async fn write_loop(
         let turn_id = prompt.turn_id.clone();
         let thread_id_for_events = prompt.thread_id.clone();
         let prompt = degrade_image_refs_for_codex(&prompt.text);
-        let params = codex_tool_call_params(
-            &prompt,
-            &priors_text,
-            approval_policy,
-            sandbox,
-            thread_id.as_deref(),
-        );
+        let mut retried_stale_session = false;
+        loop {
+            let attempted_thread_id = thread_id.clone();
+            let params = codex_tool_call_params(
+                &prompt,
+                &priors_text,
+                approval_policy,
+                sandbox,
+                attempted_thread_id.as_deref(),
+            );
 
-        // Allocate the tools/call request id up front and publish it
-        // into the cancel-tracker before sending. The drainer reads
-        // this lock to know exactly which id to target with
-        // `notifications/cancelled` — no inference from `pending`,
-        // so initialize ids and stale-during-cleanup ids cannot win.
-        let request_id = client.alloc_id().await;
-        *current_tools_call.lock().await = Some(request_id);
-        let (outcome, partial_text, event_thread_id) = client
-            .request_with_id_capture(
-                "tools/call",
-                params,
-                request_id,
-                Some((turn_id.clone(), thread_id_for_events.clone())),
-            )
-            .await;
-        *current_tools_call.lock().await = None;
+            // Allocate the tools/call request id up front and publish it
+            // into the cancel-tracker before sending. The drainer reads
+            // this lock to know exactly which id to target with
+            // `notifications/cancelled` — no inference from `pending`,
+            // so initialize ids and stale-during-cleanup ids cannot win.
+            let request_id = client.alloc_id().await;
+            *current_tools_call.lock().await = Some(request_id);
+            let (outcome, partial_text, event_thread_id) = client
+                .request_with_id_capture(
+                    "tools/call",
+                    params,
+                    request_id,
+                    Some((turn_id.clone(), thread_id_for_events.clone())),
+                )
+                .await;
+            *current_tools_call.lock().await = None;
 
-        // Take the halted-id marker if it matches THIS request. A
-        // stale marker from a previous turn — or a marker for some
-        // future turn — stays in place; we only consume what we
-        // know belongs to us. This is the fix for the previous
-        // AtomicBool design that could leak a halt signal into the
-        // next turn's legitimate error.
-        let halted_match = {
-            let mut guard = halted_request_id.lock().await;
-            if *guard == Some(request_id) {
-                *guard = None;
-                true
-            } else {
-                false
-            }
-        };
-
-        match outcome {
-            Ok(result) => {
-                if runtime.base.stopping.load(Ordering::SeqCst) {
-                    break;
+            // Take the halted-id marker if it matches THIS request. A
+            // stale marker from a previous turn — or a marker for some
+            // future turn — stays in place; we only consume what we
+            // know belongs to us. This is the fix for the previous
+            // AtomicBool design that could leak a halt signal into the
+            // next turn's legitimate error.
+            let halted_match = {
+                let mut guard = halted_request_id.lock().await;
+                if *guard == Some(request_id) {
+                    *guard = None;
+                    true
+                } else {
+                    false
                 }
-                if halted_match {
-                    // Codex acked the cancel after the model already
-                    // produced a final result — rare but possible.
-                    // Honour the user's halt: emit TurnInterrupted
-                    // and discard the late result so the REPL drain
-                    // sees the boundary.
-                    let _ = runtime
-                        .base
-                        .events
-                        .send(turn_interrupted_event(
-                            &runtime.base.role,
-                            &partial_text,
-                            &turn_id,
-                            &thread_id_for_events,
-                        ))
-                        .await;
-                    continue;
-                }
-                if let Some(next_thread_id) =
-                    extract_thread_id_from_tool_result(&result).or(event_thread_id)
-                {
-                    if thread_id.as_deref() != Some(next_thread_id.as_str()) {
-                        thread_id = Some(next_thread_id.clone());
-                        let _ = runtime
-                            .base
-                            .events
-                            .send(CrepEvent::RoleSessionUpdated {
-                                role: runtime.base.role.clone(),
-                                priors_hash: String::new(),
-                                session_id: next_thread_id,
-                            })
-                            .await;
+            };
+
+            match outcome {
+                Ok(result) => {
+                    if runtime.base.stopping.load(Ordering::SeqCst) {
+                        break 'prompt_loop;
                     }
-                }
-                let text = extract_text_from_tool_result(&result);
-                for event in crate::adapter::role_spoke_events_from_text_with_ids(
-                    &runtime.base.role,
-                    &text,
-                    0.0,
-                    0,
-                    &turn_id,
-                    &thread_id_for_events,
-                ) {
-                    let _ = runtime.base.events.send(event).await;
-                }
-            }
-            Err(error) => {
-                warn!(role = %runtime.base.role, %error, "codex tools/call failed");
-                if runtime.base.stopping.load(Ordering::SeqCst) {
-                    break;
-                }
-                if matches!(&error, RpcError::Timeout) {
-                    runtime.base.stopping.store(true, Ordering::SeqCst);
-                    let _ = runtime.internal_stop.try_send(StopReason::TimedOut);
-                    break;
-                }
-                // If the user halted *this* turn, the RPC error is
-                // expected (codex closed the pending request after
-                // our `notifications/cancelled` reached it). Emit
-                // `TurnInterrupted` instead of an error `RoleSpoke`.
-                // The id-bound marker means a stale halt cannot leak
-                // into a later turn's legitimate failure.
-                if halted_match {
-                    let _ = runtime
-                        .base
-                        .events
-                        .send(turn_interrupted_event(
-                            &runtime.base.role,
+                    if halted_match {
+                        // Codex acked the cancel after the model already
+                        // produced a final result — rare but possible.
+                        // Honour the user's halt: emit TurnInterrupted
+                        // and discard the late result so the REPL drain
+                        // sees the boundary.
+                        emit_turn_interrupted(
+                            &runtime,
                             &partial_text,
                             &turn_id,
                             &thread_id_for_events,
-                        ))
+                        )
                         .await;
-                    continue;
+                        break;
+                    }
+                    let text = extract_text_from_tool_result(&result);
+                    if attempted_thread_id.is_some()
+                        && !retried_stale_session
+                        && is_stale_codex_session_text(&text)
+                    {
+                        warn!(
+                            role = %runtime.base.role,
+                            "codex resume thread id is stale; retrying turn with a fresh thread"
+                        );
+                        retried_stale_session = true;
+                        thread_id = None;
+                        continue;
+                    }
+                    if let Some(next_thread_id) =
+                        extract_thread_id_from_tool_result(&result).or(event_thread_id)
+                    {
+                        if thread_id.as_deref() != Some(next_thread_id.as_str()) {
+                            thread_id = Some(next_thread_id.clone());
+                            let _ = runtime
+                                .base
+                                .events
+                                .send(CrepEvent::RoleSessionUpdated {
+                                    role: runtime.base.role.clone(),
+                                    priors_hash: String::new(),
+                                    session_id: next_thread_id,
+                                })
+                                .await;
+                        }
+                    }
+                    for event in crate::adapter::role_spoke_events_from_text_with_ids(
+                        &runtime.base.role,
+                        &text,
+                        0.0,
+                        0,
+                        &turn_id,
+                        &thread_id_for_events,
+                    ) {
+                        let _ = runtime.base.events.send(event).await;
+                    }
+                    break;
                 }
-                let text = format!("[codex error: {error}]");
-                let _ = runtime
-                    .base
-                    .events
-                    .send(CrepEvent::RoleSpoke {
-                        role: runtime.base.role.clone(),
-                        priors_hash: String::new(),
-                        text,
-                        mentions: Vec::new(),
-                        cost_usd: 0.0,
-                        cache_read: 0,
-                        turn_id,
-                        thread_id: thread_id_for_events,
-                        outcome: crate::crep::TurnOutcome::Continue,
-                        phase_block: None,
-                    })
-                    .await;
+                Err(error) => {
+                    warn!(role = %runtime.base.role, %error, "codex tools/call failed");
+                    if runtime.base.stopping.load(Ordering::SeqCst) {
+                        break 'prompt_loop;
+                    }
+                    if matches!(&error, RpcError::Timeout) {
+                        runtime.base.stopping.store(true, Ordering::SeqCst);
+                        let _ = runtime.internal_stop.try_send(StopReason::TimedOut);
+                        break 'prompt_loop;
+                    }
+                    if attempted_thread_id.is_some()
+                        && !retried_stale_session
+                        && is_stale_codex_session_error(&error)
+                    {
+                        warn!(
+                            role = %runtime.base.role,
+                            "codex resume thread id failed; retrying turn with a fresh thread"
+                        );
+                        retried_stale_session = true;
+                        thread_id = None;
+                        continue;
+                    }
+                    // If the user halted *this* turn, the RPC error is
+                    // expected (codex closed the pending request after
+                    // our `notifications/cancelled` reached it). Emit
+                    // `TurnInterrupted` instead of an error `RoleSpoke`.
+                    // The id-bound marker means a stale halt cannot leak
+                    // into a later turn's legitimate failure.
+                    if halted_match {
+                        emit_turn_interrupted(
+                            &runtime,
+                            &partial_text,
+                            &turn_id,
+                            &thread_id_for_events,
+                        )
+                        .await;
+                        break;
+                    }
+                    emit_codex_error_event(&runtime, &error, turn_id, thread_id_for_events).await;
+                    break;
+                }
             }
         }
     }
     debug!(role = %runtime.base.role, "codex write loop exiting");
+}
+
+fn is_stale_codex_session_error(error: &RpcError) -> bool {
+    matches!(error, RpcError::Server(message) if is_stale_codex_session_text(message))
+}
+
+fn is_stale_codex_session_text(text: &str) -> bool {
+    if is_stale_codex_session_message(text) {
+        return true;
+    }
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(is_stale_codex_session_message)
+        })
+        .unwrap_or(false)
+}
+
+fn is_stale_codex_session_message(text: &str) -> bool {
+    text.trim_start()
+        .starts_with("Session not found for thread_id:")
+}
+
+async fn emit_turn_interrupted(
+    runtime: &CodexWriteRuntime,
+    partial_text: &str,
+    turn_id: &str,
+    thread_id: &str,
+) {
+    let _ = runtime
+        .base
+        .events
+        .send(turn_interrupted_event(
+            &runtime.base.role,
+            partial_text,
+            turn_id,
+            thread_id,
+        ))
+        .await;
+}
+
+async fn emit_codex_error_event(
+    runtime: &CodexWriteRuntime,
+    error: &RpcError,
+    turn_id: String,
+    thread_id: String,
+) {
+    let text = format!("[codex error: {error}]");
+    let _ = runtime
+        .base
+        .events
+        .send(CrepEvent::RoleSpoke {
+            role: runtime.base.role.clone(),
+            priors_hash: String::new(),
+            text,
+            mentions: Vec::new(),
+            cost_usd: 0.0,
+            cache_read: 0,
+            turn_id,
+            thread_id,
+            outcome: crate::crep::TurnOutcome::Continue,
+            phase_block: None,
+        })
+        .await;
 }
 
 fn turn_interrupted_event(
@@ -1810,6 +1885,19 @@ mod tests {
         assert_eq!(params["arguments"]["threadId"], "thread-1");
         assert_eq!(params["arguments"]["prompt"], "continue");
         assert!(params["arguments"].get("base-instructions").is_none());
+    }
+
+    #[test]
+    fn stale_codex_session_errors_are_detected_in_tool_text_and_rpc_errors() {
+        let text = "Session not found for thread_id: 4028d717-299e-4039-b333-c615a041c197";
+        assert!(is_stale_codex_session_text(text));
+        assert!(is_stale_codex_session_error(&RpcError::Server(
+            serde_json::json!({"message": text}).to_string()
+        )));
+        assert!(!is_stale_codex_session_text("ordinary model reply"));
+        assert!(!is_stale_codex_session_text(
+            "quoted text: Session not found for thread_id: fake"
+        ));
     }
 
     #[test]

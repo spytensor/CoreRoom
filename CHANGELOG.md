@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.19] - 2026-05-26
+
+### Fixed
+
+- **Codex stale resume sessions recover cleanly.** If Codex reports
+  `Session not found for thread_id` for a persisted thread id, CoreRoom now
+  retries that turn once with a fresh Codex thread instead of rendering the
+  raw adapter error as an `@host` reply.
+- **Root host turns no longer double-label `@host`.** The transcript now
+  suppresses the root host `TurnDispatched` handoff banner while preserving
+  real cross-role handoff banners.
+- **`@user` is visibly styled in scrollback.** The user tag now uses the
+  prompt green instead of off-white, so user-authored transcript lines are
+  visually distinct from body text and role output.
+
 ## [0.9.18] - 2026-05-26
 
 ### Fixed
@@ -1700,7 +1715,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.18...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.19...HEAD
+[0.9.19]: https://github.com/spytensor/CoreRoom/compare/v0.9.18...v0.9.19
 [0.9.18]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/spytensor/CoreRoom/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/spytensor/CoreRoom/compare/v0.9.15...v0.9.16

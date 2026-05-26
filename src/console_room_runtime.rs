@@ -322,8 +322,7 @@ impl RoomRuntimeState {
 
     fn push_user_line(&mut self, line: &str) {
         // Style the @user tag consistently with the colored role
-        // identities around it. Off-white bold reads as "you" without
-        // colliding with any role slot in the palette.
+        // identities around it.
         self.push_scrollback(Line::from(vec![
             Span::styled(
                 "@user".to_owned(),
@@ -1658,12 +1657,10 @@ fn strip_leading_role_header(rendered: &str, role: &str) -> String {
     }
 }
 
-/// Display color for the `@user` tag in scrollback. Picked to read as
-/// "you" without collding with any role slot in the palette (host
-/// lavender, engineer/backend sky, reviewer blossom, security coral,
-/// qa honey, sre teal, frontend rose, product jade). `EM` from the
-/// crossterm palette is `RGB(0xf0, 0xf0, 0xf0)` — warm off-white.
-const USER_TAG_COLOR: Color = Color::Rgb(0xf0, 0xf0, 0xf0);
+/// Display color for the `@user` tag in scrollback. Use the prompt
+/// green so user-authored text is visibly distinct from both body text
+/// and every role slot.
+const USER_TAG_COLOR: Color = Color::Rgb(0x58, 0xc3, 0x9c);
 
 #[cfg(test)]
 fn spinner_line(snapshot: &SpinnerSnapshot, host_role: &str) -> Line<'static> {

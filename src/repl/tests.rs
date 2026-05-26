@@ -640,17 +640,17 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.9.18 ───────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.9.19 ───────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
 │ ◉ @host      cc     · 1M · ask          • /halt @role interrupts a turn; Ct… │
 │ ◇ @backend   cc     · 1M · ask          • /journal <role> captures today's … │
 │ ◆ @security  codex  · default · bypass                                       │
-│                                         what's new in 0.9.18                 │
-│  3.3k  base tokens loaded               • Claude Agent delegation is disabl… │
-│ /repo/CoreRoom                          • cr cost now normalizes Claude Cod… │
-│                                         • terminal text selection works by … │
+│                                         what's new in 0.9.19                 │
+│  3.3k  base tokens loaded               • stale Codex resume sessions retry… │
+│ /repo/CoreRoom                          • @user now has a visible identity … │
+│                                         • root host turns no longer double-… │
 │                                                                              │
 │                                         /help for commands                   │
 │                                                                              │
@@ -860,6 +860,19 @@ fn turn_dispatched_renders_as_full_width_handoff_banner() {
     };
     let rendered = strip_ansi(&render_event_line_at_width(&queued, "host", 60));
     assert_eq!(rendered, "  @frontend queued · 2 ahead");
+}
+
+#[test]
+fn root_host_turn_dispatched_is_not_rendered_as_handoff_banner() {
+    let dispatched = CrepEvent::TurnDispatched {
+        role: "host".into(),
+        priors_hash: String::new(),
+        turn_id: String::new(),
+        thread_id: String::new(),
+        parent_turn_id: None,
+        queue_position: 0,
+    };
+    assert_eq!(render_event_line_at_width(&dispatched, "host", 80), "");
 }
 
 #[test]
