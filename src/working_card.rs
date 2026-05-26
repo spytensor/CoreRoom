@@ -481,7 +481,7 @@ mod tests {
                 priors_hash: String::new(),
                 turn_id: TurnId::from("t1".to_owned()),
                 thread_id: TurnId::from("thread-t1".to_owned()),
-                parent_turn_id: None,
+                parent_turn_id: Some(TurnId::from("root".to_owned())),
                 queue_position: 0,
             })
             .expect("dispatch yields a spawn id");

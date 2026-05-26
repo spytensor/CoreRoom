@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::adapter::PermissionMode;
+
+const CORE_CONTROL_PLANE_TOOLS: &[&str] = &["Agent"];
 use crate::config::COREROOM_DIR;
 
 pub use bridge::{
@@ -331,6 +333,12 @@ fn decide_tool(
     policy: &PermissionPolicy,
     request: &ToolRequest,
 ) -> ToolVerdict {
+    if is_core_control_plane_tool(&request.name) {
+        return deny(format!(
+            "{} is reserved for engine-native delegation; use CoreRoom @role: routing so cost, lifecycle, and interrupts stay host-controlled",
+            request.name
+        ));
+    }
     if policy.denies(&request.name) {
         return deny(format!(
             "{} denied by CoreRoom session policy",
@@ -409,6 +417,12 @@ fn canonical_tool_name(tool: &str) -> String {
     tool.trim().to_owned()
 }
 
+fn is_core_control_plane_tool(tool: &str) -> bool {
+    CORE_CONTROL_PLANE_TOOLS
+        .iter()
+        .any(|reserved| tool.eq_ignore_ascii_case(reserved))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +458,20 @@ mod tests {
         };
         let verdict = decide_tool(PermissionMode::Auto, &PermissionPolicy::default(), &request);
         assert_eq!(verdict.claude_decision, "ask");
+    }
+
+    #[test]
+    fn native_agent_tool_is_denied_even_when_policy_allows_it() {
+        let mut policy = PermissionPolicy::default();
+        policy.allow_tool("Agent");
+        let request = ToolRequest {
+            name: "Agent".into(),
+            input: json!({"description": "spawn reviewer"}),
+        };
+        let verdict = decide_tool(PermissionMode::Bypass, &policy, &request);
+        assert_eq!(verdict.claude_decision, "deny");
+        assert!(verdict.reason.contains("@role"));
+        assert!(verdict.reason.contains("host-controlled"));
     }
 
     #[test]

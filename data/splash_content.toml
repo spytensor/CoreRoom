@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.18"
+items = [
+  "Claude Agent delegation is disabled inside CoreRoom roles; use @role routing",
+  "cr cost now normalizes Claude Code cumulative session totals",
+  "terminal text selection works by default; mouse capture is opt-in",
+]
+
+[[whats_new]]
 version = "0.9.17"
 items = [
   "sub-agent work now appears inline as chat-stream working cards with live tool calls",

@@ -11,6 +11,7 @@
 //! ```text
 //! claude --print --input-format=stream-json --output-format=stream-json \
 //!        --include-hook-events --verbose --dangerously-skip-permissions \
+//!        --disallowedTools Agent \
 //!        --append-system-prompt-file=<priors> [--model=<model>]
 //! ```
 //!
@@ -52,6 +53,7 @@ use crate::turn::{TurnId, LEGACY_TURN_ID};
 /// event outbound queue. Sized for typical interactive usage; can be
 /// revisited if back-pressure becomes a real problem.
 const CHANNEL_CAPACITY: usize = 64;
+const NATIVE_DELEGATION_TOOL: &str = "Agent";
 
 /// Adapter that drives the Claude Code CLI.
 #[derive(Debug, Clone)]
@@ -105,16 +107,9 @@ impl EngineAdapter for CcAdapter {
 
         let mut tempfiles = Vec::new();
         let mut cmd = Command::new(&self.claude_path);
-        cmd.arg("--print")
-            .arg("--input-format=stream-json")
-            .arg("--output-format=stream-json")
-            .arg("--include-hook-events")
-            .arg("--verbose")
-            .arg("--dangerously-skip-permissions")
-            .arg(format!(
-                "--append-system-prompt-file={}",
-                config.priors_path.display()
-            ));
+        for arg in base_claude_args(&config.priors_path) {
+            cmd.arg(arg);
+        }
         // Per amendment A-006: if the REPL handed us a session id
         // saved by a previous `cr start`, ask cc to resume that
         // conversation instead of opening a fresh one. cc tracks
@@ -233,6 +228,20 @@ impl EngineAdapter for CcAdapter {
             tempfiles,
         ))
     }
+}
+
+fn base_claude_args(priors_path: &Path) -> Vec<String> {
+    vec![
+        "--print".to_owned(),
+        "--input-format=stream-json".to_owned(),
+        "--output-format=stream-json".to_owned(),
+        "--include-hook-events".to_owned(),
+        "--verbose".to_owned(),
+        "--dangerously-skip-permissions".to_owned(),
+        "--disallowedTools".to_owned(),
+        NATIVE_DELEGATION_TOOL.to_owned(),
+        format!("--append-system-prompt-file={}", priors_path.display()),
+    ]
 }
 
 #[derive(Debug, Clone)]

@@ -242,21 +242,28 @@ pub struct SpawnLifecycleTracker {
     /// Turn-id → spawn-id index. Lets tool-call and `RoleSpoke`
     /// events find their spawn instance in O(log N) without scanning.
     by_turn: BTreeMap<TurnId, SpawnId>,
-    /// Host role name used to attribute root spawns (no `parent_turn_id`).
-    /// Root spawns are still recorded so the footer can narrate "host
-    /// is working" without a special case in the renderer.
+    /// Turn-id → role index for all dispatched turns, including public
+    /// root turns that are intentionally not tracked as sub-agent
+    /// spawns. Child spawns use this to attribute `spawned_by` without
+    /// forcing the root host turn itself into the working-card model.
+    role_by_turn: BTreeMap<TurnId, String>,
+    /// Host role name used as a fallback attribution when a child
+    /// dispatch references a parent turn that is not present in the
+    /// in-memory replay window.
     host_role: String,
 }
 
 impl SpawnLifecycleTracker {
     /// Build a new tracker. `host_role` is used as the default
-    /// `spawned_by` attribution for root-level spawns.
+    /// `spawned_by` attribution for child spawns whose parent turn is
+    /// outside the in-memory replay window.
     #[must_use]
     pub fn new(host_role: impl Into<String>) -> Self {
         Self {
             next_id: 0,
             instances: BTreeMap::new(),
             by_turn: BTreeMap::new(),
+            role_by_turn: BTreeMap::new(),
             host_role: host_role.into(),
         }
     }
@@ -330,7 +337,7 @@ impl SpawnLifecycleTracker {
                 turn_id,
                 parent_turn_id,
                 ..
-            } => Some(self.on_turn_dispatched(role, turn_id, parent_turn_id.as_ref())),
+            } => self.on_turn_dispatched(role, turn_id, parent_turn_id.as_ref()),
             CrepEvent::ToolCallProposed {
                 tool_name,
                 tool_use_id,
@@ -378,15 +385,25 @@ impl SpawnLifecycleTracker {
         role: &str,
         turn_id: &TurnId,
         parent_turn_id: Option<&TurnId>,
-    ) -> SpawnId {
-        // Concurrent spawns by the same role: each `TurnDispatched`
-        // mints a new spawn id even if a prior spawn for the same role
-        // is still `Working`. Distinguishing comes from `turn_id`.
+    ) -> Option<SpawnId> {
+        self.role_by_turn.insert(turn_id.clone(), role.to_owned());
+        let Some(parent_turn_id) = parent_turn_id else {
+            // Public root turns are not sub-agent spawns. Tracking
+            // them here made normal @host replies render as
+            // "@host spawning" footer noise and working cards.
+            return None;
+        };
+
+        // Concurrent spawns by the same role: each child
+        // `TurnDispatched` mints a new spawn id even if a prior spawn
+        // for the same role is still `Working`. Distinguishing comes
+        // from `turn_id`.
         let spawn_id = self.next_spawn_id();
-        let spawned_by = parent_turn_id
-            .and_then(|parent| self.by_turn.get(parent).copied())
-            .and_then(|parent_id| self.instances.get(&parent_id))
-            .map_or_else(|| self.host_role.clone(), |parent| parent.role.clone());
+        let spawned_by = self
+            .role_by_turn
+            .get(parent_turn_id)
+            .cloned()
+            .unwrap_or_else(|| self.host_role.clone());
         let now = Instant::now();
         let instance = SpawnInstance {
             spawn_id,
@@ -400,13 +417,13 @@ impl SpawnLifecycleTracker {
             final_report_message_id: None,
             outcome: Outcome::default(),
             turn_id: turn_id.clone(),
-            parent_turn_id: parent_turn_id.cloned(),
+            parent_turn_id: Some(parent_turn_id.clone()),
             title: String::new(),
             chat_position: 0,
         };
         self.instances.insert(spawn_id, instance);
         self.by_turn.insert(turn_id.clone(), spawn_id);
-        spawn_id
+        Some(spawn_id)
     }
 
     fn on_tool_proposed(
@@ -624,6 +641,10 @@ mod tests {
         }
     }
 
+    fn subagent_dispatched(role: &str, turn: &str) -> CrepEvent {
+        turn_dispatched(role, turn, Some("root"))
+    }
+
     fn tool_proposed(turn: &str, tool: &str, tool_use_id: &str) -> CrepEvent {
         CrepEvent::ToolCallProposed {
             role: String::new(),
@@ -680,11 +701,23 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_creates_spawning_instance_attributed_to_host_by_default() {
+    fn root_dispatch_is_not_tracked_as_a_subagent_spawn() {
+        let mut tracker = SpawnLifecycleTracker::new("host");
+        assert!(
+            tracker
+                .apply_event(&turn_dispatched("host", "root", None))
+                .is_none(),
+            "public root host turns must not become working-card spawns"
+        );
+        assert_eq!(tracker.instances().count(), 0);
+    }
+
+    #[test]
+    fn child_dispatch_creates_spawning_instance_attributed_to_host_by_default() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
-            .expect("dispatch yields spawn id");
+            .apply_event(&subagent_dispatched("backend", "t1"))
+            .expect("child dispatch yields spawn id");
         let instance = tracker.get(id).expect("instance exists");
         assert_eq!(instance.role, "backend");
         assert_eq!(instance.spawned_by, "host");
@@ -698,7 +731,7 @@ mod tests {
     fn first_tool_call_transitions_spawning_to_working() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         let instance = tracker.get(id).unwrap();
@@ -712,7 +745,7 @@ mod tests {
     fn streaming_output_alone_also_promotes_to_working() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&CrepEvent::RoleOutputDelta {
             role: "backend".to_owned(),
@@ -729,7 +762,7 @@ mod tests {
     fn tool_executed_marks_record_done_and_increments_step_count() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         tracker.apply_event(&tool_executed("t1", "u1", true));
@@ -748,7 +781,7 @@ mod tests {
         // RoleSpoke / TurnInterrupted reaches Done.
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         tracker.apply_event(&tool_executed("t1", "u1", false));
@@ -765,7 +798,7 @@ mod tests {
     fn role_spoke_transitions_working_to_done_then_reported_clean() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         tracker.apply_event(&tool_executed("t1", "u1", true));
@@ -790,7 +823,7 @@ mod tests {
     fn turn_interrupted_resolves_to_done_with_interrupted_outcome() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         tracker.apply_event(&turn_interrupted("t1"));
@@ -803,7 +836,7 @@ mod tests {
     fn interrupt_during_spawning_still_reaches_done_with_interrupted_outcome() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&turn_interrupted("t1"));
         let instance = tracker.get(id).unwrap();
@@ -817,10 +850,10 @@ mod tests {
         // different turn ids must mint two distinct spawn instances.
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id_a = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         let id_b = tracker
-            .apply_event(&turn_dispatched("backend", "t2", None))
+            .apply_event(&subagent_dispatched("backend", "t2"))
             .unwrap();
         assert_ne!(id_a, id_b);
 
@@ -846,9 +879,9 @@ mod tests {
         // @security via `parent_turn_id`. The security spawn should be
         // attributed to backend, not host.
         let mut tracker = SpawnLifecycleTracker::new("host");
-        let _backend = tracker
+        assert!(tracker
             .apply_event(&turn_dispatched("backend", "t1", None))
-            .unwrap();
+            .is_none());
         let security = tracker
             .apply_event(&turn_dispatched("security", "t2", Some("t1")))
             .unwrap();
@@ -859,7 +892,7 @@ mod tests {
     fn permission_denied_records_failed_tool_without_failing_lifecycle() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         tracker.apply_event(&CrepEvent::PermissionDenied {
             role: "backend".to_owned(),
@@ -885,13 +918,13 @@ mod tests {
     fn working_instances_ordered_by_started_at_lists_older_first() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let first = tracker
-            .apply_event(&turn_dispatched("security", "t1", None))
+            .apply_event(&subagent_dispatched("security", "t1"))
             .unwrap();
         // Force a different started_at by burning a tick. `Instant`
         // is monotonic on every supported platform.
         std::thread::sleep(std::time::Duration::from_millis(2));
         let second = tracker
-            .apply_event(&turn_dispatched("backend", "t2", None))
+            .apply_event(&subagent_dispatched("backend", "t2"))
             .unwrap();
         tracker.apply_event(&tool_proposed("t1", "Bash", "u1"));
         tracker.apply_event(&tool_proposed("t2", "Read", "u2"));
@@ -912,10 +945,10 @@ mod tests {
         // disjoint by state.
         let mut tracker = SpawnLifecycleTracker::new("host");
         let _spawning = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         let working = tracker
-            .apply_event(&turn_dispatched("security", "t2", None))
+            .apply_event(&subagent_dispatched("security", "t2"))
             .unwrap();
         // Promote the second spawn to Working with a tool call; leave
         // the first in Spawning.
@@ -942,7 +975,7 @@ mod tests {
         // Events that have no per-spawn meaning return `None` and
         // leave the tracker untouched.
         let mut tracker = SpawnLifecycleTracker::new("host");
-        tracker.apply_event(&turn_dispatched("backend", "t1", None));
+        tracker.apply_event(&subagent_dispatched("backend", "t1"));
         let before = tracker.get(SpawnId(0)).cloned().unwrap();
         let result = tracker.apply_event(&CrepEvent::RoleStarted {
             role: "backend".to_owned(),
@@ -967,7 +1000,7 @@ mod tests {
         // listens for it and last-write-wins onto `SpawnInstance::title`.
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("security", "t1", None))
+            .apply_event(&subagent_dispatched("security", "t1"))
             .unwrap();
         // Default title is empty before any `WorkTitle` lands.
         assert!(tracker.get(id).unwrap().title.is_empty());
@@ -1010,7 +1043,7 @@ mod tests {
     fn set_chat_position_stamps_renderer_hint_on_instance() {
         let mut tracker = SpawnLifecycleTracker::new("host");
         let id = tracker
-            .apply_event(&turn_dispatched("backend", "t1", None))
+            .apply_event(&subagent_dispatched("backend", "t1"))
             .unwrap();
         // Default chat_position is 0 — meaningless until the renderer
         // stamps it.

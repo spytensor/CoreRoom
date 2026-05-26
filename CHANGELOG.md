@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.18] - 2026-05-26
+
+### Fixed
+
+- **Claude Code native `Agent` delegation is disabled inside managed
+  roles.** CoreRoom now starts Claude Code with `--disallowedTools Agent`
+  and the permission hook hard-denies `Agent`, so peer work must go
+  through `@role: <brief>` where parent turns, lifecycle, interrupts,
+  cost, and evidence stay host-controlled.
+- **`cr cost` normalizes Claude Code cumulative session totals.** Claude
+  Code reports `total_cost_usd` as a session total, not a per-turn
+  increment; CoreRoom now converts those samples to monotonic deltas per
+  role/session before aggregating.
+- **Root turns no longer render as sub-agent spawns.** Public user/host
+  turns without a parent turn are ignored by the spawn lifecycle tracker,
+  fixing footer noise such as `@host spawning`.
+- **Terminal text selection works by default.** The live room no longer
+  enables mouse capture unless `COREROOM_MOUSE_CAPTURE=1` is set, so users
+  can select and copy transcript text normally.
+
+### Changed
+
+- **Engine-native delegation is documented as a threat-model invariant.**
+  The architecture and README now state that CoreRoom-owned delegation is
+  `@role: <brief>`, not an engine-native subagent plane.
+
 ## [0.9.17] - 2026-05-26
 
 ### Added
@@ -1674,7 +1700,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.18...HEAD
+[0.9.18]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/spytensor/CoreRoom/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/spytensor/CoreRoom/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/spytensor/CoreRoom/compare/v0.9.14...v0.9.15

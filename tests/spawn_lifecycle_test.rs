@@ -50,6 +50,10 @@ fn turn_dispatched(role: &str, turn: &str, parent: Option<&str>) -> CrepEvent {
     }
 }
 
+fn subagent_dispatched(role: &str, turn: &str) -> CrepEvent {
+    turn_dispatched(role, turn, Some("root"))
+}
+
 fn tool_proposed(turn: &str, tool: &str, tool_use_id: &str) -> CrepEvent {
     CrepEvent::ToolCallProposed {
         role: String::new(),
@@ -127,7 +131,7 @@ fn room_runtime_apply_event_drives_lifecycle_through_clean_path() {
     // surface: TurnDispatched → ToolCallProposed → ToolCallExecuted
     // → RoleSpoke (Done) → RoleSpoke (Reported).
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("backend", "t1", None)));
+    state.apply_event(crep_event(subagent_dispatched("backend", "t1")));
     let tracker = state.spawn_lifecycle();
     let spawn = tracker.instances().next().expect("instance exists");
     assert_eq!(spawn.state, SpawnState::Spawning);
@@ -161,7 +165,7 @@ fn room_runtime_apply_event_drives_lifecycle_through_interrupt_path() {
     // Outcome::Interrupted. There is no `Failed` lifecycle state
     // (per ADR §3 in `docs/v0.10-chat-stream-vs-dashboard.md`).
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("security", "t1", None)));
+    state.apply_event(crep_event(subagent_dispatched("security", "t1")));
     state.apply_event(crep_event(tool_proposed("t1", "Read", "u1")));
     state.apply_event(crep_event(turn_interrupted("t1")));
 
@@ -180,8 +184,8 @@ fn room_runtime_apply_event_routes_concurrent_spawns_by_turn_id() {
     // same role result in two independent SpawnInstances, each with
     // its own tool-call stream.
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("worker", "t1", None)));
-    state.apply_event(crep_event(turn_dispatched("worker", "t2", None)));
+    state.apply_event(crep_event(subagent_dispatched("worker", "t1")));
+    state.apply_event(crep_event(subagent_dispatched("worker", "t2")));
     state.apply_event(crep_event(tool_proposed("t1", "Bash", "u1")));
     state.apply_event(crep_event(tool_proposed("t2", "Read", "u2")));
 
@@ -210,8 +214,8 @@ fn room_runtime_working_spawn_instances_excludes_spawning() {
     // `Spawning` does not. The `working_spawn_instances` shortcut
     // on `RoomRuntimeState` must honor that filter.
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("backend", "t1", None)));
-    state.apply_event(crep_event(turn_dispatched("security", "t2", None)));
+    state.apply_event(crep_event(subagent_dispatched("backend", "t1")));
+    state.apply_event(crep_event(subagent_dispatched("security", "t2")));
     // Promote only the second to Working with a tool call.
     state.apply_event(crep_event(tool_proposed("t2", "Read", "u1")));
 
@@ -229,7 +233,7 @@ fn room_runtime_lifecycle_tolerates_unrelated_room_events() {
     use std::time::Instant;
 
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("backend", "t1", None)));
+    state.apply_event(crep_event(subagent_dispatched("backend", "t1")));
     state.apply_event(RoomEvent::Spinner(SpinnerSnapshot {
         role: "backend".to_owned(),
         frame: 0,
@@ -249,12 +253,13 @@ fn room_runtime_lifecycle_tolerates_unrelated_room_events() {
 
 #[test]
 fn parent_attribution_threads_through_dispatch_chain() {
-    // Verify the spawned_by attribution across a real dispatch
-    // chain: @host (root) → @backend (root) → @security (child of
-    // backend). Tests that the `parent_turn_id` lookup resolves the
-    // parent's role correctly when it itself is a tracked spawn.
+    // Verify the spawned_by attribution across a real dispatch chain:
+    // @host (public root) → @backend (child) → @security (child of
+    // backend). Public roots are remembered for attribution but are
+    // not themselves tracked as spawn instances.
     let mut state = make_state();
-    state.apply_event(crep_event(turn_dispatched("backend", "t1", None)));
+    state.apply_event(crep_event(turn_dispatched("host", "root", None)));
+    state.apply_event(crep_event(turn_dispatched("backend", "t1", Some("root"))));
     state.apply_event(crep_event(turn_dispatched("security", "t2", Some("t1"))));
 
     let instances: Vec<&SpawnInstance> = state.spawn_lifecycle().instances().collect();
@@ -267,7 +272,6 @@ fn parent_attribution_threads_through_dispatch_chain() {
         .iter()
         .find(|spawn| spawn.role == "backend")
         .unwrap();
-    // Root spawn is attributed to the host role.
     assert_eq!(backend.spawned_by, "host");
 }
 

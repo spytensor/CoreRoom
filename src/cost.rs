@@ -1,11 +1,13 @@
 //! `cr cost` — per-role spend summary derived from
 //! `.coreroom/messages.jsonl`.
 //!
-//! v0.1 sums `RoleSpoke.cost_usd` by role across the entire log
-//! (or, with `--since`, from the given date forward). Cache reads are
-//! also surfaced because they're a useful proxy for "how warm was
-//! this session" — large `cache_read` totals usually mean low cost
-//! per turn.
+//! `RoleSpoke.cost_usd` is summed by role across the entire log (or,
+//! with `--since`, from the given date forward). Claude Code reports
+//! its `total_cost_usd` as a cumulative session sample, so cc samples
+//! are normalized to monotonic deltas per role/session before they are
+//! added. Cache reads are also surfaced because they're a useful proxy
+//! for "how warm was this session" — large `cache_read` totals usually
+//! mean low cost per turn.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,7 +24,7 @@ use crate::crep::CrepEvent;
 pub struct RoleStats {
     /// Number of `RoleSpoke` events from this role.
     pub turns: u64,
-    /// Sum of `cost_usd` across all turns.
+    /// Sum of normalized cost across all turns.
     pub cost_usd: f64,
     /// Whether this role's engine reports real cost. Unsupported
     /// engines render as `—` rather than a fake `$0.00`.
@@ -61,10 +63,23 @@ pub async fn aggregate(
     let replay = MessageBus::replay(&log_path).await?;
     let mut by_role: BTreeMap<String, RoleStats> = BTreeMap::new();
     let mut engine_by_role: BTreeMap<String, String> = BTreeMap::new();
+    let mut session_by_role: BTreeMap<String, String> = BTreeMap::new();
+    let mut cc_cost_by_session: BTreeMap<(String, String), f64> = BTreeMap::new();
     for event in replay.events {
         match event {
-            CrepEvent::RoleStarted { role, engine, .. } => {
+            CrepEvent::RoleStarted {
+                role,
+                engine,
+                session_id,
+                ..
+            } => {
+                session_by_role.insert(role.clone(), session_id);
                 engine_by_role.insert(role, engine);
+            }
+            CrepEvent::RoleSessionUpdated {
+                role, session_id, ..
+            } => {
+                session_by_role.insert(role, session_id);
             }
             CrepEvent::RoleSpoke {
                 role,
@@ -73,11 +88,21 @@ pub async fn aggregate(
                 ..
             } => {
                 let engine = engine_by_role.get(&role).map(String::as_str);
+                let cost_increment = if engine == Some("cc") {
+                    cc_cost_delta(
+                        &mut cc_cost_by_session,
+                        &role,
+                        session_by_role.get(&role).map(String::as_str),
+                        cost_usd,
+                    )
+                } else {
+                    cost_usd
+                };
                 let entry = by_role.entry(role).or_default();
                 entry.turns += 1;
                 if engine == Some("cc") || cost_usd > 0.0 {
                     entry.cost_supported = true;
-                    entry.cost_usd += cost_usd;
+                    entry.cost_usd += cost_increment;
                 }
                 entry.cache_read = entry.cache_read.saturating_add(cache_read);
             }
@@ -85,6 +110,25 @@ pub async fn aggregate(
         }
     }
     Ok(by_role)
+}
+
+fn cc_cost_delta(
+    last_totals: &mut BTreeMap<(String, String), f64>,
+    role: &str,
+    session_id: Option<&str>,
+    total_cost_usd: f64,
+) -> f64 {
+    if total_cost_usd <= 0.0 {
+        return 0.0;
+    }
+    let session_id = session_id
+        .filter(|id| !id.is_empty())
+        .unwrap_or("<unknown>");
+    let key = (role.to_owned(), session_id.to_owned());
+    match last_totals.insert(key, total_cost_usd) {
+        Some(previous) if total_cost_usd >= previous => total_cost_usd - previous,
+        Some(_) | None => total_cost_usd,
+    }
 }
 
 /// Top-level entry point for `cr cost`. Loads the log, aggregates,
@@ -186,7 +230,7 @@ mod tests {
             &[
                 CrepEvent::RoleStarted {
                     role: "backend".into(),
-                    engine: "cc".into(),
+                    engine: "other".into(),
                     model: "opus".into(),
                     session_id: "b".into(),
                     priors_hash: "h".into(),
@@ -195,7 +239,7 @@ mod tests {
                 spoke("backend", 0.10, 2000),
                 CrepEvent::RoleStarted {
                     role: "frontend".into(),
-                    engine: "cc".into(),
+                    engine: "other".into(),
                     model: "opus".into(),
                     session_id: "f".into(),
                     priors_hash: "h".into(),
@@ -218,6 +262,38 @@ mod tests {
         assert_eq!(backend.cache_read, 3_000);
         let frontend = stats.get("frontend").unwrap();
         assert_eq!(frontend.turns, 1);
+    }
+
+    #[tokio::test]
+    async fn aggregate_normalizes_cc_total_cost_samples_per_session() {
+        let tmp = TempDir::new().unwrap();
+        write_log(
+            &tmp,
+            &[
+                CrepEvent::RoleStarted {
+                    role: "host".into(),
+                    engine: "cc".into(),
+                    model: "opus".into(),
+                    session_id: "s1".into(),
+                    priors_hash: "h".into(),
+                },
+                spoke("host", 10.0, 100),
+                spoke("host", 12.5, 200),
+                spoke("host", 12.5, 300),
+                CrepEvent::RoleSessionUpdated {
+                    role: "host".into(),
+                    priors_hash: "h".into(),
+                    session_id: "s2".into(),
+                },
+                spoke("host", 1.0, 400),
+            ],
+        );
+        let stats = aggregate(tmp.path(), None).await.unwrap();
+        let host = stats.get("host").unwrap();
+        assert_eq!(host.turns, 4);
+        assert!(host.cost_supported);
+        assert!((host.cost_usd - 13.5).abs() < 1e-9);
+        assert_eq!(host.cache_read, 1_000);
     }
 
     #[tokio::test]
