@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossterm::cursor::{Hide, Show};
+use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -1828,10 +1828,16 @@ fn write_enter_commands<W: Write>(mut writer: W) -> io::Result<()> {
     // impression. We don't act on the mouse events for now — the
     // event loop ignores them — but the capture is enough to keep the
     // viewport pinned to what the TUI rendered.
+    //
+    // Cursor visibility is intentionally *not* set here. ratatui's
+    // `Terminal::draw` shows or hides the cursor every frame based on
+    // whether `frame.set_cursor_position` was called, so issuing a
+    // standalone `Hide` here would race with the composer's per-frame
+    // `set_cursor_position` call and leave the Ask input without a
+    // visible caret.
     execute!(
         writer,
         EnterAlternateScreen,
-        Hide,
         EnableBracketedPaste,
         EnableMouseCapture,
     )
@@ -2083,6 +2089,107 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
         assert!(text.contains("waiting for your approval above"));
         assert!(text.contains("Permission required"));
+    }
+
+    fn render_with_cursor(
+        state: &RoomRuntimeState,
+        width: u16,
+        height: u16,
+    ) -> (String, (u16, u16)) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("create test live room terminal");
+        terminal
+            .draw(|frame| render_room_runtime_frame(frame, state))
+            .expect("draw test live room frame");
+        let pos = terminal
+            .get_cursor_position()
+            .expect("get cursor position from test backend");
+        let text = buffer_to_string(terminal.backend().buffer());
+        (text, (pos.x, pos.y))
+    }
+
+    #[test]
+    fn write_enter_commands_does_not_hide_cursor() {
+        // Regression for live-room "no visible cursor" bug: the alt-screen
+        // setup must not emit DECRST 25 (`CSI ?25 l`). ratatui's
+        // `Terminal::draw` is responsible for the cursor's visibility on
+        // every frame, so a one-shot `Hide` here races the composer's
+        // per-frame `set_cursor_position` call and leaves Ask without a
+        // visible caret.
+        let mut buf: Vec<u8> = Vec::new();
+        super::write_enter_commands(&mut buf).expect("write enter commands");
+        let text = String::from_utf8(buf).expect("enter commands are valid utf8");
+        assert!(
+            !text.contains("\x1b[?25l"),
+            "enter commands must not hide the cursor: {text:?}"
+        );
+        // Mouse capture must remain enabled (the v0.9.12 sandbox contract).
+        assert!(
+            text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
+            "enter commands should still enable mouse capture: {text:?}"
+        );
+    }
+
+    #[test]
+    fn composer_idle_positions_cursor_at_prompt() {
+        // Live-room layout at 100×28 = status(1) + body(21) + composer(5)
+        // + footer(1). Composer area y=22, h=5; inner_y=23, inner_x=1.
+        // Idle prompt is "cr > " (width 5), so an empty composer parks
+        // the cursor at (1 + 5 + 0, 23 + 0) = (6, 23).
+        let state = test_state();
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        assert_eq!(cursor, (6, 23));
+    }
+
+    #[test]
+    fn composer_cursor_advances_with_ascii_input() {
+        let mut state = test_state();
+        state.composer.insert_char('h');
+        state.composer.insert_char('i');
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        // Two ASCII chars → col advances by 2 from the empty baseline.
+        assert_eq!(cursor, (8, 23));
+    }
+
+    #[test]
+    fn composer_cursor_respects_unicode_display_width() {
+        let mut state = test_state();
+        state.composer.insert_char('你');
+        state.composer.insert_char('好');
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        // Each CJK char is 2 display cells wide → col advances by 4.
+        assert_eq!(cursor, (10, 23));
+    }
+
+    #[test]
+    fn composer_cursor_descends_past_explicit_newline() {
+        let mut state = test_state();
+        state.composer.insert_char('a');
+        state.composer.insert_newline();
+        state.composer.insert_char('b');
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        // After `\n`, row index advances by 1; the new row begins with the
+        // same width-5 continuation indent, so 'b' sits at col 1 (inner_x)
+        // + 5 (continuation indent) + 1 (the char itself) = 7.
+        assert_eq!(cursor, (7, 24));
+    }
+
+    #[test]
+    fn composer_does_not_reposition_cursor_when_blocked() {
+        let mut state = test_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(tx),
+        });
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        // Blocked state intentionally skips `frame.set_cursor_position`,
+        // so ratatui's draw calls `hide_cursor()` and the backend cursor
+        // stays at its initial origin. The user sees no caret in the
+        // dimmed composer body, matching the "waiting for approval"
+        // visual contract.
+        assert_eq!(cursor, (0, 0));
     }
 
     #[test]
