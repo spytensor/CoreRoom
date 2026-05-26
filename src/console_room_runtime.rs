@@ -5,7 +5,7 @@
 //! stream that `cr start` writes to stdout.
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, IsTerminal as _, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -84,6 +84,9 @@ pub struct RoomRuntimeState {
     /// spliced directly under the spawn's collapsed Done marker so the
     /// report reads as part of that inline work unit (#384).
     spawn_report_rows: BTreeMap<SpawnId, Vec<Line<'static>>>,
+    focused_spawn: Option<SpawnId>,
+    expanded_done_spawns: BTreeSet<SpawnId>,
+    focus_mode_spawn: Option<SpawnId>,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
     exiting: bool,
@@ -162,6 +165,9 @@ impl RoomRuntimeState {
             spinners: BTreeMap::new(),
             spawn_lifecycle,
             spawn_report_rows: BTreeMap::new(),
+            focused_spawn: None,
+            expanded_done_spawns: BTreeSet::new(),
+            focus_mode_spawn: None,
             work_cards: BTreeMap::new(),
             permission: None,
             exiting: false,
@@ -467,6 +473,89 @@ impl RoomRuntimeState {
             .working_instances_ordered_by_started_at()
     }
 
+    fn focusable_spawn_ids(&self) -> Vec<SpawnId> {
+        let mut instances: Vec<&SpawnInstance> = self
+            .spawn_lifecycle
+            .instances()
+            .filter(|spawn| {
+                matches!(
+                    spawn.state,
+                    SpawnState::Working | SpawnState::Done | SpawnState::Reported
+                )
+            })
+            .collect();
+        instances.sort_by_key(|spawn| spawn.started_at);
+        instances.into_iter().map(|spawn| spawn.spawn_id).collect()
+    }
+
+    fn focus_card(&mut self, reverse: bool) -> bool {
+        let ids = self.focusable_spawn_ids();
+        if ids.is_empty() {
+            self.focused_spawn = None;
+            self.focus_mode_spawn = None;
+            return false;
+        }
+        let next_index = match self
+            .focused_spawn
+            .and_then(|id| ids.iter().position(|x| *x == id))
+        {
+            Some(index) if reverse => index.checked_sub(1).unwrap_or(ids.len() - 1),
+            Some(index) => (index + 1) % ids.len(),
+            None if reverse => ids.len() - 1,
+            None => 0,
+        };
+        self.focused_spawn = Some(ids[next_index]);
+        true
+    }
+
+    fn focused_spawn(&self) -> Option<&SpawnInstance> {
+        self.focused_spawn
+            .and_then(|spawn_id| self.spawn_lifecycle.get(spawn_id))
+    }
+
+    fn clear_card_focus(&mut self) {
+        self.focus_mode_spawn = None;
+        self.focused_spawn = None;
+    }
+
+    fn toggle_done_expansion(&mut self) -> bool {
+        let Some(spawn) = self.focused_spawn() else {
+            return false;
+        };
+        if !matches!(spawn.state, SpawnState::Done | SpawnState::Reported)
+            || spawn.tool_calls.is_empty()
+        {
+            return false;
+        }
+        let spawn_id = spawn.spawn_id;
+        if !self.expanded_done_spawns.remove(&spawn_id) {
+            self.expanded_done_spawns.insert(spawn_id);
+        }
+        true
+    }
+
+    fn focused_working_role(&self) -> Option<String> {
+        self.focused_spawn()
+            .filter(|spawn| spawn.state == SpawnState::Working)
+            .map(|spawn| spawn.role.clone())
+    }
+
+    fn toggle_focus_mode(&mut self) -> bool {
+        let Some(spawn_id) = self
+            .focused_spawn()
+            .filter(|spawn| spawn.state == SpawnState::Working)
+            .map(|spawn| spawn.spawn_id)
+        else {
+            return false;
+        };
+        if self.focus_mode_spawn == Some(spawn_id) {
+            self.focus_mode_spawn = None;
+        } else {
+            self.focus_mode_spawn = Some(spawn_id);
+        }
+        true
+    }
+
     fn has_active_work(&self) -> bool {
         self.spinners
             .values()
@@ -636,6 +725,9 @@ fn handle_key(
         }
         return Ok(());
     }
+    if handle_card_key(key, state, input_tx)? {
+        return Ok(());
+    }
 
     match key.code {
         KeyCode::Char('?')
@@ -739,6 +831,60 @@ fn handle_key(
         _ => {}
     }
     Ok(())
+}
+
+fn handle_card_key(
+    key: KeyEvent,
+    state: &mut RoomRuntimeState,
+    input_tx: &mpsc::UnboundedSender<RuntimeInput>,
+) -> Result<bool> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return Ok(false);
+    }
+    match key.code {
+        KeyCode::Tab
+            if state.composer.view_model().input.is_empty() || state.focused_spawn.is_some() =>
+        {
+            Ok(state.focus_card(false))
+        }
+        KeyCode::BackTab
+            if state.composer.view_model().input.is_empty() || state.focused_spawn.is_some() =>
+        {
+            Ok(state.focus_card(true))
+        }
+        KeyCode::Esc if state.focus_mode_spawn.is_some() => {
+            state.focus_mode_spawn = None;
+            Ok(true)
+        }
+        KeyCode::Esc if state.focused_spawn.is_some() => {
+            state.clear_card_focus();
+            Ok(true)
+        }
+        KeyCode::Char('e') if state.focused_spawn.is_some() => {
+            let _ = state.toggle_done_expansion();
+            Ok(true)
+        }
+        KeyCode::Char('i') if state.focused_spawn.is_some() => {
+            if let Some(role) = state.focused_working_role() {
+                input_tx
+                    .send(RuntimeInput::Line(format!("/halt @{role}")))
+                    .context("sending focused-card interrupt to room runtime")?;
+                state.push_notice(
+                    NoticeLevel::System,
+                    format!("interrupt requested for @{role}"),
+                );
+            }
+            Ok(true)
+        }
+        KeyCode::Char('f') if state.focused_spawn.is_some() => {
+            let _ = state.toggle_focus_mode();
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
 }
 
 fn submit_line(
@@ -1152,19 +1298,42 @@ fn append_spawn_activity_lines(
     inner_width: u16,
     now: Instant,
 ) {
+    let focused = state.focused_spawn == Some(spawn.spawn_id);
     match spawn.state {
-        SpawnState::Working => merged.extend(crate::working_card::render_working_card_lines(
-            spawn,
-            &state.host_role,
-            inner_width,
-            now,
-            crate::working_card::DEFAULT_VISIBLE_STEPS,
-        )),
-        SpawnState::Done | SpawnState::Reported => {
-            if let Some(line) =
-                crate::working_card::render_done_collapsed_line(spawn, &state.host_role)
+        SpawnState::Working => {
+            if state
+                .focus_mode_spawn
+                .is_some_and(|id| id != spawn.spawn_id)
             {
+                if let Some(line) =
+                    crate::working_card::render_working_stub_line(spawn, &state.host_role, now)
+                {
+                    merged.push(line);
+                }
+            } else {
+                merged.extend(crate::working_card::render_working_card_lines_with_focus(
+                    spawn,
+                    &state.host_role,
+                    inner_width,
+                    now,
+                    crate::working_card::DEFAULT_VISIBLE_STEPS,
+                    focused,
+                ));
+            }
+        }
+        SpawnState::Done | SpawnState::Reported => {
+            if let Some(line) = crate::working_card::render_done_collapsed_line_with_focus(
+                spawn,
+                &state.host_role,
+                focused,
+            ) {
                 merged.push(line);
+            }
+            if state.expanded_done_spawns.contains(&spawn.spawn_id) {
+                merged.extend(crate::working_card::render_expanded_done_log_lines(
+                    spawn,
+                    inner_width,
+                ));
             }
             if let Some(report_rows) = state.spawn_report_rows.get(&spawn.spawn_id) {
                 merged.extend(report_rows.iter().cloned());
@@ -4383,6 +4552,172 @@ mod tests {
         assert!(
             backend_row < security_row,
             "markers must remain in spawn-time order, not completion order"
+        );
+    }
+
+    #[test]
+    fn tab_and_shift_tab_cycle_card_focus() {
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("tab handled");
+        assert_eq!(
+            state.focused_spawn().map(|spawn| spawn.role.as_str()),
+            Some("backend")
+        );
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("tab handled");
+        assert_eq!(
+            state.focused_spawn().map(|spawn| spawn.role.as_str()),
+            Some("security")
+        );
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            &mut state,
+            &tx,
+        )
+        .expect("backtab handled");
+        assert_eq!(
+            state.focused_spawn().map(|spawn| spawn.role.as_str()),
+            Some("backend")
+        );
+    }
+
+    #[test]
+    fn card_hotkeys_fall_through_when_no_card_is_focused() {
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("key handled");
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("key handled");
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("key handled");
+        assert_eq!(state.composer.view_model().input, "eif");
+    }
+
+    #[test]
+    fn e_toggles_expanded_done_log_for_focused_done_card() {
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("qa", "t1")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "qa", "t1", "Bash", "u1",
+        )));
+        state.apply_event(crep_room_event(tool_executed_event(
+            "qa",
+            "t1",
+            "u1",
+            "ran smoke script",
+        )));
+        state.apply_event(crep_room_event(role_spoke_event("qa", "t1", "")));
+        let spawn_id = state.spawn_lifecycle.instances().next().unwrap().spawn_id;
+        state.focused_spawn = Some(spawn_id);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("expand handled");
+        let expanded = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        let expanded_count = expanded.matches("ran smoke script").count();
+        assert!(
+            expanded_count >= 2,
+            "expanded log should include the tool summary: {expanded}"
+        );
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("collapse handled");
+        let collapsed = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert_eq!(
+            collapsed.matches("ran smoke script").count(),
+            expanded_count - 1,
+            "second e should remove only the expanded log row: {collapsed}"
+        );
+    }
+
+    #[test]
+    fn i_interrupts_only_the_focused_working_card_role() {
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        state.focused_spawn = state
+            .spawn_lifecycle
+            .instances()
+            .find(|spawn| spawn.role == "security")
+            .map(|spawn| spawn.spawn_id);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("interrupt handled");
+        assert_eq!(
+            rx.try_recv().expect("halt command sent"),
+            RuntimeInput::Line("/halt @security".to_owned())
+        );
+    }
+
+    #[test]
+    fn f_focus_mode_expands_focused_card_and_stubs_the_others() {
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        state.focused_spawn = state
+            .spawn_lifecycle
+            .instances()
+            .find(|spawn| spawn.role == "backend")
+            .map(|spawn| spawn.spawn_id);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("focus mode handled");
+        let merged = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert!(merged.contains("@backend"));
+        assert!(merged.contains("[e]xpand [i]nterrupt [f]ocus"));
+        assert!(merged.contains("@security ·"));
+        assert_eq!(
+            merged.matches("[e]xpand [i]nterrupt [f]ocus").count(),
+            1,
+            "only focused card should keep the full card footer: {merged}"
         );
     }
 

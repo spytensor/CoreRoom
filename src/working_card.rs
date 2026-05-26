@@ -65,11 +65,29 @@ pub fn render_working_card_lines(
     now: Instant,
     visible_steps: usize,
 ) -> Vec<Line<'static>> {
+    render_working_card_lines_with_focus(spawn, host_role, inner_width, now, visible_steps, false)
+}
+
+#[must_use]
+/// Build the working-card lines, with a brighter border when focused.
+pub fn render_working_card_lines_with_focus(
+    spawn: &SpawnInstance,
+    host_role: &str,
+    inner_width: u16,
+    now: Instant,
+    visible_steps: usize,
+    focused: bool,
+) -> Vec<Line<'static>> {
     if spawn.state != SpawnState::Working {
         return Vec::new();
     }
 
     let role_color = tui_style::role_color(&spawn.role, host_role);
+    let border_color = if focused {
+        Color::LightCyan
+    } else {
+        Color::DarkGray
+    };
     let card_width = usable_card_width(inner_width);
     let elapsed = elapsed_label(now.saturating_duration_since(spawn.started_at));
     let title = if spawn.title.is_empty() {
@@ -86,12 +104,51 @@ pub fn render_working_card_lines(
         &title,
         &elapsed,
         card_width,
+        border_color,
     ));
     for record in tail_tool_calls(&spawn.tool_calls, visible_steps) {
-        lines.push(body_line(record, card_width));
+        lines.push(body_line(record, card_width, border_color));
     }
-    lines.push(bottom_border_line(spawn.step_count, card_width));
+    lines.push(bottom_border_line(
+        spawn.step_count,
+        card_width,
+        border_color,
+    ));
     lines
+}
+
+#[must_use]
+/// Build the one-line focused-mode stub for a non-focused working card.
+pub fn render_working_stub_line(
+    spawn: &SpawnInstance,
+    host_role: &str,
+    now: Instant,
+) -> Option<Line<'static>> {
+    if spawn.state != SpawnState::Working {
+        return None;
+    }
+    let role_color = tui_style::role_color(&spawn.role, host_role);
+    let elapsed = elapsed_label(now.saturating_duration_since(spawn.started_at));
+    let title = if spawn.title.is_empty() {
+        NO_TITLE_PLACEHOLDER.to_owned()
+    } else {
+        spawn.title.clone()
+    };
+    Some(Line::from(vec![
+        Span::raw(CARD_INDENT),
+        Span::styled(
+            format!("@{}", spawn.role),
+            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                " · {title} · working · {elapsed} · {} step{}",
+                spawn.step_count,
+                if spawn.step_count == 1 { "" } else { "s" }
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
 }
 
 /// Build the single collapsed line that replaces a finished working
@@ -103,11 +160,28 @@ pub fn render_working_card_lines(
 /// below this line.
 #[must_use]
 pub fn render_done_collapsed_line(spawn: &SpawnInstance, host_role: &str) -> Option<Line<'static>> {
+    render_done_collapsed_line_with_focus(spawn, host_role, false)
+}
+
+#[must_use]
+/// Build the collapsed Done marker, highlighting the role token when focused.
+pub fn render_done_collapsed_line_with_focus(
+    spawn: &SpawnInstance,
+    host_role: &str,
+    focused: bool,
+) -> Option<Line<'static>> {
     if !matches!(spawn.state, SpawnState::Done | SpawnState::Reported) {
         return None;
     }
 
     let role_color = tui_style::role_color(&spawn.role, host_role);
+    let role_style = if focused {
+        Style::default()
+            .fg(role_color)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::default().fg(role_color).add_modifier(Modifier::BOLD)
+    };
     let elapsed = elapsed_label(
         spawn
             .state_changed_at
@@ -136,10 +210,7 @@ pub fn render_done_collapsed_line(spawn: &SpawnInstance, host_role: &str) -> Opt
 
     Some(Line::from(vec![
         Span::raw(CARD_INDENT),
-        Span::styled(
-            format!("@{}", spawn.role),
-            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("@{}", spawn.role), role_style),
         Span::raw(" "),
         Span::styled(marker.to_owned(), marker_style),
         Span::raw(" "),
@@ -149,6 +220,23 @@ pub fn render_done_collapsed_line(spawn: &SpawnInstance, host_role: &str) -> Opt
             Style::default().fg(Color::DarkGray),
         ),
     ]))
+}
+
+#[must_use]
+/// Build inline tool-log rows shown when a collapsed Done card is expanded.
+pub fn render_expanded_done_log_lines(
+    spawn: &SpawnInstance,
+    inner_width: u16,
+) -> Vec<Line<'static>> {
+    if !matches!(spawn.state, SpawnState::Done | SpawnState::Reported) {
+        return Vec::new();
+    }
+    let card_width = usable_card_width(inner_width);
+    spawn
+        .tool_calls
+        .iter()
+        .map(|record| body_line(record, card_width, Color::DarkGray))
+        .collect()
 }
 
 /// Effective inner-card width inside the scrollback panel. The card
@@ -192,6 +280,7 @@ fn top_border_line(
     title: &str,
     elapsed: &str,
     card_width: usize,
+    border_color: Color,
 ) -> Line<'static> {
     // Budget the title to fit even on narrow terminals. The fixed
     // chrome is the borders, separators, the role label (`avatar` +
@@ -217,7 +306,7 @@ fn top_border_line(
     spans.push(Span::raw(CARD_INDENT));
     spans.push(Span::styled(
         "┌─ ".to_owned(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(border_color),
     ));
     spans.extend(tui_style::role_label_spans(role, host_role));
     spans.push(Span::styled(
@@ -226,7 +315,7 @@ fn top_border_line(
     ));
     spans.push(Span::styled(
         "── ".to_owned(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(border_color),
     ));
     spans.push(Span::styled(
         "working".to_owned(),
@@ -249,19 +338,19 @@ fn top_border_line(
     if pad > 0 {
         spans.push(Span::styled(
             "─".repeat(pad),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(border_color),
         ));
     }
     spans.push(Span::styled(
         "┐".to_owned(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(border_color),
     ));
     Line::from(spans)
 }
 
 /// One body line:
 ///   `│ {marker} {summary…} {pad}│`
-fn body_line(record: &ToolCallRecord, card_width: usize) -> Line<'static> {
+fn body_line(record: &ToolCallRecord, card_width: usize, border_color: Color) -> Line<'static> {
     let (marker, marker_style) = marker_for_status(record.status);
     let summary_text = if record.summary.is_empty() {
         record.tool.clone()
@@ -277,12 +366,12 @@ fn body_line(record: &ToolCallRecord, card_width: usize) -> Line<'static> {
 
     Line::from(vec![
         Span::raw(CARD_INDENT),
-        Span::styled("│ ".to_owned(), Style::default().fg(Color::DarkGray)),
+        Span::styled("│ ".to_owned(), Style::default().fg(border_color)),
         Span::styled(marker.to_owned(), marker_style),
         Span::raw(" "),
         Span::raw(summary),
         Span::raw(" ".repeat(pad)),
-        Span::styled(" │".to_owned(), Style::default().fg(Color::DarkGray)),
+        Span::styled(" │".to_owned(), Style::default().fg(border_color)),
     ])
 }
 
@@ -296,7 +385,7 @@ fn marker_for_status(status: ToolCallStatus) -> (&'static str, Style) {
 
 /// Bottom border:
 ///   `└─ {N step(s) done · [e]xpand [i]nterrupt [f]ocus} ─...─┘`
-fn bottom_border_line(done_count: usize, card_width: usize) -> Line<'static> {
+fn bottom_border_line(done_count: usize, card_width: usize, border_color: Color) -> Line<'static> {
     let footer_text = format!(
         " {done_count} step{plural} done · [e]xpand [i]nterrupt [f]ocus ",
         plural = if done_count == 1 { "" } else { "s" },
@@ -305,7 +394,7 @@ fn bottom_border_line(done_count: usize, card_width: usize) -> Line<'static> {
     spans.push(Span::raw(CARD_INDENT));
     spans.push(Span::styled(
         "└─".to_owned(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(border_color),
     ));
     spans.push(Span::styled(
         footer_text.clone(),
@@ -320,12 +409,12 @@ fn bottom_border_line(done_count: usize, card_width: usize) -> Line<'static> {
     if pad > 0 {
         spans.push(Span::styled(
             "─".repeat(pad),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(border_color),
         ));
     }
     spans.push(Span::styled(
         "┘".to_owned(),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(border_color),
     ));
     Line::from(spans)
 }
