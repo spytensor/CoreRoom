@@ -13,47 +13,6 @@
 > full screen K9s-style, the right rail shows the standby Team
 > roster, and the bottom hint row stays context-aware.
 
-> **Status: v0.9.8 — user-runnable, still pre-1.0.** Claude Code,
-> Codex, and Gemini adapters are wired up; bare `cr` opens CoreRoom
-> directly, guides setup when `.coreroom/` is missing, and shows the
-> effective role / engine / model configuration on entry. **v0.4.3**
-> adds host-led SDLC gate ledgers and live `/compact <role|all>` for
-> supported engines. **v0.4.4** fixes legacy config compatibility for
-> both user and project files that still contain the removed
-> `budget_per_role_usd` field. **v0.5.0** adds the virtual-team scaffold:
-> `cr init --preset team`, role owners and scoped authority, role
-> knowledge mounts, plan sign-off vetoes, Claude hook scaffolding,
-> priors locking, and stale-priors liveness checks.
-> **v0.6.0** introduced the host-led Engineering Control Room turn:
-> `@host` becomes the user-facing engineering control role, with GitHub
-> issue driven work, dependency context, evidence packets, and mandatory
-> tracker closure. **v0.7.0** completes the CoreRoom rename across the repo,
-> Rust crate, npm package, release artifacts, state directory, and environment
-> variables while keeping the short `cr` command stable.
-> **v0.8.0** built the console data plane: snapshots, responsive layout,
-> public transcript visibility, role/work/gate/evidence/source views,
-> observation-backed freshness, and dogfood evidence. **v0.9.0** adds the
-> first K9s-style full-screen console: read-only ratatui rendering,
-> navigation/detail panes, Xray/log views, host action overlays, and terminal
-> QA fixtures for the release path. **v0.9.1** makes that console the real
-> default entrypoint: plain `cr` opens the full-screen console first for an
-> initialized project, then hands off to the REPL; `cr start` skips the console,
-> and `cr console` opens the live local console directly. **v0.9.2** makes the
-> console conversation user-first: public input/output stays in the center pane,
-> host-managed specialist work appears as compact task cards, and meaningless
-> unknown/placeholder state is hidden from the primary room view. **v0.9.3**
-> adds role avatars for rails and delegation cards, with safe terminal glyphs
-> by default and optional Nerd Font glyphs through `COREROOM_AVATAR_PACK=nerd-font`.
-> **v0.9.4** added the staged unified live room path behind
-> `cr console --live-room`; **v0.9.5** and **v0.9.6** tested making that
-> staged surface the default. **v0.9.7** restored the truthful default while
-> runtime parity was rebuilt. **v0.9.8** makes plain `cr` the executable
-> full-screen TUI room: it reuses the mature role runtime, streams role output,
-> surfaces permission prompts, and writes durable turn events. `cr start`
-> remains the direct stdout entrypoint, and `cr console` remains the read-only
-> dashboard/snapshot surface.
-> Per semver, 0.x.y means the public API is not yet stable.
-
 ## Why
 
 A single `CLAUDE.md` is a global namespace. As projects accumulate years of
@@ -160,7 +119,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.8
+TAG=v0.9.17
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \

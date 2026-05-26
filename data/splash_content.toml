@@ -16,6 +16,14 @@ items = [
 ]
 
 [[whats_new]]
+version = "0.9.17"
+items = [
+  "sub-agent work now appears inline as chat-stream working cards with live tool calls",
+  "finished cards collapse to Done lines and emit reports as normal chat messages",
+  "right rail is a slim project dashboard; card hotkeys support expand, interrupt, and focus",
+]
+
+[[whats_new]]
 version = "0.9.15"
 items = [
   "role activity moves to inline rows at the bottom of Room, like chat tool calls",

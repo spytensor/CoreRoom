@@ -128,16 +128,11 @@ visible truncation:
 - [ ] **120 × 40** — modern desktop terminal
 - [ ] **60 × 20** — split pane / mobile SSH
 
-The two PNGs embedded in `README.md` are generated separately from the
-real-TUI verification screenshots. Refresh them with:
-
-```bash
-make readme-images
-```
-
-The command runs `scripts/render-readme-images.py`, a Pillow renderer that
-keeps the README hero images reproducible without depending on a live
-interactive session, VHS, freeze, silicon, or desktop screenshot state.
+The README hero image is a real terminal capture at
+`docs/images/live-room.png`. Do not refresh it with `make readme-images`; that
+target is deprecated and intentionally exits non-zero. If the live-room visual
+contract changes, capture a real terminal session and keep the README pointing
+at the checked-in PNG.
 
 For the v0.9 full-screen console, also run the ratatui terminal QA fixtures:
 
@@ -163,8 +158,8 @@ roles and host prompt, verifies priors, enters plain `cr` through a PTY to
 confirm the executable full-screen TUI room, drives a gated fake engine through
 streaming output and a permission prompt, checks durable `.coreroom/messages.jsonl`
 turn events, verifies `cr console --live-room` opens the same TUI room,
-regenerates README images, and fails if staged live-room tokens become the
-default path again.
+checks the README hero capture, and fails if staged live-room tokens become
+the default path again.
 Release evidence must include this command when console, setup/init, host
 control, role prompt composition, or README visual behavior changed.
 

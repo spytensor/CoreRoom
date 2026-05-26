@@ -10,6 +10,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.17] - 2026-05-26
+
+### Added
+
+- **Sub-agent work now renders as inline chat-stream working cards
+  (#377, #380-#386, PR #389-#395).** The live room now tracks
+  sub-agent lifecycle state from spawning through working, done, and
+  reported, then renders that activity directly in the Room transcript
+  instead of splitting it across the right rail. Working cards show live
+  tool-call rows, collapse to one-line Done markers when finished, and
+  emit the final report as a regular chat message immediately below the
+  marker.
+- **Per-card keyboard controls (#385, PR #394).** Focusable working
+  cards support `e` to expand a completed card's log, `i` to interrupt
+  the focused role through the existing halt path, `f` to focus one
+  card while stubbing the rest, `Tab` / `Shift-Tab` to move focus, and
+  `Esc` to leave focus mode.
+- **Concurrent-card density management (#386, PR #395).** When many
+  roles are active, the room keeps the most recent working cards full
+  size and stubs the rest. The default full-card budget is three, with
+  `COREROOM_MAX_FULL_CARDS` available for release/debug tuning.
+
+### Changed
+
+- **Right rail is now a slim project dashboard (#383, PR #391).** Team
+  roster and transient tool-call activity moved out of the rail. The
+  rail now stays scoped to project/work state that outlives a single
+  turn: Work, Cards, Evidence, and room-level Blockers.
+- **Footer narration summarizes active delegated work (#382, PR
+  #390).** The room footer reports how many roles are still working
+  and names them without promising input gating behavior that the
+  runtime does not enforce.
+- **README no longer carries the historical `Status: v...` release
+  block.** The top of the README now keeps the product statement,
+  live-room capture, and current usage path without a stale running
+  release diary.
+
+### Internal
+
+- **Chat-stream ADR and prototype landed (#378, #379, PR #387, PR
+  #388).** `docs/v0.10-chat-stream-vs-dashboard.md` locks the model:
+  the chat stream owns current team activity, while the right rail owns
+  durable dashboard state. `examples/chat-stream-demo.rs` remains as a
+  standalone visual prototype for the card grammar.
+
 ## [0.9.16] - 2026-05-26
 
 ### Added
@@ -1629,7 +1674,14 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.8...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...HEAD
+[0.9.17]: https://github.com/spytensor/CoreRoom/compare/v0.9.16...v0.9.17
+[0.9.16]: https://github.com/spytensor/CoreRoom/compare/v0.9.15...v0.9.16
+[0.9.15]: https://github.com/spytensor/CoreRoom/compare/v0.9.14...v0.9.15
+[0.9.14]: https://github.com/spytensor/CoreRoom/compare/v0.9.13...v0.9.14
+[0.9.12]: https://github.com/spytensor/CoreRoom/compare/v0.9.11...v0.9.12
+[0.9.10]: https://github.com/spytensor/CoreRoom/compare/v0.9.9...v0.9.10
+[0.9.9]: https://github.com/spytensor/CoreRoom/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/spytensor/CoreRoom/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/spytensor/CoreRoom/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/spytensor/CoreRoom/compare/v0.9.5...v0.9.6

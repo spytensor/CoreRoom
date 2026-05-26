@@ -5,7 +5,7 @@ This script is intentionally heavier than unit tests. It builds the local
 binary, creates a temporary user project, runs real `cr` commands against that
 project, drives the default full-screen runtime through a PTY with the
 deterministic fake engine, verifies durable behavior, enters the read-only
-console through a PTY, and regenerates README visual assets.
+console through a PTY, and verifies the README hero capture.
 It is meant for release gating, not fast inner-loop testing.
 """
 
@@ -30,11 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "target" / "debug" / "cr"
 SNAPSHOT = ROOT / "tests" / "fixtures" / "console_snapshot_v08.toml"
-README_IMAGES = [
-    ROOT / "docs" / "images" / "boot-dashboard.png",
-    ROOT / "docs" / "images" / "work-cards.png",
-    ROOT / "docs" / "images" / "control-room-console.png",
-]
+README = ROOT / "README.md"
+README_HERO = ROOT / "docs" / "images" / "live-room.png"
 ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[=>78])")
 
 
@@ -63,7 +60,7 @@ def main() -> int:
 
     dogfood_snapshot_console_pty(width=120, height=40)
     dogfood_nerd_font_avatar_pack()
-    dogfood_readme_images()
+    dogfood_readme_hero_capture()
 
     print("\nDOGFOOD PASS: v0.9 local user-case gate completed")
     return 0
@@ -315,12 +312,15 @@ def dogfood_nerd_font_avatar_pack() -> None:
     print("Nerd Font avatar pack rendered through real PTY while keeping @role text")
 
 
-def dogfood_readme_images() -> None:
-    print("\n== Scenario: deterministic README visuals")
-    run(["make", "readme-images"], cwd=ROOT, timeout=120)
-    for image in README_IMAGES:
-        assert_png(image)
-        print(f"verified PNG: {image.relative_to(ROOT)} ({image.stat().st_size} bytes)")
+def dogfood_readme_hero_capture() -> None:
+    print("\n== Scenario: README hero capture")
+    assert_png(README_HERO)
+    readme = README.read_text(encoding="utf-8")
+    require("docs/images/live-room.png", readme, "README hero reference")
+    print(
+        f"verified PNG: {README_HERO.relative_to(ROOT)} "
+        f"({README_HERO.stat().st_size} bytes)"
+    )
 
 
 def create_sample_project(project: Path) -> None:
