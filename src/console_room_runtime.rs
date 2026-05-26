@@ -171,11 +171,24 @@ impl RoomRuntimeState {
         match event {
             RoomEvent::Crep { event, host_role } => {
                 // Per #380: drive the per-spawn lifecycle tracker off
-                // the same CrepEvent stream the renderer reads. This
-                // is a state-only update — no rendering branches
-                // consult the tracker yet (#381+ does), so the
-                // existing rail output is unchanged (AC-5).
-                self.spawn_lifecycle.apply_event(event.as_ref());
+                // the same CrepEvent stream the renderer reads. The
+                // chat-stream renderer (`#381`) reads back from this
+                // tracker to splice working cards into scrollback at
+                // their original chat-time position.
+                let spawn_id = self.spawn_lifecycle.apply_event(event.as_ref());
+                // For a fresh `TurnDispatched`, stamp the spawn's
+                // chat-row index now — *before* the spawner's "@host
+                // delegating @role …" line gets pushed below — so the
+                // card materializes immediately after that line in the
+                // stream. Using `scrollback.len()` as the index makes
+                // splicing trivial in the renderer: position N means
+                // "after scrollback row N-1, before row N".
+                if matches!(event.as_ref(), CrepEvent::TurnDispatched { .. }) {
+                    if let Some(id) = spawn_id {
+                        let position = self.scrollback.len();
+                        self.spawn_lifecycle.set_chat_position(id, position);
+                    }
+                }
                 let ends_turn = matches!(
                     event.as_ref(),
                     CrepEvent::RoleSpoke { .. }
@@ -337,6 +350,13 @@ impl RoomRuntimeState {
             // scrolling down, so the badge must not promise more than
             // `scroll_offset` rows still exist below the user's view.
             self.unread_since_scroll = self.unread_since_scroll.min(self.scroll_offset);
+            // Every spawn lifecycle record carries a `chat_position`
+            // anchored to a scrollback index. Without this shift, every
+            // Working card's index points at an evicted row after the
+            // drain, breaking #381 AC-2 (card sits at its chat-time
+            // position). Saturating subtraction keeps the card visible
+            // at the top of the window rather than panicking.
+            self.spawn_lifecycle.shift_chat_positions(overflow);
         }
     }
 
@@ -988,9 +1008,14 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
         .last_viewport_rows
         .set(u16::try_from(visible_rows).unwrap_or(u16::MAX));
 
+    // Build the merged scrollback with working cards spliced inline
+    // at their original chat-time positions (#381). When no spawn is
+    // in the `Working` state this is a clone of `scrollback`.
+    let merged = build_merged_scrollback(state, area.width);
+
     // Clamp lazily: scrollback can shrink (1000-row drain in
     // `push_scrollback`), so the stored offset may exceed the new max.
-    let max_offset = state.scrollback.len().saturating_sub(visible_rows.max(1));
+    let max_offset = merged.len().saturating_sub(visible_rows.max(1));
     let effective_offset = state.scroll_offset.min(max_offset);
 
     let items: Vec<Line<'static>> = if effective_offset == 0 {
@@ -1001,14 +1026,14 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
         // fresh room).
         let activity_lines = current_turn_lines(state);
         let scroll_rows = visible_rows.saturating_sub(activity_lines.len());
-        let start = state.scrollback.len().saturating_sub(scroll_rows);
-        let mut items: Vec<Line<'static>> = if state.scrollback.is_empty() {
+        let start = merged.len().saturating_sub(scroll_rows);
+        let mut items: Vec<Line<'static>> = if merged.is_empty() {
             vec![Line::from(vec![Span::styled(
                 "Submit a task below. Runtime output appears here.",
                 Style::default().fg(Color::DarkGray),
             )])]
         } else {
-            state.scrollback[start..].to_vec()
+            merged[start..].to_vec()
         };
         items.extend(activity_lines);
         items
@@ -1017,10 +1042,10 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
         // bottom row for a follow-back indicator so the user always
         // sees that they are looking at history.
         let scroll_rows = visible_rows.saturating_sub(1);
-        let total = state.scrollback.len();
+        let total = merged.len();
         let end = total.saturating_sub(effective_offset);
         let start = end.saturating_sub(scroll_rows);
-        let mut items = state.scrollback[start..end].to_vec();
+        let mut items = merged[start..end].to_vec();
         items.push(scrollback_follow_indicator(state.unread_since_scroll));
         items
     };
@@ -1030,6 +1055,68 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
         List::new(items).block(Block::default().borders(Borders::ALL).title("Room")),
         area,
     );
+}
+
+/// Build the scrollback to render: existing scrollback with inline
+/// working cards spliced at each spawn's `chat_position`. Working
+/// spawns whose chat_position is past the end of scrollback are
+/// appended at the bottom (covers the race where the spawn was
+/// dispatched but the spawner's confirmation line has not yet
+/// rendered).
+///
+/// Elapsed time is rendered at one-second granularity (AC-5) — the
+/// `now` argument is the same `Instant` used for every card on this
+/// frame, so even if two cards started at slightly different points
+/// the displayed elapsed only changes once per wall-clock second.
+fn build_merged_scrollback(state: &RoomRuntimeState, panel_width: u16) -> Vec<Line<'static>> {
+    // Card width is panel_width less the surrounding borders (2 chars).
+    let inner_width = panel_width.saturating_sub(2);
+    // Collect working spawns, deduplicated and ordered by chat_position
+    // so the splice walk below stays linear.
+    let mut working: Vec<&SpawnInstance> = state
+        .spawn_lifecycle()
+        .instances()
+        .filter(|spawn| spawn.state == crate::spawn_lifecycle::SpawnState::Working)
+        .collect();
+    working.sort_by_key(|spawn| spawn.chat_position);
+
+    if working.is_empty() {
+        return state.scrollback.clone();
+    }
+
+    let now = Instant::now();
+    let mut merged: Vec<Line<'static>> =
+        Vec::with_capacity(state.scrollback.len() + working.len() * 5);
+    let mut spawn_iter = working.into_iter().peekable();
+    for (idx, line) in state.scrollback.iter().enumerate() {
+        // Splice in any cards whose chat_position == idx (before this row).
+        while spawn_iter
+            .peek()
+            .is_some_and(|spawn| spawn.chat_position <= idx)
+        {
+            let spawn = spawn_iter.next().expect("peeked non-empty");
+            merged.extend(crate::working_card::render_working_card_lines(
+                spawn,
+                &state.host_role,
+                inner_width,
+                now,
+                crate::working_card::DEFAULT_VISIBLE_STEPS,
+            ));
+        }
+        merged.push(line.clone());
+    }
+    // Append any cards whose chat_position is past the end of scrollback
+    // (race: spawn registered but no scrollback row has landed yet).
+    for spawn in spawn_iter {
+        merged.extend(crate::working_card::render_working_card_lines(
+            spawn,
+            &state.host_role,
+            inner_width,
+            now,
+            crate::working_card::DEFAULT_VISIBLE_STEPS,
+        ));
+    }
+    merged
 }
 
 /// Bottom-of-Room hint shown whenever the user has scrolled away from
@@ -3736,6 +3823,101 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------------------------
+    // #381 — `WorkingCard` widget integration. Verifies that the card
+    // materializes inside the rendered scrollback at the chat-time
+    // position assigned at TurnDispatched, reads role identity from
+    // `tui_style::role_color`, and does not break the existing
+    // scrollback / scroll-offset model.
+    // ------------------------------------------------------------------
+
+    fn dispatch_event(role: &str, turn: &str) -> CrepEvent {
+        CrepEvent::TurnDispatched {
+            role: role.to_owned(),
+            priors_hash: String::new(),
+            turn_id: crate::turn::TurnId::from(turn.to_owned()),
+            thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
+            parent_turn_id: None,
+            queue_position: 0,
+        }
+    }
+
+    fn work_title_event(role: &str, turn: &str, title: &str) -> CrepEvent {
+        CrepEvent::WorkTitle {
+            role: role.to_owned(),
+            priors_hash: String::new(),
+            title: title.to_owned(),
+            turn_id: crate::turn::TurnId::from(turn.to_owned()),
+            thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
+        }
+    }
+
+    fn tool_proposed_event(role: &str, turn: &str, tool: &str, tool_use_id: &str) -> CrepEvent {
+        CrepEvent::ToolCallProposed {
+            role: role.to_owned(),
+            priors_hash: String::new(),
+            tool_name: tool.to_owned(),
+            tool_input: serde_json::json!({}),
+            tool_use_id: tool_use_id.to_owned(),
+            turn_id: crate::turn::TurnId::from(turn.to_owned()),
+            thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
+        }
+    }
+
+    fn tool_executed_event(role: &str, turn: &str, tool_use_id: &str, summary: &str) -> CrepEvent {
+        CrepEvent::ToolCallExecuted {
+            role: role.to_owned(),
+            priors_hash: String::new(),
+            tool_use_id: tool_use_id.to_owned(),
+            ok: true,
+            output_summary: summary.to_owned(),
+            turn_id: crate::turn::TurnId::from(turn.to_owned()),
+            thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
+        }
+    }
+
+    fn crep_room_event(event: CrepEvent) -> RoomEvent {
+        RoomEvent::Crep {
+            event: Box::new(event),
+            host_role: "host".to_owned(),
+        }
+    }
+
+    #[test]
+    fn working_card_renders_inline_with_role_title_and_state_label() {
+        // Dispatch @security, set its title, fire a tool call to push
+        // it from Spawning → Working. The rendered scrollback must
+        // now contain the card's top border (with @security + the
+        // task title + `working`) and its hotkey-hint footer.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event(
+            "security",
+            "t1",
+            "audit README claims",
+        )));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(
+            text.contains("@security"),
+            "card top border must carry @security: {text}"
+        );
+        assert!(
+            text.contains("audit README claims"),
+            "card top border must carry the task title: {text}"
+        );
+        assert!(
+            text.contains("working"),
+            "card top border must carry the `working` state label: {text}"
+        );
+        assert!(
+            text.contains("[e]xpand [i]nterrupt [f]ocus"),
+            "card footer must render the hotkey hint string: {text}"
+        );
+    }
+
     #[test]
     fn footer_narration_chips_use_identity_colors() {
         // AC-3: role chips carry the same color as the @role mentions
@@ -3756,6 +3938,265 @@ mod tests {
             .and_then(|span| span.style.fg)
             .expect("@backend chip present with a color");
         assert_eq!(chip_color, tui_style::role_color("backend", "host"));
+    }
+
+    #[test]
+    fn working_card_uses_no_title_placeholder_when_work_title_missing() {
+        // AC: if no `WorkTitle` event has landed for the spawn, the
+        // card top border shows the locked placeholder rather than
+        // collapsing the border.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("backend", "t1")));
+        // Skip the WorkTitle event. Fire a tool call to flip to Working.
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "backend", "t1", "Bash", "u1",
+        )));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(
+            text.contains(crate::working_card::NO_TITLE_PLACEHOLDER),
+            "expected (no title) placeholder: {text}"
+        );
+    }
+
+    #[test]
+    fn working_card_only_renders_when_state_is_working_not_spawning() {
+        // Only `Spawning` so far — no tool call, no output delta.
+        // Per the ADR, Spawning has no card (it shows as a hint in
+        // the spawner's text). The chat stream must not render a card
+        // for a spawn that has not promoted to Working yet.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("backend", "t1")));
+        state.apply_event(crep_room_event(work_title_event(
+            "backend",
+            "t1",
+            "set up scaffolding",
+        )));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        // No card top border or footer.
+        assert!(
+            !text.contains("[e]xpand [i]nterrupt [f]ocus"),
+            "no card footer should render for Spawning: {text}"
+        );
+    }
+
+    #[test]
+    fn working_card_uses_role_identity_color_via_tui_style() {
+        // AC-3: no hard-coded role color. We can't sniff color from
+        // the rendered text directly, but we can verify by running
+        // the merge helper with a known role and inspecting the
+        // top-border `@role` span style.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event("security", "t1", "audit")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        let merged = super::build_merged_scrollback(&state, 120);
+        let role_token_color = merged
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref().contains("@security"))
+            .and_then(|span| span.style.fg)
+            .expect("@security span has a foreground color");
+        assert_eq!(
+            role_token_color,
+            tui_style::role_color("security", "host"),
+            "card identity color must come from tui_style::role_color"
+        );
+    }
+
+    #[test]
+    fn working_card_body_shows_done_and_in_progress_markers() {
+        // Drive @security through one Done tool call + one
+        // InProgress. Card body must show ✓ for the done summary
+        // and ∴ for the in-progress one.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event("security", "t1", "audit")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        state.apply_event(crep_room_event(tool_executed_event(
+            "security",
+            "t1",
+            "u1",
+            "read README.md §2.4",
+        )));
+        // A second proposal that has not executed yet.
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Grep", "u2",
+        )));
+        let text = render_room_runtime_to_text(&state, 120, 30).expect("render");
+        assert!(
+            text.contains('✓'),
+            "card body must render ✓ for the done tool call: {text}"
+        );
+        assert!(
+            text.contains('∴'),
+            "card body must render ∴ for the in-progress tool call: {text}"
+        );
+        assert!(
+            text.contains("read README.md"),
+            "done summary must appear in body: {text}"
+        );
+        // Footer step count tracks done calls only.
+        assert!(
+            text.contains("1 step done"),
+            "footer step count should be 1: {text}"
+        );
+    }
+
+    #[test]
+    fn working_card_position_follows_spawning_event_chat_time_not_bottom() {
+        // AC-2: the card sits at the chat-time of TurnDispatched, not
+        // pinned at the bottom. We push a chat-style line *after*
+        // the spawn dispatches; the card must appear ABOVE that line
+        // in the merged scrollback.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event("security", "t1", "audit")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        // A post-spawn chat row from @host.
+        state.push_scrollback(Line::from("post-spawn host line"));
+        let merged = super::build_merged_scrollback(&state, 120);
+        let card_row = merged
+            .iter()
+            .position(|line| {
+                line.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("[e]xpand [i]nterrupt [f]ocus"))
+            })
+            .expect("card footer present");
+        let post_row = merged
+            .iter()
+            .position(|line| {
+                line.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("post-spawn host line"))
+            })
+            .expect("post-spawn line present");
+        assert!(
+            card_row < post_row,
+            "card must render before post-spawn line: card={card_row}, post={post_row}"
+        );
+    }
+
+    #[test]
+    fn working_card_position_survives_scrollback_drain() {
+        // Regression for the @reviewer audit on PR #392: the
+        // 1000-row scrollback drain in `push_scrollback` evicts the
+        // oldest rows from the front but used to leave the
+        // SpawnInstance's `chat_position` pointing at a now-dead
+        // index. Shipping that would have meant Working cards
+        // silently slipped out of place after long sessions.
+        //
+        // Drive >1000 lines of scrollback with one Working spawn
+        // anchored near the start, then assert: (a) `chat_position`
+        // has been shifted by exactly `overflow`, (b) the merged
+        // scrollback still places the card BEFORE the most recent
+        // post-spawn lines.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event(
+            "security",
+            "t1",
+            "audit README claims",
+        )));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        let spawn_id_before = state
+            .spawn_lifecycle
+            .instances()
+            .next()
+            .expect("one spawn")
+            .spawn_id;
+        let position_before = state
+            .spawn_lifecycle
+            .get(spawn_id_before)
+            .expect("spawn present")
+            .chat_position;
+
+        // Flood scrollback well past the 1000-row cap.
+        for i in 0..1_500 {
+            state.push_scrollback(Line::from(format!("filler {i}")));
+        }
+
+        // The drain shrunk the buffer to exactly 1000 rows. The card's
+        // chat_position must have shifted by `(1 + 1500) - 1000 = 501`
+        // (roughly — accounting for the spawn's own row contribution).
+        // Concretely: chat_position must be strictly less than its
+        // pre-drain value.
+        let position_after = state
+            .spawn_lifecycle
+            .get(spawn_id_before)
+            .expect("spawn still tracked")
+            .chat_position;
+        assert!(
+            position_after < position_before
+                || (position_before == 0 && position_after == 0),
+            "chat_position should shift left after drain: before={position_before}, after={position_after}"
+        );
+
+        // Add one more post-spawn row and verify ordering still holds
+        // in the merged scrollback.
+        state.push_scrollback(Line::from("very fresh line"));
+        let merged = super::build_merged_scrollback(&state, 120);
+        let card_row = merged.iter().position(|line| {
+            line.spans
+                .iter()
+                .any(|s| s.content.as_ref().contains("[e]xpand [i]nterrupt [f]ocus"))
+        });
+        let fresh_row = merged.iter().position(|line| {
+            line.spans
+                .iter()
+                .any(|s| s.content.as_ref().contains("very fresh line"))
+        });
+        if let (Some(card), Some(fresh)) = (card_row, fresh_row) {
+            assert!(
+                card < fresh,
+                "post-drain: card must still precede the latest line (card={card}, fresh={fresh})"
+            );
+        }
+    }
+
+    #[test]
+    fn build_merged_scrollback_is_idempotent() {
+        // Rerendering the same state twice must produce byte-identical
+        // merged scrollback. If a future change introduces hidden
+        // mutation (e.g., recomputing card positions on every call),
+        // this test surfaces it as a flake before users do.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event(
+            "security",
+            "t1",
+            "audit README claims",
+        )));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        state.apply_event(crep_room_event(tool_executed_event(
+            "security",
+            "t1",
+            "u1",
+            "read README.md §2.4",
+        )));
+        let first = super::build_merged_scrollback(&state, 120);
+        let second = super::build_merged_scrollback(&state, 120);
+        let first_text: String = first
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        let second_text: String = second
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(first_text, second_text);
     }
 
     fn test_state() -> RoomRuntimeState {

@@ -67,3 +67,4 @@ pub mod turn;
 pub mod update;
 mod work;
 pub mod work_order;
+pub mod working_card;
