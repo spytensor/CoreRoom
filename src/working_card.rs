@@ -124,10 +124,28 @@ pub fn render_working_stub_line(
     host_role: &str,
     now: Instant,
 ) -> Option<Line<'static>> {
+    render_working_stub_line_with_focus(spawn, host_role, now, false)
+}
+
+#[must_use]
+/// Build the one-line working stub, highlighting its role token when focused.
+pub fn render_working_stub_line_with_focus(
+    spawn: &SpawnInstance,
+    host_role: &str,
+    now: Instant,
+    focused: bool,
+) -> Option<Line<'static>> {
     if spawn.state != SpawnState::Working {
         return None;
     }
     let role_color = tui_style::role_color(&spawn.role, host_role);
+    let role_style = if focused {
+        Style::default()
+            .fg(role_color)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::default().fg(role_color).add_modifier(Modifier::BOLD)
+    };
     let elapsed = elapsed_label(now.saturating_duration_since(spawn.started_at));
     let title = if spawn.title.is_empty() {
         NO_TITLE_PLACEHOLDER.to_owned()
@@ -136,10 +154,7 @@ pub fn render_working_stub_line(
     };
     Some(Line::from(vec![
         Span::raw(CARD_INDENT),
-        Span::styled(
-            format!("@{}", spawn.role),
-            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("@{}", spawn.role), role_style),
         Span::styled(
             format!(
                 " · {title} · working · {elapsed} · {} step{}",

@@ -43,6 +43,8 @@ use crate::room_io_tui::TuiSink;
 use crate::spawn_lifecycle::{SpawnId, SpawnInstance, SpawnLifecycleTracker, SpawnState};
 use crate::tui_style;
 
+const DEFAULT_MAX_FULL_CARDS: usize = 3;
+
 /// Mutable render state for the executable room.
 #[derive(Debug)]
 pub struct RoomRuntimeState {
@@ -87,6 +89,7 @@ pub struct RoomRuntimeState {
     focused_spawn: Option<SpawnId>,
     expanded_done_spawns: BTreeSet<SpawnId>,
     focus_mode_spawn: Option<SpawnId>,
+    max_full_cards: usize,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
     exiting: bool,
@@ -168,6 +171,7 @@ impl RoomRuntimeState {
             focused_spawn: None,
             expanded_done_spawns: BTreeSet::new(),
             focus_mode_spawn: None,
+            max_full_cards: configured_max_full_cards(),
             work_cards: BTreeMap::new(),
             permission: None,
             exiting: false,
@@ -706,6 +710,14 @@ fn handle_mouse(mouse: MouseEvent, state: &mut RoomRuntimeState) {
 fn scroll_page_lines(state: &RoomRuntimeState) -> usize {
     let viewport = usize::from(state.last_viewport_rows.get());
     (viewport / 2).max(1)
+}
+
+fn configured_max_full_cards() -> usize {
+    std::env::var("COREROOM_MAX_FULL_CARDS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MAX_FULL_CARDS)
 }
 
 fn handle_key(
@@ -1269,6 +1281,7 @@ fn build_merged_scrollback(state: &RoomRuntimeState, panel_width: u16) -> Vec<Li
     }
 
     let now = Instant::now();
+    let full_working_spawns = full_working_spawn_ids(state);
     let mut merged: Vec<Line<'static>> =
         Vec::with_capacity(state.scrollback.len() + renderable.len() * 5);
     let mut spawn_iter = renderable.into_iter().peekable();
@@ -1279,16 +1292,60 @@ fn build_merged_scrollback(state: &RoomRuntimeState, panel_width: u16) -> Vec<Li
             .is_some_and(|spawn| spawn.chat_position <= idx)
         {
             let spawn = spawn_iter.next().expect("peeked non-empty");
-            append_spawn_activity_lines(&mut merged, state, spawn, inner_width, now);
+            append_spawn_activity_lines(
+                &mut merged,
+                state,
+                spawn,
+                inner_width,
+                now,
+                &full_working_spawns,
+            );
         }
         merged.push(line.clone());
     }
     // Append any spawn rows whose chat_position is past the end of scrollback
     // (race: spawn registered but no scrollback row has landed yet).
     for spawn in spawn_iter {
-        append_spawn_activity_lines(&mut merged, state, spawn, inner_width, now);
+        append_spawn_activity_lines(
+            &mut merged,
+            state,
+            spawn,
+            inner_width,
+            now,
+            &full_working_spawns,
+        );
     }
     merged
+}
+
+fn full_working_spawn_ids(state: &RoomRuntimeState) -> BTreeSet<SpawnId> {
+    let mut working: Vec<&SpawnInstance> = state
+        .spawn_lifecycle()
+        .instances()
+        .filter(|spawn| spawn.state == SpawnState::Working)
+        .collect();
+    working.sort_by_key(|spawn| {
+        (
+            std::cmp::Reverse(spawn_last_activity(spawn)),
+            spawn.spawn_id,
+        )
+    });
+    working
+        .into_iter()
+        .take(state.max_full_cards)
+        .map(|spawn| spawn.spawn_id)
+        .collect()
+}
+
+fn spawn_last_activity(spawn: &SpawnInstance) -> Instant {
+    spawn
+        .tool_calls
+        .iter()
+        .fold(spawn.state_changed_at, |latest, record| {
+            latest
+                .max(record.started_at)
+                .max(record.finished_at.unwrap_or(record.started_at))
+        })
 }
 
 fn append_spawn_activity_lines(
@@ -1297,17 +1354,23 @@ fn append_spawn_activity_lines(
     spawn: &SpawnInstance,
     inner_width: u16,
     now: Instant,
+    full_working_spawns: &BTreeSet<SpawnId>,
 ) {
     let focused = state.focused_spawn == Some(spawn.spawn_id);
     match spawn.state {
         SpawnState::Working => {
-            if state
+            let focus_mode_stub = state
                 .focus_mode_spawn
-                .is_some_and(|id| id != spawn.spawn_id)
-            {
-                if let Some(line) =
-                    crate::working_card::render_working_stub_line(spawn, &state.host_role, now)
-                {
+                .is_some_and(|id| id != spawn.spawn_id);
+            let density_stub =
+                state.focus_mode_spawn.is_none() && !full_working_spawns.contains(&spawn.spawn_id);
+            if focus_mode_stub || density_stub {
+                if let Some(line) = crate::working_card::render_working_stub_line_with_focus(
+                    spawn,
+                    &state.host_role,
+                    now,
+                    focused,
+                ) {
                     merged.push(line);
                 }
             } else {
@@ -4721,6 +4784,96 @@ mod tests {
         );
     }
 
+    #[test]
+    fn density_at_threshold_keeps_all_working_cards_full() {
+        let mut state = test_state();
+        state.max_full_cards = 3;
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        push_working_spawn(&mut state, "qa", "t3");
+
+        let merged = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert_eq!(full_card_footer_count(&merged), 3);
+        assert!(
+            !merged.contains("· working · 0s · 0 steps"),
+            "no card should be stubbed at threshold: {merged}"
+        );
+    }
+
+    #[test]
+    fn density_over_threshold_stubs_least_recently_active_cards() {
+        let mut state = test_state();
+        state.max_full_cards = 3;
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        push_working_spawn(&mut state, "qa", "t3");
+        push_working_spawn(&mut state, "frontend", "t4");
+
+        let merged = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert_eq!(full_card_footer_count(&merged), 3);
+        assert!(
+            merged.contains("@backend ·"),
+            "oldest card should render as a one-line stub: {merged}"
+        );
+    }
+
+    #[test]
+    fn density_stub_auto_expands_when_it_receives_activity() {
+        let mut state = test_state();
+        state.max_full_cards = 1;
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        let before = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert!(
+            before.contains("@backend ·"),
+            "backend should start as least-recently-active stub: {before}"
+        );
+
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "backend", "t1", "Read", "u-extra",
+        )));
+        let after = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert_eq!(full_card_footer_count(&after), 1);
+        let backend_row = line_position(&super::build_merged_scrollback(&state, 120), "@backend")
+            .expect("backend visible");
+        let footer_row = line_position(
+            &super::build_merged_scrollback(&state, 120),
+            "[e]xpand [i]nterrupt [f]ocus",
+        )
+        .expect("one full card footer");
+        assert!(
+            footer_row > backend_row,
+            "backend should auto-expand to full card after activity: {after}"
+        );
+    }
+
+    #[test]
+    fn focus_mode_can_expand_a_density_stub() {
+        let mut state = test_state();
+        state.max_full_cards = 1;
+        push_working_spawn(&mut state, "backend", "t1");
+        push_working_spawn(&mut state, "security", "t2");
+        state.focused_spawn = state
+            .spawn_lifecycle
+            .instances()
+            .find(|spawn| spawn.role == "backend")
+            .map(|spawn| spawn.spawn_id);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        super::handle_key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+            &mut state,
+            &tx,
+        )
+        .expect("focus mode handled");
+        let merged = super::lines_to_plain_string(&super::build_merged_scrollback(&state, 120));
+        assert_eq!(full_card_footer_count(&merged), 1);
+        assert!(
+            merged.contains("@backend") && merged.contains("[e]xpand [i]nterrupt [f]ocus"),
+            "focused density stub should expand into full card: {merged}"
+        );
+    }
+
     fn test_state() -> RoomRuntimeState {
         let team = vec![
             TeamMember {
@@ -4751,6 +4904,10 @@ mod tests {
         lines
             .iter()
             .position(|line| line_text(line).contains(needle))
+    }
+
+    fn full_card_footer_count(text: &str) -> usize {
+        text.matches("[e]xpand [i]nterrupt [f]ocus").count()
     }
 
     fn sample_request() -> BridgeRequest {
