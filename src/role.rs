@@ -15,9 +15,10 @@ use crate::config::{AuthorityScope, Config, RoleEntry, CONFIG_FILE, COREROOM_DIR
 use crate::config_layered::ProjectConfigRaw;
 use crate::{liveness, manifest};
 
-/// Default body for a freshly-scaffolded role priors file. Users are
-/// expected to replace this with project-specific guidance.
-const DEFAULT_ROLE_PRIORS: &str = include_str!("init_defaults/role_template.md");
+// Priors templates for freshly-scaffolded roles live in
+// `src/init_defaults/` and are picked by name via
+// `crate::init::role_priors_template`. `role.rs` defers to that helper
+// so the wizard and the runtime scaffolding paths stay in sync.
 
 /// One role to append to an existing `.coreroom/` project config.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -508,7 +509,7 @@ fn role_peers(raw: &ProjectConfigRaw, name: &str) -> Vec<String> {
 }
 
 fn render_role_template(name: &str, host: &str, peers: &[String]) -> String {
-    DEFAULT_ROLE_PRIORS
+    crate::init::role_priors_template(name)
         .replace("{ROLE}", name)
         .replace("{HOST}", host)
         .replace(

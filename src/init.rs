@@ -61,7 +61,24 @@ const DEFAULT_HOST_PRIORS: &str = include_str!("init_defaults/host.md");
 const DEFAULT_SHARED_PRIORS: &str = include_str!("init_defaults/shared.md");
 const DEFAULT_GITIGNORE: &str = include_str!("init_defaults/gitignore");
 const DEFAULT_ROLE_TEMPLATE: &str = include_str!("init_defaults/role_template.md");
+const FRONTEND_ROLE_TEMPLATE: &str = include_str!("init_defaults/roles/frontend.md");
 const ROLE_SUGGESTIONS_DISMISSED: &str = "sessions/role-suggestions-dismissed";
+
+/// Pick the priors template body for a freshly-scaffolded role. Most
+/// roles fall through to the generic `DEFAULT_ROLE_TEMPLATE`; a small
+/// allow-list of well-known role names gets a domain-specialized
+/// variant so the very first priors file the user opens already
+/// reflects what the role actually does in this project.
+///
+/// `frontend` in CoreRoom is the ratatui/terminal-UI specialist —
+/// not a web frontend. Consumer projects can override by editing
+/// their own `.coreroom/roles/<name>/priors.md`.
+pub(crate) const fn role_priors_template(name: &str) -> &'static str {
+    match name.as_bytes() {
+        b"frontend" => FRONTEND_ROLE_TEMPLATE,
+        _ => DEFAULT_ROLE_TEMPLATE,
+    }
+}
 
 const DEFAULT_ENGINE: Engine = Engine::Cc;
 const DEFAULT_STARTER_ROLES: &[&str] = &["host", "engineer", "reviewer"];

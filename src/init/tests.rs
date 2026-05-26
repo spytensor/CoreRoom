@@ -548,6 +548,114 @@ fn role_template_substitutes_role_name() {
 }
 
 #[test]
+fn role_priors_template_picks_frontend_specialization() {
+    // Unit-level check that the name dispatch points at the right
+    // include_str! body. Anchor strings come from the specialized
+    // template only and must not appear in the generic one.
+    let frontend = role_priors_template("frontend");
+    let engineer = role_priors_template("engineer");
+    let host = role_priors_template("host");
+    assert!(
+        frontend.contains("terminal-UI specialist"),
+        "frontend template missing TUI framing"
+    );
+    assert!(
+        frontend.contains("ratatui"),
+        "frontend template should call out ratatui"
+    );
+    assert!(
+        !engineer.contains("terminal-UI specialist"),
+        "generic template must not inherit frontend framing"
+    );
+    assert!(
+        !host.contains("terminal-UI specialist"),
+        "generic template must not inherit frontend framing"
+    );
+}
+
+#[test]
+fn cr_role_add_frontend_writes_tui_specialist_priors() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module x\n").unwrap();
+    run(tmp.path(), InitOptions::auto()).expect("init");
+    crate::role::add(tmp.path(), "frontend", None, None).expect("add frontend role");
+
+    let priors = std::fs::read_to_string(
+        tmp.path()
+            .join(COREROOM_DIR)
+            .join(ROLES_DIR)
+            .join("frontend")
+            .join(crate::manifest::ROLE_PRIORS_FILE),
+    )
+    .unwrap();
+    // Domain framing is present.
+    assert!(priors.contains("terminal-UI specialist"));
+    assert!(priors.contains("ratatui"));
+    assert!(priors.contains("traditional web frontend role"));
+    // Shared protocol clauses survived the template swap.
+    assert!(priors.contains("peer-quote"));
+    assert!(priors.contains("gate-templates"));
+    // Substitution placeholders are gone — `{ROLE}/{HOST}/{PEERS}` are
+    // replaced by `frontend / host / @host …`.
+    assert!(!priors.contains("{ROLE}"));
+    assert!(!priors.contains("{HOST}"));
+    assert!(!priors.contains("{PEERS}"));
+    assert!(priors.contains("@frontend"));
+    assert!(priors.contains("@host"));
+}
+
+#[test]
+fn cr_role_add_non_frontend_keeps_generic_template() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module x\n").unwrap();
+    run(tmp.path(), InitOptions::auto()).expect("init");
+    crate::role::add(tmp.path(), "backend", None, None).expect("add backend role");
+
+    let priors = std::fs::read_to_string(
+        tmp.path()
+            .join(COREROOM_DIR)
+            .join(ROLES_DIR)
+            .join("backend")
+            .join(crate::manifest::ROLE_PRIORS_FILE),
+    )
+    .unwrap();
+    // The generic template emerges for non-frontend roles.
+    assert!(!priors.contains("terminal-UI specialist"));
+    assert!(!priors.contains("ratatui"));
+    assert!(priors.contains("@host"));
+    assert!(priors.contains("@backend"));
+}
+
+#[test]
+fn existing_frontend_priors_are_not_overwritten_on_repeated_add() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module x\n").unwrap();
+    run(tmp.path(), InitOptions::auto()).expect("init");
+
+    // First add: writes the TUI-specialist defaults.
+    crate::role::add(tmp.path(), "frontend", None, None).expect("first add");
+
+    let priors_path = tmp
+        .path()
+        .join(COREROOM_DIR)
+        .join(ROLES_DIR)
+        .join("frontend")
+        .join(crate::manifest::ROLE_PRIORS_FILE);
+    let user_body = "# frontend role\n\nLocal override — this project DOES ship a web UI.\n";
+    std::fs::write(&priors_path, user_body).expect("user override write");
+
+    // Repeated add fails fast (role already exists), so the user file
+    // survives unchanged — this is the "backward compatible" contract
+    // from #373.
+    let err = crate::role::add(tmp.path(), "frontend", None, None)
+        .expect_err("re-adding the same role should fail rather than overwrite");
+    assert!(err.to_string().contains("frontend"));
+
+    let actual = std::fs::read_to_string(&priors_path).expect("read priors");
+    assert_eq!(actual, user_body);
+}
+
+#[test]
 fn planned_files_lists_in_render_order() {
     let paths = planned_files(
         Path::new("/tmp/p"),

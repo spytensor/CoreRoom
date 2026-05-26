@@ -9,7 +9,7 @@ use crate::gate::{self, GATE_TEMPLATES_DIR};
 use crate::manifest;
 
 use super::{
-    RolePlan, DEFAULT_ENGINE, DEFAULT_GITIGNORE, DEFAULT_HOST_PRIORS, DEFAULT_ROLE_TEMPLATE,
+    role_priors_template, RolePlan, DEFAULT_ENGINE, DEFAULT_GITIGNORE, DEFAULT_HOST_PRIORS,
     DEFAULT_SHARED_PRIORS,
 };
 
@@ -54,7 +54,7 @@ fn render_role_priors(role_name: &str, roles: &[RolePlan]) -> String {
         .filter(|role| role.name != role_name)
         .map(|role| format!("@{}", role.name))
         .collect::<Vec<_>>();
-    DEFAULT_ROLE_TEMPLATE
+    role_priors_template(role_name)
         .replace("{ROLE}", role_name)
         .replace("{HOST}", "host")
         .replace(
