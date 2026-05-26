@@ -10,6 +10,14 @@ use crate::config::{AuthorityScope, RoleAccess};
 use crate::observation::Observation;
 use crate::work_order::WorkOrderRoleGrant;
 
+/// Per-spawn lifecycle types — re-exported here so renderers have a
+/// single import path for the snapshot API. See
+/// [`crate::spawn_lifecycle`] for the full data model.
+pub use crate::spawn_lifecycle::{
+    Outcome, SpawnId, SpawnInstance, SpawnLifecycleTracker, SpawnState, ToolCallRecord,
+    ToolCallStatus,
+};
+
 /// Current console snapshot schema version.
 pub const CONSOLE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 

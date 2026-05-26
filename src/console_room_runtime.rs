@@ -40,6 +40,7 @@ use crate::permissions::{BridgeRequest, BridgeResponse, DecisionScope, Permissio
 use crate::repl::{Command, RuntimeInput};
 use crate::room_io::{NoticeLevel, RoomEvent, RoomSink, SpinnerPaint, SpinnerSnapshot, StdoutSink};
 use crate::room_io_tui::TuiSink;
+use crate::spawn_lifecycle::{SpawnInstance, SpawnLifecycleTracker};
 use crate::tui_style;
 
 /// Mutable render state for the executable room.
@@ -59,6 +60,14 @@ pub struct RoomRuntimeState {
     /// speaker.
     last_speaker: Option<String>,
     spinners: BTreeMap<String, SpinnerSnapshot>,
+    /// Per-spawn-instance lifecycle records for the v0.10 chat stream.
+    /// Populated from the same `CrepEvent` stream as `spinners`, but
+    /// keyed by [`crate::spawn_lifecycle::SpawnId`] so concurrent
+    /// spawns by the same role can be tracked independently. The
+    /// current rail renderer reads from `spinners`, not this tracker,
+    /// so adding this field is a no-visual-diff change (AC-5 on #380).
+    /// `#381`+ wire the chat-stream widget against this tracker.
+    spawn_lifecycle: SpawnLifecycleTracker,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
     exiting: bool,
@@ -124,6 +133,7 @@ impl RoomRuntimeState {
             crate::repl::composer_command_specs(),
             "type a task · @role · /help · /exit",
         );
+        let spawn_lifecycle = SpawnLifecycleTracker::new(host_role.clone());
         Self {
             project_root,
             project_name,
@@ -134,6 +144,7 @@ impl RoomRuntimeState {
             scrollback: Vec::new(),
             last_speaker: None,
             spinners: BTreeMap::new(),
+            spawn_lifecycle,
             work_cards: BTreeMap::new(),
             permission: None,
             exiting: false,
@@ -148,6 +159,12 @@ impl RoomRuntimeState {
     pub fn apply_event(&mut self, event: RoomEvent) {
         match event {
             RoomEvent::Crep { event, host_role } => {
+                // Per #380: drive the per-spawn lifecycle tracker off
+                // the same CrepEvent stream the renderer reads. This
+                // is a state-only update — no rendering branches
+                // consult the tracker yet (#381+ does), so the
+                // existing rail output is unchanged (AC-5).
+                self.spawn_lifecycle.apply_event(event.as_ref());
                 let ends_turn = matches!(
                     event.as_ref(),
                     CrepEvent::RoleSpoke { .. }
@@ -367,6 +384,25 @@ impl RoomRuntimeState {
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
         self.unread_since_scroll = 0;
+    }
+
+    /// Per-spawn lifecycle tracker for the chat-stream renderer
+    /// (`#381`+). The current rail renderer does not consult this
+    /// field — it still reads from
+    /// [`Self::spinners`] — so exposing the tracker is a snapshot-API
+    /// expansion, not a visual change.
+    #[must_use]
+    pub const fn spawn_lifecycle(&self) -> &SpawnLifecycleTracker {
+        &self.spawn_lifecycle
+    }
+
+    /// Convenience shortcut over
+    /// [`SpawnLifecycleTracker::working_instances_ordered_by_started_at`]
+    /// for the footer narration consumer in `#382`.
+    #[must_use]
+    pub fn working_spawn_instances(&self) -> Vec<&SpawnInstance> {
+        self.spawn_lifecycle
+            .working_instances_ordered_by_started_at()
     }
 
     fn has_active_work(&self) -> bool {
