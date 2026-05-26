@@ -4,6 +4,7 @@
 //! lines into the existing REPL parser and renders the same `RoomEvent`
 //! stream that `cr start` writes to stdout.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal as _, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
@@ -62,6 +63,17 @@ pub struct RoomRuntimeState {
     permission: Option<PendingPermission>,
     exiting: bool,
     show_cheatsheet: bool,
+    /// Rows above the bottom that the user has scrolled the Room
+    /// transcript up by. `0` follows new turns; `> 0` parks the view
+    /// at history and a "↓ N new / End to follow" indicator is shown.
+    scroll_offset: usize,
+    /// Lines appended to scrollback while `scroll_offset > 0`. Drives
+    /// the unread badge; reset to zero on `scroll_to_bottom`.
+    unread_since_scroll: usize,
+    /// Inner height of the Room widget seen on the most recent render,
+    /// captured via interior mutability so scroll clamping can run
+    /// from the (immutable) render path. `0` until the first frame.
+    last_viewport_rows: Cell<u16>,
 }
 
 /// One configured role in the room roster. Live work state lives in
@@ -126,6 +138,9 @@ impl RoomRuntimeState {
             permission: None,
             exiting: false,
             show_cheatsheet: false,
+            scroll_offset: 0,
+            unread_since_scroll: 0,
+            last_viewport_rows: Cell::new(0),
         }
     }
 
@@ -283,10 +298,59 @@ impl RoomRuntimeState {
 
     fn push_scrollback(&mut self, line: Line<'static>) {
         self.scrollback.push(line);
+        if self.scroll_offset > 0 {
+            self.unread_since_scroll = self.unread_since_scroll.saturating_add(1);
+        }
         let overflow = self.scrollback.len().saturating_sub(1000);
         if overflow > 0 {
             self.scrollback.drain(0..overflow);
         }
+    }
+
+    /// Current scrollback offset measured in rows above the bottom of
+    /// the Room widget. `0` means "follow the latest turn".
+    #[must_use]
+    pub const fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    /// Number of lines appended since the user scrolled away from the
+    /// bottom. Reset by `scroll_to_bottom`.
+    #[must_use]
+    pub const fn unread_since_scroll(&self) -> usize {
+        self.unread_since_scroll
+    }
+
+    fn scroll_max(&self) -> usize {
+        let viewport = usize::from(self.last_viewport_rows.get()).max(1);
+        self.scrollback.len().saturating_sub(viewport)
+    }
+
+    /// Scroll the Room transcript up by `lines` rows. Clamped to the
+    /// oldest visible row given the most recently rendered viewport.
+    pub fn scroll_up(&mut self, lines: usize) {
+        let max = self.scroll_max();
+        self.scroll_offset = self.scroll_offset.saturating_add(lines).min(max);
+    }
+
+    /// Scroll the Room transcript down by `lines` rows. Reaching the
+    /// bottom clears the unread badge.
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+        if self.scroll_offset == 0 {
+            self.unread_since_scroll = 0;
+        }
+    }
+
+    /// Jump to the oldest visible row in the current viewport.
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = self.scroll_max();
+    }
+
+    /// Return to the bottom and resume following new turns.
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+        self.unread_since_scroll = 0;
     }
 
     fn has_active_work(&self) -> bool {
@@ -413,9 +477,32 @@ fn handle_terminal_event(
         Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
             handle_key(key, state, input_tx)?;
         }
+        Event::Mouse(mouse) if state.permission.is_none() && !state.show_cheatsheet => {
+            handle_mouse(mouse, state);
+        }
         _ => {}
     }
     Ok(())
+}
+
+/// Translate the live room's wheel events into scrollback navigation.
+/// `MOUSE_WHEEL_LINES` matches the K9s / vim feel — one notch moves a
+/// small fixed step rather than a full page.
+fn handle_mouse(mouse: MouseEvent, state: &mut RoomRuntimeState) {
+    const MOUSE_WHEEL_LINES: usize = 3;
+    match mouse.kind {
+        MouseEventKind::ScrollUp => state.scroll_up(MOUSE_WHEEL_LINES),
+        MouseEventKind::ScrollDown => state.scroll_down(MOUSE_WHEEL_LINES),
+        _ => {}
+    }
+}
+
+/// One PgUp/PgDn moves half the visible Room height, with a small
+/// floor for tiny windows. Half-page matches the feel of `less` and
+/// keeps a couple of orientation rows on screen when the user pages.
+fn scroll_page_lines(state: &RoomRuntimeState) -> usize {
+    let viewport = usize::from(state.last_viewport_rows.get());
+    (viewport / 2).max(1)
 }
 
 fn handle_key(
@@ -496,6 +583,20 @@ fn handle_key(
         }
         KeyCode::Left => {
             let _ = state.composer.move_left();
+        }
+        KeyCode::PageUp => {
+            let page = scroll_page_lines(state);
+            state.scroll_up(page);
+        }
+        KeyCode::PageDown => {
+            let page = scroll_page_lines(state);
+            state.scroll_down(page);
+        }
+        KeyCode::Home if state.composer.view_model().input.is_empty() => {
+            state.scroll_to_top();
+        }
+        KeyCode::End if state.composer.view_model().input.is_empty() => {
+            state.scroll_to_bottom();
         }
         KeyCode::Home => {
             let _ = state.composer.move_home();
@@ -782,27 +883,73 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
 
 fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let visible_rows = area.height.saturating_sub(2) as usize;
-    // Activity rows are appended at the BOTTOM of the Room so they
-    // read like an inline tool-call indicator on the most recent
-    // turn, sitting just above the composer — not as a banner pinned
-    // to the top above the conversation.
-    let activity_lines = current_turn_lines(state);
-    let scroll_rows = visible_rows.saturating_sub(activity_lines.len());
-    let start = state.scrollback.len().saturating_sub(scroll_rows);
-    let mut items: Vec<Line<'static>> = if state.scrollback.is_empty() {
-        vec![Line::from(vec![Span::styled(
-            "Submit a task below. Runtime output appears here.",
-            Style::default().fg(Color::DarkGray),
-        )])]
+    // Capture the viewport so scroll handlers can clamp `scroll_offset`
+    // against the real Room widget height — the cheapest path to a
+    // shared viewport hint without threading `&mut state` through the
+    // entire render call chain.
+    state
+        .last_viewport_rows
+        .set(u16::try_from(visible_rows).unwrap_or(u16::MAX));
+
+    // Clamp lazily: scrollback can shrink (1000-row drain in
+    // `push_scrollback`), so the stored offset may exceed the new max.
+    let max_offset = state.scrollback.len().saturating_sub(visible_rows.max(1));
+    let effective_offset = state.scroll_offset.min(max_offset);
+
+    let items: Vec<Line<'static>> = if effective_offset == 0 {
+        // Sticking to the bottom: include the inline activity rows so
+        // the most recent turn reads like a chat composer would. This
+        // is the v0.9.15 behavior, preserved (and still applies when
+        // scrollback is empty so spinner activity is visible on a
+        // fresh room).
+        let activity_lines = current_turn_lines(state);
+        let scroll_rows = visible_rows.saturating_sub(activity_lines.len());
+        let start = state.scrollback.len().saturating_sub(scroll_rows);
+        let mut items: Vec<Line<'static>> = if state.scrollback.is_empty() {
+            vec![Line::from(vec![Span::styled(
+                "Submit a task below. Runtime output appears here.",
+                Style::default().fg(Color::DarkGray),
+            )])]
+        } else {
+            state.scrollback[start..].to_vec()
+        };
+        items.extend(activity_lines);
+        items
     } else {
-        state.scrollback[start..].to_vec()
+        // Scrolled back: drop the "now" activity rows and reserve the
+        // bottom row for a follow-back indicator so the user always
+        // sees that they are looking at history.
+        let scroll_rows = visible_rows.saturating_sub(1);
+        let total = state.scrollback.len();
+        let end = total.saturating_sub(effective_offset);
+        let start = end.saturating_sub(scroll_rows);
+        let mut items = state.scrollback[start..end].to_vec();
+        items.push(scrollback_follow_indicator(state.unread_since_scroll));
+        items
     };
-    items.extend(activity_lines);
+
     let items = items.into_iter().map(ListItem::new).collect::<Vec<_>>();
     frame.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title("Room")),
         area,
     );
+}
+
+/// Bottom-of-Room hint shown whenever the user has scrolled away from
+/// the live tail. Yellow when there is unread output to flag, dim gray
+/// when scrollback is quiet so the user can ignore it.
+fn scrollback_follow_indicator(unread: usize) -> Line<'static> {
+    if unread > 0 {
+        Line::from(vec![Span::styled(
+            format!("↓ {unread} new · End to follow"),
+            Style::default().fg(Color::Yellow),
+        )])
+    } else {
+        Line::from(vec![Span::styled(
+            "↑ scrolled back · End to follow",
+            Style::default().fg(Color::DarkGray),
+        )])
+    }
 }
 
 fn render_status_rail(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
@@ -2275,44 +2422,196 @@ mod tests {
         assert!(text.contains("? / esc to close"));
     }
 
-    #[test]
-    fn mouse_events_are_ignored_by_the_terminal_event_handler() {
-        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-        let mut state = test_state();
-        let initial_input = state.composer.view_model().input.clone();
-        let initial_exiting = state.exiting;
-        let initial_help = state.show_cheatsheet;
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let events = [
-            Event::Mouse(MouseEvent {
-                kind: MouseEventKind::ScrollUp,
-                column: 0,
-                row: 0,
-                modifiers: KeyModifiers::empty(),
-            }),
-            Event::Mouse(MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: 0,
-                row: 0,
-                modifiers: KeyModifiers::empty(),
-            }),
-            Event::Mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: 4,
-                row: 4,
-                modifiers: KeyModifiers::empty(),
-            }),
-        ];
-        for event in events {
-            handle_terminal_event(event, &mut state, &tx).expect("event handled");
+    fn mouse_event(kind: MouseEventKind) -> Event {
+        Event::Mouse(MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        })
+    }
+
+    fn key_event(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::empty(),
         }
-        // Mouse capture is enabled so the terminal stops scrolling its
-        // main-buffer scrollback under the user; the events arrive
-        // here, but for now we keep them as noops. Nothing in the
-        // runtime state may have moved.
-        assert_eq!(state.composer.view_model().input, initial_input);
-        assert_eq!(state.exiting, initial_exiting);
-        assert_eq!(state.show_cheatsheet, initial_help);
+    }
+
+    fn populate_scrollback(state: &mut RoomRuntimeState, lines: usize) {
+        for i in 0..lines {
+            state.push_scrollback(Line::from(format!("line {i}")));
+        }
+    }
+
+    #[test]
+    fn mouse_wheel_unrelated_buttons_do_not_move_scroll() {
+        use crossterm::event::MouseButton;
+        let mut state = test_state();
+        populate_scrollback(&mut state, 100);
+        state.last_viewport_rows.set(20);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        handle_terminal_event(
+            mouse_event(MouseEventKind::Down(MouseButton::Left)),
+            &mut state,
+            &tx,
+        )
+        .expect("event handled");
+        assert_eq!(state.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn mouse_wheel_up_scrolls_history_then_clamps_at_top() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(10);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        for _ in 0..3 {
+            handle_terminal_event(mouse_event(MouseEventKind::ScrollUp), &mut state, &tx)
+                .expect("event handled");
+        }
+        // Each wheel notch is 3 lines; three notches = 9. Max is
+        // scrollback (30) - viewport (10) = 20, so we are well below
+        // the clamp.
+        assert_eq!(state.scroll_offset(), 9);
+        // Keep spamming until we hit the clamp; ScrollUp must not
+        // overshoot the oldest visible row.
+        for _ in 0..100 {
+            handle_terminal_event(mouse_event(MouseEventKind::ScrollUp), &mut state, &tx)
+                .expect("event handled");
+        }
+        assert_eq!(state.scroll_offset(), 20);
+    }
+
+    #[test]
+    fn mouse_wheel_down_clears_unread_when_back_at_bottom() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(10);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Walk up so unread can accumulate.
+        for _ in 0..2 {
+            handle_terminal_event(mouse_event(MouseEventKind::ScrollUp), &mut state, &tx)
+                .expect("event handled");
+        }
+        assert_eq!(state.scroll_offset(), 6);
+        // New lines arrive while we are scrolled up.
+        state.push_scrollback(Line::from("fresh 1"));
+        state.push_scrollback(Line::from("fresh 2"));
+        assert_eq!(state.unread_since_scroll(), 2);
+        // Walking back to the bottom clears the unread badge.
+        for _ in 0..3 {
+            handle_terminal_event(mouse_event(MouseEventKind::ScrollDown), &mut state, &tx)
+                .expect("event handled");
+        }
+        assert_eq!(state.scroll_offset(), 0);
+        assert_eq!(state.unread_since_scroll(), 0);
+    }
+
+    #[test]
+    fn page_keys_scroll_by_half_a_viewport() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 40);
+        state.last_viewport_rows.set(20);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        handle_terminal_event(Event::Key(key_event(KeyCode::PageUp)), &mut state, &tx)
+            .expect("event handled");
+        // Half of 20 = 10.
+        assert_eq!(state.scroll_offset(), 10);
+        handle_terminal_event(Event::Key(key_event(KeyCode::PageDown)), &mut state, &tx)
+            .expect("event handled");
+        assert_eq!(state.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn home_jumps_to_top_only_when_composer_is_empty() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 25);
+        state.last_viewport_rows.set(10);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Home with text in the composer must still move the input
+        // cursor (Composer's move_home), never the scrollback.
+        state.composer.insert_char('a');
+        state.composer.insert_char('b');
+        state.composer.move_right(); // cursor at end so move_home is a real action
+        handle_terminal_event(Event::Key(key_event(KeyCode::Home)), &mut state, &tx)
+            .expect("event handled");
+        assert_eq!(state.scroll_offset(), 0);
+        assert_eq!(state.composer.cursor(), 0);
+
+        // With an empty composer, Home jumps to the top of history.
+        state.composer.clear();
+        handle_terminal_event(Event::Key(key_event(KeyCode::Home)), &mut state, &tx)
+            .expect("event handled");
+        assert_eq!(state.scroll_offset(), 25 - 10);
+
+        // End with an empty composer returns to the bottom and resets
+        // the unread badge.
+        state.push_scrollback(Line::from("post-scroll arrival"));
+        assert_eq!(state.unread_since_scroll(), 1);
+        handle_terminal_event(Event::Key(key_event(KeyCode::End)), &mut state, &tx)
+            .expect("event handled");
+        assert_eq!(state.scroll_offset(), 0);
+        assert_eq!(state.unread_since_scroll(), 0);
+    }
+
+    #[test]
+    fn permission_overlay_disables_scroll_events() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(10);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (resp_tx, _resp_rx) = mpsc::unbounded_channel();
+        state.apply_event(RoomEvent::PermissionPrompt {
+            request: sample_request(),
+            host_role: "host".to_owned(),
+            response_tx: Some(resp_tx),
+        });
+        // Mouse wheel must not move the transcript while a permission
+        // modal is open — the user's attention belongs to the prompt.
+        handle_terminal_event(mouse_event(MouseEventKind::ScrollUp), &mut state, &tx)
+            .expect("event handled");
+        assert_eq!(state.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn scrolled_back_render_shows_follow_indicator_with_unread_count() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(20);
+        state.scroll_up(5);
+        // A real arrival while scrolled adds to the unread badge.
+        state.push_scrollback(Line::from("fresh delta"));
+        let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        assert!(
+            text.contains("↓ 1 new · End to follow"),
+            "expected unread indicator in scrollback footer; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn scrolled_back_render_without_unread_shows_quiet_indicator() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(20);
+        state.scroll_up(5);
+        let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        assert!(
+            text.contains("↑ scrolled back · End to follow"),
+            "expected quiet indicator; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn at_bottom_render_omits_follow_indicator() {
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        assert!(!text.contains("scrolled back · End to follow"));
+        assert!(!text.contains("new · End to follow"));
     }
 
     #[test]
