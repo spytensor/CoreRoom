@@ -27,7 +27,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use tokio::sync::mpsc;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::adapter::Engine;
 use crate::config::Config;
@@ -775,20 +775,54 @@ pub fn render_room_runtime_to_text(
 
 fn render_room_runtime_frame(frame: &mut Frame<'_>, state: &RoomRuntimeState) {
     let area = frame.area();
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(8),
-            Constraint::Length(5),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    // Per the v0.10 ADR (`docs/v0.10-chat-stream-vs-dashboard.md`,
+    // "Footer narration line"): the narration strip shows above the
+    // composer ONLY when at least one sub-agent is in `Working` or
+    // `Spawning`. When both counts are zero the row is hidden so the
+    // composer reclaims that cell — no empty bar is rendered.
+    let needs_narration = !state
+        .spawn_lifecycle
+        .working_instances_ordered_by_started_at()
+        .is_empty()
+        || !state
+            .spawn_lifecycle
+            .spawning_instances_ordered_by_started_at()
+            .is_empty();
 
-    render_status_bar(frame, root[0], state);
-    render_body(frame, root[1], state);
-    render_composer(frame, root[2], state);
-    render_footer(frame, root[3], state);
+    if needs_narration {
+        let root = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // status bar
+                Constraint::Min(8),    // body (room + rail)
+                Constraint::Length(1), // footer narration
+                Constraint::Length(5), // composer
+                Constraint::Length(1), // footer (bindings)
+            ])
+            .split(area);
+
+        render_status_bar(frame, root[0], state);
+        render_body(frame, root[1], state);
+        render_footer_narration(frame, root[2], state);
+        render_composer(frame, root[3], state);
+        render_footer(frame, root[4], state);
+    } else {
+        let root = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // status bar
+                Constraint::Min(8),    // body (room + rail)
+                Constraint::Length(5), // composer
+                Constraint::Length(1), // footer (bindings)
+            ])
+            .split(area);
+
+        render_status_bar(frame, root[0], state);
+        render_body(frame, root[1], state);
+        render_composer(frame, root[2], state);
+        render_footer(frame, root[3], state);
+    }
+
     if let Some(permission) = &state.permission {
         render_permission_overlay(frame, area, permission);
     } else if state.show_cheatsheet {
@@ -1638,6 +1672,171 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
     let bindings = footer_bindings(state);
     let fitted = fit_bindings_to_width(&bindings, area.width.into());
     frame.render_widget(Paragraph::new(vec![bindings_to_line(&fitted)]), area);
+}
+
+/// One-row narration strip above the composer that names the roles
+/// being waited on while sub-agents work. Format (locked by the v0.10
+/// ADR, "Footer narration line"):
+///
+/// ```text
+/// 2 roles still working · @security @backend · @qa spawning
+/// ```
+///
+/// The leading `N roles still working` count is **`Working`-only**.
+/// `Spawning` instances are named with a trailing `· @role spawning`
+/// suffix so the user sees that a role has been delegated even before
+/// its first tool call, but they do NOT increment the count (they have
+/// no live tool-call stream and no card to focus). When both counts
+/// are zero the renderer hides the row entirely — see
+/// [`render_room_runtime_frame`].
+///
+/// The strip never wraps. When the row would overflow, role chips
+/// truncate left-to-right with `… +N more`.
+fn render_footer_narration(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState) {
+    let working = state
+        .spawn_lifecycle
+        .working_instances_ordered_by_started_at();
+    let spawning = state
+        .spawn_lifecycle
+        .spawning_instances_ordered_by_started_at();
+    let line =
+        build_footer_narration_line(&working, &spawning, &state.host_role, area.width as usize);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+/// One role chip in [`build_footer_narration_line`]: the colored
+/// `@role` text plus an optional trailing `" spawning"` annotation
+/// drawn in the muted style.
+struct NarrationChip {
+    text: String,
+    color: Color,
+    suffix: Option<&'static str>,
+}
+
+/// Pure-data builder for [`render_footer_narration`]. Split out so the
+/// renderer tests can pin the exact span sequence and the truncation
+/// behavior without standing up a [`Frame`].
+fn build_footer_narration_line(
+    working: &[&SpawnInstance],
+    spawning: &[&SpawnInstance],
+    host_role: &str,
+    available_width: usize,
+) -> Line<'static> {
+    let working_count = working.len();
+    // Per ADR Q4: list roles only — no "chat resumes" promise. The
+    // header text uses singular `role` for exactly one Working, plural
+    // `roles` for zero or many. ("0 roles" reads correctly when only
+    // Spawning instances are present.)
+    let header = if working_count == 1 {
+        "1 role still working".to_owned()
+    } else {
+        format!("{working_count} roles still working")
+    };
+    let muted = Style::default().fg(Color::DarkGray);
+
+    // Build the candidate chip list. Each chip is rendered as its own
+    // styled span; we measure visible width with `UnicodeWidthStr` and
+    // walk left-to-right, dropping the tail to a truncation marker
+    // (`… +N more`) when the next chip would exceed the row budget.
+    let mut chips: Vec<NarrationChip> = Vec::with_capacity(working.len() + spawning.len());
+    for instance in working {
+        chips.push(NarrationChip {
+            text: format!("@{}", instance.role),
+            color: tui_style::role_color(&instance.role, host_role),
+            suffix: None,
+        });
+    }
+    for instance in spawning {
+        chips.push(NarrationChip {
+            text: format!("@{}", instance.role),
+            color: tui_style::role_color(&instance.role, host_role),
+            suffix: Some(" spawning"),
+        });
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled(header.clone(), muted));
+    if chips.is_empty() {
+        return Line::from(spans);
+    }
+
+    // Width budget = entire row minus the header that is already
+    // committed. We reserve a separator (` · `) before every chip and
+    // the chip itself (and its optional ` spawning` suffix). When the
+    // remaining budget cannot fit the next chip we collapse the tail
+    // to `… +N more`, which is itself measured against the budget so a
+    // single overflowing chip still produces a visible truncation
+    // marker rather than overflowing silently.
+    let header_w = UnicodeWidthStr::width(header.as_str());
+    let mut used = header_w;
+    let total = chips.len();
+
+    let mut i = 0;
+    while i < total {
+        let chip = &chips[i];
+        let chip_w = UnicodeWidthStr::width(chip.text.as_str())
+            + chip.suffix.map_or(0, UnicodeWidthStr::width);
+        let sep = footer_narration_separator(i, working.len());
+        let sep_w = UnicodeWidthStr::width(sep);
+        let remaining = total - i;
+        // Reserve space for a possible truncation marker AFTER this
+        // chip, so the last chip that fits can be followed by `…
+        // +K more` if a later chip would overflow. When this is the
+        // last chip in the list there is no tail to mark, so no
+        // reservation is needed.
+        let reserve = if remaining > 1 {
+            let tail_marker = format!("… +{} more", remaining - 1);
+            let tail_sep = footer_narration_separator(i + 1, working.len());
+            UnicodeWidthStr::width(tail_sep) + UnicodeWidthStr::width(tail_marker.as_str())
+        } else {
+            0
+        };
+
+        if used + sep_w + chip_w + reserve <= available_width {
+            spans.push(Span::styled(sep.to_owned(), muted));
+            spans.push(Span::styled(
+                chip.text.clone(),
+                Style::default().fg(chip.color),
+            ));
+            if let Some(suffix) = chip.suffix {
+                spans.push(Span::styled(suffix.to_owned(), muted));
+            }
+            used += sep_w + chip_w;
+            i += 1;
+        } else {
+            // This chip (or the truncation marker that would have to
+            // follow it) does not fit. Collapse the rest of the list to
+            // `… +K more` with K = number of chips not rendered. The
+            // marker is rendered best-effort: when the area is too
+            // narrow to fit even the marker, we still emit it so the
+            // user sees "there is more" rather than a silent drop.
+            let marker_text = format!("… +{remaining} more");
+            spans.push(Span::styled(sep.to_owned(), muted));
+            spans.push(Span::styled(marker_text, muted));
+            break;
+        }
+    }
+
+    Line::from(spans)
+}
+
+/// Choose the separator that precedes the chip at index `i`.
+///
+/// - First chip overall (i = 0): ` · ` (separates the header from the
+///   chip list).
+/// - First chip of the Spawning group when there is at least one
+///   Working chip ahead of it (i == working_count > 0): ` · ` (the
+///   ADR uses a dot to set the spawning suffix apart from the Working
+///   list).
+/// - All other chips: ` ` (chips inside the same group are
+///   space-separated).
+fn footer_narration_separator(i: usize, working_count: usize) -> &'static str {
+    let is_group_boundary = i == 0 || (i == working_count && working_count > 0);
+    if is_group_boundary {
+        " · "
+    } else {
+        " "
+    }
 }
 
 /// One footer chip: a styled keys badge + a plain action label.
@@ -3348,6 +3547,228 @@ mod tests {
         assert_eq!(spans[0].content.as_ref(), "[");
         assert_eq!(spans[1].content.as_ref(), "@backend");
         assert_eq!(spans[2].content.as_ref(), "]");
+    }
+
+    /// Drive `state` through enough `CrepEvent`s to land one spawn in
+    /// `Working`. Returns nothing; callers inspect
+    /// `state.spawn_lifecycle()` or rerender to assert visuals.
+    fn push_working_spawn(state: &mut RoomRuntimeState, role: &str, turn_id: &str) {
+        state.apply_event(RoomEvent::Crep {
+            event: Box::new(CrepEvent::TurnDispatched {
+                role: role.to_owned(),
+                priors_hash: String::new(),
+                turn_id: turn_id.to_owned(),
+                thread_id: format!("thread-{turn_id}"),
+                parent_turn_id: None,
+                queue_position: 0,
+            }),
+            host_role: state.host_role.clone(),
+        });
+        // First tool call promotes Spawning → Working.
+        state.apply_event(RoomEvent::Crep {
+            event: Box::new(CrepEvent::ToolCallProposed {
+                role: role.to_owned(),
+                priors_hash: String::new(),
+                tool_name: "Bash".to_owned(),
+                tool_input: json!({}),
+                tool_use_id: format!("use-{turn_id}"),
+                turn_id: turn_id.to_owned(),
+                thread_id: format!("thread-{turn_id}"),
+            }),
+            host_role: state.host_role.clone(),
+        });
+    }
+
+    /// Drive `state` through a `TurnDispatched` only — leaves the spawn
+    /// in `Spawning` (no tool call yet).
+    fn push_spawning_spawn(state: &mut RoomRuntimeState, role: &str, turn_id: &str) {
+        state.apply_event(RoomEvent::Crep {
+            event: Box::new(CrepEvent::TurnDispatched {
+                role: role.to_owned(),
+                priors_hash: String::new(),
+                turn_id: turn_id.to_owned(),
+                thread_id: format!("thread-{turn_id}"),
+                parent_turn_id: None,
+                queue_position: 0,
+            }),
+            host_role: state.host_role.clone(),
+        });
+    }
+
+    /// Render only the narration row of `state` and return the flat
+    /// text. Wraps `build_footer_narration_line` so width / truncation
+    /// semantics can be exercised directly without a full frame.
+    fn narration_text(state: &RoomRuntimeState, width: usize) -> String {
+        let working = state
+            .spawn_lifecycle
+            .working_instances_ordered_by_started_at();
+        let spawning = state
+            .spawn_lifecycle
+            .spawning_instances_ordered_by_started_at();
+        super::build_footer_narration_line(&working, &spawning, &state.host_role, width)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn footer_narration_hidden_when_no_subagents() {
+        // AC-4: zero Working + zero Spawning → strip is not rendered,
+        // composer occupies the row that the strip would otherwise own.
+        let state = test_state();
+        assert_eq!(state.spawn_lifecycle.working_count(), 0);
+        let text = render_room_runtime_to_text(&state, 120, 28).expect("render");
+        assert!(
+            !text.contains("still working"),
+            "narration should be hidden when no sub-agents are active:\n{text}"
+        );
+        // Composer baseline cursor at 100×28 is row 23 (see
+        // `composer_idle_positions_cursor_at_prompt`). Inserting one
+        // working spawn pushes the composer down by 1; absent any
+        // spawn, the composer stays put. Confirm via cursor.
+        let (_, cursor) = render_with_cursor(&state, 100, 28);
+        assert_eq!(cursor, (6, 23));
+    }
+
+    #[test]
+    fn footer_narration_shows_one_role_singular() {
+        // AC-2, AC-5: one Working instance → "1 role still working ·
+        // @backend" (singular).
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        let line = narration_text(&state, 120);
+        assert!(
+            line.contains("1 role still working"),
+            "expected singular header: {line:?}"
+        );
+        assert!(!line.contains("1 roles"));
+        assert!(line.contains("@backend"), "expected role chip: {line:?}");
+    }
+
+    #[test]
+    fn footer_narration_shows_multiple_roles_with_plural() {
+        // AC-2, AC-5: two+ Working instances → "N roles still working"
+        // followed by the chips in started_at order.
+        let mut state = test_state();
+        push_working_spawn(&mut state, "security", "t1");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        push_working_spawn(&mut state, "backend", "t2");
+        let line = narration_text(&state, 120);
+        assert!(
+            line.contains("2 roles still working"),
+            "expected plural header: {line:?}"
+        );
+        assert!(line.contains("@security"));
+        assert!(line.contains("@backend"));
+        // Order: security (earlier started_at) before backend.
+        let sec_idx = line.find("@security").expect("@security in line");
+        let be_idx = line.find("@backend").expect("@backend in line");
+        assert!(
+            sec_idx < be_idx,
+            "started_at order broken (security should precede backend): {line:?}"
+        );
+    }
+
+    #[test]
+    fn footer_narration_names_spawning_with_suffix() {
+        // ADR locked rule: Spawning roles get a "· @x spawning" suffix
+        // chip but do NOT increment the leading count. One Working +
+        // one Spawning → "1 role still working · @<work> · @<spawn>
+        // spawning".
+        let mut state = test_state();
+        push_working_spawn(&mut state, "security", "t1");
+        push_spawning_spawn(&mut state, "backend", "t2");
+        let line = narration_text(&state, 120);
+        // Count is Working-only.
+        assert!(
+            line.contains("1 role still working"),
+            "Spawning must not increment the count: {line:?}"
+        );
+        assert!(!line.contains("2 roles still working"));
+        // Spawning chip has the trailing " spawning" suffix.
+        assert!(
+            line.contains("@backend spawning"),
+            "expected `@backend spawning` suffix chip: {line:?}"
+        );
+        // Working chip stays plain.
+        assert!(line.contains("@security"));
+        // ADR Q4: footer never promises "chat resumes when they report".
+        assert!(
+            !line.contains("chat resumes"),
+            "ADR Q4 forbids 'chat resumes' wording: {line:?}"
+        );
+
+        // Zero-Working corner case (locked by the ADR): with only a
+        // Spawning instance, the line reads "0 roles still working ·
+        // @backend spawning". This also means the strip is rendered
+        // when only Spawning exists (composer does NOT reclaim the row).
+        let mut spawning_only = test_state();
+        push_spawning_spawn(&mut spawning_only, "qa", "t1");
+        let zero_line = narration_text(&spawning_only, 120);
+        assert!(
+            zero_line.contains("0 roles still working"),
+            "ADR: zero Working + one Spawning ⇒ '0 roles still working': {zero_line:?}"
+        );
+        assert!(zero_line.contains("@qa spawning"));
+    }
+
+    #[test]
+    fn footer_narration_truncates_when_too_many_roles() {
+        // AC-6: when role chips exceed the row, the tail collapses to
+        // `… +N more`. We push enough Working instances that even a
+        // generous-looking width forces the truncation marker.
+        let mut state = test_state();
+        for i in 0..12 {
+            push_working_spawn(&mut state, &format!("ingestor{i:02}"), &format!("t{i}"));
+        }
+        // 40 columns is well under the un-truncated rendering width of
+        // "12 roles still working · @ingestor00 @ingestor01 …" → forces
+        // a `… +N more` tail.
+        let line = narration_text(&state, 40);
+        assert!(
+            line.contains("12 roles still working"),
+            "expected header even when truncated: {line:?}"
+        );
+        assert!(
+            line.contains("more"),
+            "expected truncation marker (…+N more): {line:?}"
+        );
+        assert!(
+            line.contains("…"),
+            "expected ellipsis in truncation marker: {line:?}"
+        );
+        // The rendered line, sans color, must not exceed the budget.
+        let visible_width = UnicodeWidthStr::width(line.as_str());
+        // Allow up to the budget — the truncation marker is best-effort
+        // when the area is degenerate, but with 40 columns and the test
+        // header it should always fit.
+        assert!(
+            visible_width <= 40,
+            "narration overflowed row width 40 → {visible_width}: {line:?}"
+        );
+    }
+
+    #[test]
+    fn footer_narration_chips_use_identity_colors() {
+        // AC-3: role chips carry the same color as the @role mentions
+        // in scrollback (sourced from `tui_style::role_color`).
+        let mut state = test_state();
+        push_working_spawn(&mut state, "backend", "t1");
+        let working = state
+            .spawn_lifecycle
+            .working_instances_ordered_by_started_at();
+        let spawning = state
+            .spawn_lifecycle
+            .spawning_instances_ordered_by_started_at();
+        let line = super::build_footer_narration_line(&working, &spawning, &state.host_role, 120);
+        let chip_color = line
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == "@backend")
+            .and_then(|span| span.style.fg)
+            .expect("@backend chip present with a color");
+        assert_eq!(chip_color, tui_style::role_color("backend", "host"));
     }
 
     fn test_state() -> RoomRuntimeState {
