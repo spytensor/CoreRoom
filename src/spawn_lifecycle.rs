@@ -204,6 +204,20 @@ pub struct SpawnInstance {
     /// future renderer can group spawns under the spawner's chat
     /// thread without re-reading the original `TurnDispatched` event.
     pub parent_turn_id: Option<TurnId>,
+    /// One-line task title for the spawn, used by the `WorkingCard`
+    /// renderer (`#381`) on the card's top border. Empty when no
+    /// `WorkTitle` event has been observed for this spawn yet; the
+    /// renderer is responsible for substituting an `(no title)`
+    /// placeholder in that case.
+    pub title: String,
+    /// Chat-row index assigned at `Spawning` time by the renderer that
+    /// owns the chat scrollback. Used by the `WorkingCard` widget
+    /// (`#381`) to splice the card into the chat stream at the spawn
+    /// event's chat-time position rather than at the bottom. The
+    /// tracker itself never reads this field — it is a renderer hint
+    /// stored alongside the lifecycle record so concurrent renderers
+    /// do not need a parallel `spawn_id → chat_position` map.
+    pub chat_position: usize,
 }
 
 /// In-memory tracker that owns the [`SpawnInstance`] map and applies
@@ -341,10 +355,10 @@ impl SpawnLifecycleTracker {
             CrepEvent::TurnInterrupted {
                 turn_id, source, ..
             } => self.on_turn_interrupted(turn_id, *source),
+            CrepEvent::WorkTitle { turn_id, title, .. } => self.on_work_title(turn_id, title),
             // Events that do not affect a per-spawn lifecycle record.
             CrepEvent::RoleStarted { .. }
             | CrepEvent::RoleSessionUpdated { .. }
-            | CrepEvent::WorkTitle { .. }
             | CrepEvent::PhaseAdvanced { .. }
             | CrepEvent::PhaseBlocked { .. }
             | CrepEvent::PlanReviewed { .. }
@@ -387,6 +401,8 @@ impl SpawnLifecycleTracker {
             outcome: Outcome::default(),
             turn_id: turn_id.clone(),
             parent_turn_id: parent_turn_id.cloned(),
+            title: String::new(),
+            chat_position: 0,
         };
         self.instances.insert(spawn_id, instance);
         self.by_turn.insert(turn_id.clone(), spawn_id);
@@ -527,6 +543,46 @@ impl SpawnLifecycleTracker {
             SpawnState::Reported => {}
         }
         Some(spawn_id)
+    }
+
+    fn on_work_title(&mut self, turn_id: &TurnId, title: &str) -> Option<SpawnId> {
+        let spawn_id = self.by_turn.get(turn_id).copied()?;
+        let instance = self.instances.get_mut(&spawn_id)?;
+        // Last write wins — `WorkTitle` can be emitted repeatedly as a
+        // sub-agent refines its phase title. The renderer always
+        // displays the most recent one.
+        title.clone_into(&mut instance.title);
+        Some(spawn_id)
+    }
+
+    /// Stamp the chat-row index the `WorkingCard` renderer will use as
+    /// the splice point in scrollback. Idempotent: callers should only
+    /// invoke this once, at `Spawning` time, before the first card
+    /// renders for the spawn. Subsequent calls overwrite (last write
+    /// wins) so test fixtures can re-pin a card without rebuilding the
+    /// tracker. A `None` `spawn_id` is a no-op (the calling renderer
+    /// did not get an id back from `apply_event`).
+    pub fn set_chat_position(&mut self, spawn_id: SpawnId, chat_position: usize) {
+        if let Some(instance) = self.instances.get_mut(&spawn_id) {
+            instance.chat_position = chat_position;
+        }
+    }
+
+    /// Shift every tracked instance's `chat_position` left by `by` rows,
+    /// saturating at 0. Called by `RoomRuntimeState::push_scrollback`
+    /// after the 1000-row drain (v0.9.16 #371) so a Working card stays
+    /// anchored to its chat-time row instead of pointing at the old —
+    /// now evicted — index. A card whose original position falls inside
+    /// the drained range collapses to 0 and renders at the top of the
+    /// visible window; downstream splicing in `build_merged_scrollback`
+    /// treats a saturating-0 position as "earliest visible row".
+    pub fn shift_chat_positions(&mut self, by: usize) {
+        if by == 0 {
+            return;
+        }
+        for instance in self.instances.values_mut() {
+            instance.chat_position = instance.chat_position.saturating_sub(by);
+        }
     }
 
     fn on_turn_interrupted(
@@ -902,5 +958,67 @@ mod tests {
         // Silences the unused-import warning when the StopReason
         // helper is not pulled into a transition test.
         let _ = StopReason::Completed;
+    }
+
+    #[test]
+    fn work_title_event_populates_title_on_matching_spawn() {
+        // `WorkTitle` is the canonical source for the card's top-border
+        // title in the chat-stream renderer (`#381`). The tracker now
+        // listens for it and last-write-wins onto `SpawnInstance::title`.
+        let mut tracker = SpawnLifecycleTracker::new("host");
+        let id = tracker
+            .apply_event(&turn_dispatched("security", "t1", None))
+            .unwrap();
+        // Default title is empty before any `WorkTitle` lands.
+        assert!(tracker.get(id).unwrap().title.is_empty());
+        tracker.apply_event(&CrepEvent::WorkTitle {
+            role: "security".to_owned(),
+            priors_hash: String::new(),
+            title: "audit README security claims".to_owned(),
+            turn_id: TurnId::from("t1".to_owned()),
+            thread_id: TurnId::from("thread-t1".to_owned()),
+        });
+        assert_eq!(
+            tracker.get(id).unwrap().title,
+            "audit README security claims"
+        );
+        // Second WorkTitle replaces the first (last write wins).
+        tracker.apply_event(&CrepEvent::WorkTitle {
+            role: "security".to_owned(),
+            priors_hash: String::new(),
+            title: "refined title".to_owned(),
+            turn_id: TurnId::from("t1".to_owned()),
+            thread_id: TurnId::from("thread-t1".to_owned()),
+        });
+        assert_eq!(tracker.get(id).unwrap().title, "refined title");
+    }
+
+    #[test]
+    fn work_title_for_unknown_turn_is_ignored() {
+        let mut tracker = SpawnLifecycleTracker::new("host");
+        let result = tracker.apply_event(&CrepEvent::WorkTitle {
+            role: "ghost".to_owned(),
+            priors_hash: String::new(),
+            title: "no such turn".to_owned(),
+            turn_id: TurnId::from("unknown".to_owned()),
+            thread_id: TurnId::from("thread-x".to_owned()),
+        });
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn set_chat_position_stamps_renderer_hint_on_instance() {
+        let mut tracker = SpawnLifecycleTracker::new("host");
+        let id = tracker
+            .apply_event(&turn_dispatched("backend", "t1", None))
+            .unwrap();
+        // Default chat_position is 0 — meaningless until the renderer
+        // stamps it.
+        assert_eq!(tracker.get(id).unwrap().chat_position, 0);
+        tracker.set_chat_position(id, 42);
+        assert_eq!(tracker.get(id).unwrap().chat_position, 42);
+        // Setting on an unknown id is a silent no-op.
+        tracker.set_chat_position(SpawnId(9999), 7);
+        assert_eq!(tracker.get(id).unwrap().chat_position, 42);
     }
 }
