@@ -304,6 +304,11 @@ impl RoomRuntimeState {
         let overflow = self.scrollback.len().saturating_sub(1000);
         if overflow > 0 {
             self.scrollback.drain(0..overflow);
+            // Drain evicts the oldest rows from the front. Any unread
+            // lines that were drained are no longer reachable by
+            // scrolling down, so the badge must not promise more than
+            // `scroll_offset` rows still exist below the user's view.
+            self.unread_since_scroll = self.unread_since_scroll.min(self.scroll_offset);
         }
     }
 
@@ -328,7 +333,14 @@ impl RoomRuntimeState {
 
     /// Scroll the Room transcript up by `lines` rows. Clamped to the
     /// oldest visible row given the most recently rendered viewport.
+    /// Until the first frame renders, `last_viewport_rows == 0` and we
+    /// defer the request rather than parking the user one row from
+    /// the top with no orientation — the next frame will trigger the
+    /// clamp via the lazy `effective_offset` path in `render_scrollback`.
     pub fn scroll_up(&mut self, lines: usize) {
+        if self.last_viewport_rows.get() == 0 {
+            return;
+        }
         let max = self.scroll_max();
         self.scroll_offset = self.scroll_offset.saturating_add(lines).min(max);
     }
@@ -342,8 +354,12 @@ impl RoomRuntimeState {
         }
     }
 
-    /// Jump to the oldest visible row in the current viewport.
+    /// Jump to the oldest visible row in the current viewport. A no-op
+    /// before the first frame renders (no viewport hint yet).
     pub fn scroll_to_top(&mut self) {
+        if self.last_viewport_rows.get() == 0 {
+            return;
+        }
         self.scroll_offset = self.scroll_max();
     }
 
@@ -1844,6 +1860,22 @@ fn cheatsheet_bindings(state: &RoomRuntimeState) -> Vec<FooterBinding> {
         priority: 3,
         primary_chip: false,
     });
+    bindings.push(FooterBinding {
+        keys: "wheel / pgup / pgdn",
+        action: "scroll Room history",
+        priority: 3,
+        primary_chip: false,
+    });
+    bindings.push(FooterBinding {
+        keys: "home / end",
+        action: if typed {
+            "composer cursor (empty composer: top / follow)"
+        } else {
+            "scroll top / follow latest"
+        },
+        priority: 3,
+        primary_chip: false,
+    });
     if working {
         bindings.push(FooterBinding {
             keys: "ctrl-c",
@@ -2612,6 +2644,68 @@ mod tests {
         let text = render_room_runtime_to_text(&state, 100, 28).expect("render");
         assert!(!text.contains("scrolled back · End to follow"));
         assert!(!text.contains("new · End to follow"));
+    }
+
+    #[test]
+    fn scroll_before_first_frame_does_not_park_user_on_pre_render_state() {
+        // Regression: `scroll_up` / `scroll_to_top` were called before
+        // any render happened, so `last_viewport_rows == 0` made
+        // `scroll_max` collapse to `len - 1` — parking the user one
+        // row from the top with no orientation. Guard returns instead.
+        let mut state = test_state();
+        populate_scrollback(&mut state, 50);
+        assert_eq!(state.last_viewport_rows.get(), 0);
+        state.scroll_up(10);
+        state.scroll_to_top();
+        assert_eq!(state.scroll_offset(), 0);
+        // After the first frame paints the viewport hint, the same
+        // call lands at a sensible position.
+        let _ = render_room_runtime_to_text(&state, 100, 28).expect("render");
+        state.scroll_up(10);
+        assert_eq!(state.scroll_offset(), 10);
+    }
+
+    #[test]
+    fn drain_caps_unread_to_what_remains_below_the_view() {
+        // Push enough lines while scrolled that `push_scrollback`
+        // drains the buffer. Anything that was evicted can no longer
+        // be revealed by scrolling down, so `unread_since_scroll`
+        // must never exceed `scroll_offset` after a drain.
+        let mut state = test_state();
+        populate_scrollback(&mut state, 50);
+        state.last_viewport_rows.set(10);
+        state.scroll_up(5);
+        assert_eq!(state.scroll_offset(), 5);
+        for i in 0..1200 {
+            state.push_scrollback(Line::from(format!("flood {i}")));
+        }
+        // Drain happens once `scrollback.len() > 1000`, so after the
+        // flood the buffer is capped at 1000 and the unread counter
+        // is capped at `scroll_offset = 5`.
+        assert!(state.unread_since_scroll() <= state.scroll_offset());
+        assert_eq!(state.unread_since_scroll(), 5);
+    }
+
+    #[test]
+    fn tiny_viewport_renders_only_the_indicator_when_scrolled() {
+        // A 1-row Room (`visible_rows.saturating_sub(1) == 0`) still
+        // has the indicator at the bottom, and the slice math must
+        // produce an empty history window without panicking.
+        let mut state = test_state();
+        populate_scrollback(&mut state, 30);
+        state.last_viewport_rows.set(1);
+        state.scroll_up(5);
+        // Total height 5 with a 5-row composer + 1-row footer + 1-row
+        // status leaves a Room area roughly 3 rows tall = 1 inner
+        // row after borders. Render must not panic and the indicator
+        // text must still appear inside the composed buffer.
+        let text = render_room_runtime_to_text(&state, 40, 10).expect("render");
+        // The indicator copy is the load-bearing assertion — exact
+        // truncation can vary with width, so check for either suffix.
+        assert!(
+            text.contains("scrolled back") || text.contains("new · End to follow"),
+            "expected indicator copy in tiny-viewport render; got:\n{text}"
+        );
     }
 
     #[test]
