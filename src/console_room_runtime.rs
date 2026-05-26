@@ -40,7 +40,7 @@ use crate::permissions::{BridgeRequest, BridgeResponse, DecisionScope, Permissio
 use crate::repl::{Command, RuntimeInput};
 use crate::room_io::{NoticeLevel, RoomEvent, RoomSink, SpinnerPaint, SpinnerSnapshot, StdoutSink};
 use crate::room_io_tui::TuiSink;
-use crate::spawn_lifecycle::{SpawnInstance, SpawnLifecycleTracker};
+use crate::spawn_lifecycle::{SpawnId, SpawnInstance, SpawnLifecycleTracker, SpawnState};
 use crate::tui_style;
 
 /// Mutable render state for the executable room.
@@ -79,6 +79,11 @@ pub struct RoomRuntimeState {
     /// so adding this field is a no-visual-diff change (AC-5 on #380).
     /// `#381`+ wire the chat-stream widget against this tracker.
     spawn_lifecycle: SpawnLifecycleTracker,
+    /// Report rows emitted by finished spawn instances. The base
+    /// scrollback remains the durable event log; these rows are
+    /// spliced directly under the spawn's collapsed Done marker so the
+    /// report reads as part of that inline work unit (#384).
+    spawn_report_rows: BTreeMap<SpawnId, Vec<Line<'static>>>,
     work_cards: BTreeMap<String, WorkCard>,
     permission: Option<PendingPermission>,
     exiting: bool,
@@ -156,6 +161,7 @@ impl RoomRuntimeState {
             last_speaker: None,
             spinners: BTreeMap::new(),
             spawn_lifecycle,
+            spawn_report_rows: BTreeMap::new(),
             work_cards: BTreeMap::new(),
             permission: None,
             exiting: false,
@@ -200,13 +206,24 @@ impl RoomRuntimeState {
                     event: event.clone(),
                     host_role: host_role.clone(),
                 });
-                let cleaned = match (&speaker, &self.last_speaker) {
-                    (Some(role), Some(prev)) if role == prev => {
-                        strip_leading_role_header(&rendered, role)
+                let report_text = role_spoke_text(event.as_ref());
+                if let (Some(id), Some(text)) = (spawn_id, report_text) {
+                    if !text.trim().is_empty() {
+                        // Report text belongs immediately below the
+                        // collapsed Done marker, not at the live tail.
+                        // Keep the normal role header intact even if
+                        // the previous chunk came from the same role.
+                        self.store_spawn_report_rows(id, &rendered);
                     }
-                    _ => rendered,
-                };
-                self.push_rendered(&cleaned);
+                } else {
+                    let cleaned = match (&speaker, &self.last_speaker) {
+                        (Some(role), Some(prev)) if role == prev => {
+                            strip_leading_role_header(&rendered, role)
+                        }
+                        _ => rendered,
+                    };
+                    self.push_rendered(&cleaned);
+                }
                 // Track the speaker so the next chunk from the same
                 // role can suppress its redundant header.
                 if let Some(role) = speaker {
@@ -335,6 +352,20 @@ impl RoomRuntimeState {
         for line in crate::ansi::ansi_to_lines(text) {
             self.push_scrollback(line);
         }
+    }
+
+    fn store_spawn_report_rows(&mut self, spawn_id: SpawnId, text: &str) {
+        let rows = crate::ansi::ansi_to_lines(text);
+        if rows.is_empty() {
+            return;
+        }
+        if self.scroll_offset > 0 {
+            self.unread_since_scroll = self.unread_since_scroll.saturating_add(rows.len());
+        }
+        self.spawn_report_rows
+            .entry(spawn_id)
+            .or_default()
+            .extend(rows);
     }
 
     fn push_scrollback(&mut self, line: Line<'static>) {
@@ -1058,8 +1089,10 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
 }
 
 /// Build the scrollback to render: existing scrollback with inline
-/// working cards spliced at each spawn's `chat_position`. Working
-/// spawns whose chat_position is past the end of scrollback are
+/// spawn activity spliced at each spawn's `chat_position`. `Working`
+/// spawns render as cards; `Done` / `Reported` spawns render as the
+/// collapsed marker plus any report rows captured for that spawn.
+/// Spawns whose chat_position is past the end of scrollback are
 /// appended at the bottom (covers the race where the spawn was
 /// dispatched but the spawner's confirmation line has not yet
 /// rendered).
@@ -1071,52 +1104,74 @@ fn render_scrollback(frame: &mut Frame<'_>, area: Rect, state: &RoomRuntimeState
 fn build_merged_scrollback(state: &RoomRuntimeState, panel_width: u16) -> Vec<Line<'static>> {
     // Card width is panel_width less the surrounding borders (2 chars).
     let inner_width = panel_width.saturating_sub(2);
-    // Collect working spawns, deduplicated and ordered by chat_position
-    // so the splice walk below stays linear.
-    let mut working: Vec<&SpawnInstance> = state
+    // Collect renderable spawns, deduplicated and ordered by
+    // chat_position so the splice walk below stays linear.
+    let mut renderable: Vec<&SpawnInstance> = state
         .spawn_lifecycle()
         .instances()
-        .filter(|spawn| spawn.state == crate::spawn_lifecycle::SpawnState::Working)
+        .filter(|spawn| {
+            matches!(
+                spawn.state,
+                SpawnState::Working | SpawnState::Done | SpawnState::Reported
+            )
+        })
         .collect();
-    working.sort_by_key(|spawn| spawn.chat_position);
+    renderable.sort_by_key(|spawn| spawn.chat_position);
 
-    if working.is_empty() {
+    if renderable.is_empty() {
         return state.scrollback.clone();
     }
 
     let now = Instant::now();
     let mut merged: Vec<Line<'static>> =
-        Vec::with_capacity(state.scrollback.len() + working.len() * 5);
-    let mut spawn_iter = working.into_iter().peekable();
+        Vec::with_capacity(state.scrollback.len() + renderable.len() * 5);
+    let mut spawn_iter = renderable.into_iter().peekable();
     for (idx, line) in state.scrollback.iter().enumerate() {
-        // Splice in any cards whose chat_position == idx (before this row).
+        // Splice in any spawn rows whose chat_position == idx (before this row).
         while spawn_iter
             .peek()
             .is_some_and(|spawn| spawn.chat_position <= idx)
         {
             let spawn = spawn_iter.next().expect("peeked non-empty");
-            merged.extend(crate::working_card::render_working_card_lines(
-                spawn,
-                &state.host_role,
-                inner_width,
-                now,
-                crate::working_card::DEFAULT_VISIBLE_STEPS,
-            ));
+            append_spawn_activity_lines(&mut merged, state, spawn, inner_width, now);
         }
         merged.push(line.clone());
     }
-    // Append any cards whose chat_position is past the end of scrollback
+    // Append any spawn rows whose chat_position is past the end of scrollback
     // (race: spawn registered but no scrollback row has landed yet).
     for spawn in spawn_iter {
-        merged.extend(crate::working_card::render_working_card_lines(
+        append_spawn_activity_lines(&mut merged, state, spawn, inner_width, now);
+    }
+    merged
+}
+
+fn append_spawn_activity_lines(
+    merged: &mut Vec<Line<'static>>,
+    state: &RoomRuntimeState,
+    spawn: &SpawnInstance,
+    inner_width: u16,
+    now: Instant,
+) {
+    match spawn.state {
+        SpawnState::Working => merged.extend(crate::working_card::render_working_card_lines(
             spawn,
             &state.host_role,
             inner_width,
             now,
             crate::working_card::DEFAULT_VISIBLE_STEPS,
-        ));
+        )),
+        SpawnState::Done | SpawnState::Reported => {
+            if let Some(line) =
+                crate::working_card::render_done_collapsed_line(spawn, &state.host_role)
+            {
+                merged.push(line);
+            }
+            if let Some(report_rows) = state.spawn_report_rows.get(&spawn.spawn_id) {
+                merged.extend(report_rows.iter().cloned());
+            }
+        }
+        SpawnState::Spawning => {}
     }
-    merged
 }
 
 /// Bottom-of-Room hint shown whenever the user has scrolled away from
@@ -1337,6 +1392,13 @@ fn speaker_of(event: &CrepEvent) -> Option<String> {
         CrepEvent::RoleSpoke { role, .. } | CrepEvent::RoleOutputDelta { role, .. } => {
             Some(role.clone())
         }
+        _ => None,
+    }
+}
+
+fn role_spoke_text(event: &CrepEvent) -> Option<&str> {
+    match event {
+        CrepEvent::RoleSpoke { text, .. } => Some(text),
         _ => None,
     }
 }
@@ -3876,6 +3938,21 @@ mod tests {
         }
     }
 
+    fn role_spoke_event(role: &str, turn: &str, text: &str) -> CrepEvent {
+        CrepEvent::RoleSpoke {
+            role: role.to_owned(),
+            priors_hash: String::new(),
+            text: text.to_owned(),
+            mentions: Vec::new(),
+            cost_usd: 0.0,
+            cache_read: 0,
+            turn_id: crate::turn::TurnId::from(turn.to_owned()),
+            thread_id: crate::turn::TurnId::from(format!("thread-{turn}")),
+            outcome: crate::crep::TurnOutcome::default(),
+            phase_block: None,
+        }
+    }
+
     fn crep_room_event(event: CrepEvent) -> RoomEvent {
         RoomEvent::Crep {
             event: Box::new(event),
@@ -4199,6 +4276,116 @@ mod tests {
         assert_eq!(first_text, second_text);
     }
 
+    #[test]
+    fn done_collapsed_line_replaces_working_card_without_report_row() {
+        // #384 AC-1 / AC-3: a finished spawn with no report text
+        // renders a collapsed Done marker in the original card slot
+        // and does not synthesize an empty report row.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("security", "t1")));
+        state.apply_event(crep_room_event(work_title_event("security", "t1", "audit")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t1", "Read", "u1",
+        )));
+        state.apply_event(crep_room_event(tool_executed_event(
+            "security",
+            "t1",
+            "u1",
+            "read README.md",
+        )));
+        state.apply_event(crep_room_event(role_spoke_event("security", "t1", "")));
+
+        let merged = super::build_merged_scrollback(&state, 120);
+        let text = super::lines_to_plain_string(&merged);
+        assert!(
+            text.contains("@security ✓ done"),
+            "missing Done marker: {text}"
+        );
+        assert!(text.contains("1 step"), "missing step count: {text}");
+        assert!(
+            !text.contains("[e]xpand [i]nterrupt [f]ocus"),
+            "working-card footer should be gone after Done: {text}"
+        );
+
+        assert!(
+            state.spawn_report_rows.is_empty(),
+            "silent completion must not create report rows"
+        );
+    }
+
+    #[test]
+    fn reported_message_is_spliced_immediately_after_done_marker() {
+        // #384 AC-2: the report is rendered as a normal role-attributed
+        // chat row immediately below the collapsed marker, not at the
+        // live tail where the RoleSpoke event arrived.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("qa", "t1")));
+        state.apply_event(crep_room_event(work_title_event("qa", "t1", "smoke test")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "qa", "t1", "Bash", "u1",
+        )));
+        state.apply_event(crep_room_event(tool_executed_event(
+            "qa",
+            "t1",
+            "u1",
+            "ran smoke script",
+        )));
+        // First RoleSpoke reaches Done silently; the second carries
+        // the report and moves the lifecycle to Reported.
+        state.apply_event(crep_room_event(role_spoke_event("qa", "t1", "")));
+        state.apply_event(crep_room_event(role_spoke_event(
+            "qa",
+            "t1",
+            "headless smoke pass: 2/2 scenarios green",
+        )));
+
+        let merged = super::build_merged_scrollback(&state, 120);
+        let marker_row = line_position(&merged, "@qa ✓ done").expect("marker row");
+        let report_header = merged
+            .get(marker_row + 1)
+            .map(line_text)
+            .expect("report header directly under marker");
+        assert!(
+            report_header.contains("@qa"),
+            "report must keep normal role attribution: {report_header:?}"
+        );
+        let report_body_row =
+            line_position(&merged, "headless smoke pass").expect("report body row");
+        assert!(
+            report_body_row > marker_row && report_body_row <= marker_row + 3,
+            "report body should be adjacent to marker: marker={marker_row}, body={report_body_row}"
+        );
+    }
+
+    #[test]
+    fn interleaved_done_markers_keep_spawn_time_order() {
+        // #384 AC-5c: completion order must not reorder cards. The
+        // marker occupies the original spawn slot, so a later-spawned
+        // role that finishes first still appears after the earlier
+        // spawn in the transcript.
+        let mut state = test_state();
+        state.apply_event(crep_room_event(dispatch_event("backend", "t1")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "backend", "t1", "Bash", "u1",
+        )));
+        state.apply_event(crep_room_event(dispatch_event("security", "t2")));
+        state.apply_event(crep_room_event(tool_proposed_event(
+            "security", "t2", "Read", "u2",
+        )));
+
+        // Finish in reverse order: security first, backend second.
+        state.apply_event(crep_room_event(role_spoke_event("security", "t2", "")));
+        state.apply_event(crep_room_event(role_spoke_event("backend", "t1", "")));
+
+        let merged = super::build_merged_scrollback(&state, 120);
+        let backend_row = line_position(&merged, "@backend ✓ done").expect("backend marker");
+        let security_row = line_position(&merged, "@security ✓ done").expect("security marker");
+        assert!(
+            backend_row < security_row,
+            "markers must remain in spawn-time order, not completion order"
+        );
+    }
+
     fn test_state() -> RoomRuntimeState {
         let team = vec![
             TeamMember {
@@ -4216,6 +4403,19 @@ mod tests {
             vec!["host".to_owned(), "backend".to_owned()],
             team,
         )
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    fn line_position(lines: &[Line<'_>], needle: &str) -> Option<usize> {
+        lines
+            .iter()
+            .position(|line| line_text(line).contains(needle))
     }
 
     fn sample_request() -> BridgeRequest {
