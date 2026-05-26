@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::spawn_lifecycle::{SpawnInstance, SpawnState, ToolCallRecord, ToolCallStatus};
+use crate::spawn_lifecycle::{Outcome, SpawnInstance, SpawnState, ToolCallRecord, ToolCallStatus};
 use crate::tui_style;
 
 /// Default count of tool-call rows visible inside the card body.
@@ -92,6 +92,63 @@ pub fn render_working_card_lines(
     }
     lines.push(bottom_border_line(spawn.step_count, card_width));
     lines
+}
+
+/// Build the single collapsed line that replaces a finished working
+/// card in the chat stream.
+///
+/// Returns `None` while the spawn is still `Spawning` or `Working`.
+/// `Done` and `Reported` both render the same marker; the report
+/// message, when present, is spliced by the room renderer directly
+/// below this line.
+#[must_use]
+pub fn render_done_collapsed_line(spawn: &SpawnInstance, host_role: &str) -> Option<Line<'static>> {
+    if !matches!(spawn.state, SpawnState::Done | SpawnState::Reported) {
+        return None;
+    }
+
+    let role_color = tui_style::role_color(&spawn.role, host_role);
+    let elapsed = elapsed_label(
+        spawn
+            .state_changed_at
+            .saturating_duration_since(spawn.started_at),
+    );
+    let steps = format!(
+        "{} step{}",
+        spawn.step_count,
+        if spawn.step_count == 1 { "" } else { "s" }
+    );
+    let (marker, label, marker_style, suffix) = match spawn.outcome {
+        Outcome::Clean => (
+            "✓",
+            "done",
+            Style::default().fg(Color::LightGreen),
+            " · [e]xpand log",
+        ),
+        Outcome::Interrupted => ("⨯", "interrupted", Style::default().fg(Color::LightRed), ""),
+        Outcome::Failed => (
+            "⨯",
+            "failed",
+            Style::default().fg(Color::LightRed),
+            " · [e]xpand log",
+        ),
+    };
+
+    Some(Line::from(vec![
+        Span::raw(CARD_INDENT),
+        Span::styled(
+            format!("@{}", spawn.role),
+            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(marker.to_owned(), marker_style),
+        Span::raw(" "),
+        Span::styled(label.to_owned(), marker_style),
+        Span::styled(
+            format!(" · {elapsed} · {steps}{suffix}"),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
 }
 
 /// Effective inner-card width inside the scrollback panel. The card
@@ -388,6 +445,43 @@ mod tests {
         assert!(
             render_working_card_lines(&spawn, "host", 80, now, DEFAULT_VISIBLE_STEPS).is_empty()
         );
+    }
+
+    #[test]
+    fn done_collapsed_line_renders_clean_completion_marker() {
+        let mut spawn = working_spawn("qa", "smoke test");
+        spawn.state = SpawnState::Done;
+        spawn.step_count = 2;
+        spawn.state_changed_at = spawn.started_at + Duration::from_secs(52);
+        let line = render_done_collapsed_line(&spawn, "host").expect("done line");
+        let text = line_to_string(&line);
+        assert!(text.contains("@qa"));
+        assert!(text.contains("✓ done"));
+        assert!(text.contains("52s"));
+        assert!(text.contains("2 steps"));
+        assert!(text.contains("[e]xpand log"));
+    }
+
+    #[test]
+    fn done_collapsed_line_renders_interrupted_without_expand_hint() {
+        let mut spawn = working_spawn("security", "audit");
+        spawn.state = SpawnState::Done;
+        spawn.outcome = Outcome::Interrupted;
+        spawn.step_count = 1;
+        let line = render_done_collapsed_line(&spawn, "host").expect("done line");
+        let text = line_to_string(&line);
+        assert!(text.contains("@security"));
+        assert!(text.contains("⨯ interrupted"));
+        assert!(text.contains("1 step"));
+        assert!(!text.contains("[e]xpand log"));
+    }
+
+    #[test]
+    fn done_collapsed_line_returns_none_before_done() {
+        let mut spawn = working_spawn("backend", "verify");
+        assert!(render_done_collapsed_line(&spawn, "host").is_none());
+        spawn.state = SpawnState::Spawning;
+        assert!(render_done_collapsed_line(&spawn, "host").is_none());
     }
 
     #[test]
