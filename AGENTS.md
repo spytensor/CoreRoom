@@ -5,12 +5,19 @@ repository, including Codex, Claude Code, and other terminal coding agents.
 
 ## Current Project Phase
 
-Active milestone: v0.8.0 - CoreRoom Console Data Plane.
+Latest release tag: v0.9.19.
 
-Primary tracker: #238.
+Active milestone: none. All currently scoped GitHub issues were closed when
+this file was last aligned (2026-05-27). Do not autonomously pick up new
+milestone work until this section names an active milestone/tracker again, or
+until the user explicitly scopes a specific issue/work item in the current
+conversation.
 
-v0.7 tracker #213 is complete. Do not work on v0.9+ issues unless the user
-explicitly pulls one into the active milestone.
+Primary tracker: none.
+
+Before issue pickup, refresh GitHub state. If GitHub state disagrees with this
+section, treat this file as stale: propose the exact `AGENTS.md` update before
+implementing anything beyond that alignment.
 
 ## Operating Model
 
@@ -33,17 +40,22 @@ Only pick up an issue when all are true:
 - The issue has `codex-ready`.
 - The issue is not labelled `constitution`.
 - The issue is not labelled `human-only`.
-- The issue belongs to the active v0.8 milestone, unless the user explicitly
-  re-scopes it.
+- The issue belongs to the active milestone/tracker named above, unless the
+  user explicitly scopes it in the current conversation.
+- If `Active milestone` is `none`, autonomous issue pickup is disabled; only
+  direct user-scoped maintenance work may proceed.
 
 If an issue is ambiguous, blocked, missing acceptance criteria, or conflicts
 with this file, comment on the issue and stop. Do not guess.
 
 ## Branch and PR Discipline
 
-- Use one branch per issue.
-- For v0.8 issues, branch from `main` as
-  `feat/v0.8-<issue-number>-<short-slug>`.
+- Use one branch per issue or direct user-scoped maintenance task.
+- Fetch first and branch from current `main`.
+- For issue work, use `feat/v<major.minor>-<issue-number>-<short-slug>` or
+  `fix/v<major.minor>-<issue-number>-<short-slug>` as appropriate.
+- For standalone maintenance explicitly scoped by the user, use
+  `chore/<short-slug>` or `fix/<short-slug>`.
 - Implement strictly against the issue Acceptance Criteria.
 - Do not touch files outside the issue scope unless the PR explains why.
 - Do not mix constitution decisions with implementation unless the issue
@@ -53,7 +65,8 @@ with this file, comment on the issue and stop. Do not guess.
 
 Every PR must include:
 
-- Linked issue using `Closes #<issue>`.
+- Linked issue using `Closes #<issue>`, or `none` with the direct user-scoped
+  reason for standalone maintenance.
 - Checked acceptance criteria.
 - Changed files summary.
 - Validation commands and results.
@@ -66,9 +79,11 @@ Every PR must include:
 
 ## Tracker Rule
 
-An issue is not done until the tracker is updated.
+An issue is not done until the tracker named above is updated. If
+`Primary tracker` is `none`, the PR must say tracker update is not applicable
+and explain the direct user-scoped reason.
 
-For v0.8, the completing PR must update #238 by:
+When a primary tracker exists, the completing PR must update it by:
 
 - Ticking the issue checkbox.
 - Updating any satisfied milestone acceptance criteria.
@@ -117,7 +132,8 @@ tests and explain why that scope is sufficient.
 
 - Do not work on `constitution` or `human-only` issues unless the user directly
   instructs this specific worker in the current conversation.
-- Do not pick up v0.9+ work while #238 is active.
+- Do not pick up future milestone work while `Active milestone` is `none`,
+  unless the user directly scopes that work in the current conversation.
 - Do not infer completion from model prose.
 - Do not update trackers without evidence.
 - Do not claim a console, status panel, or dashboard state is valid unless it

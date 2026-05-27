@@ -2595,29 +2595,31 @@ fn lines_to_plain_string(lines: &[Line<'_>]) -> String {
 }
 
 fn write_enter_commands<W: Write>(writer: W) -> io::Result<()> {
-    write_enter_commands_with_mouse_capture(writer, mouse_capture_opt_in())
+    write_enter_commands_with_mouse_capture(writer, mouse_capture_enabled())
 }
 
-fn mouse_capture_opt_in() -> bool {
-    std::env::var("COREROOM_MOUSE_CAPTURE")
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
+fn mouse_capture_enabled() -> bool {
+    mouse_capture_enabled_from(std::env::var("COREROOM_MOUSE_CAPTURE").ok().as_deref())
+}
+
+fn mouse_capture_enabled_from(value: Option<&str>) -> bool {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    !matches!(
+        value.to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off" | "disable" | "disabled"
+    )
 }
 
 fn write_enter_commands_with_mouse_capture<W: Write>(
     mut writer: W,
     enable_mouse_capture: bool,
 ) -> io::Result<()> {
-    // Mouse capture is intentionally opt-in. It lets the live room own
-    // wheel events, but it also prevents normal terminal text
-    // selection. Defaulting to copyable transcript text is the less
-    // surprising behavior; users who prefer mouse-wheel routing can
-    // run with `COREROOM_MOUSE_CAPTURE=1`.
+    // Mouse capture is on by default so the live room owns wheel
+    // events and can scroll its own Room history. Users who prefer the
+    // terminal's native selection/scroll behavior can opt out with
+    // `COREROOM_MOUSE_CAPTURE=0`.
     //
     // Cursor visibility is intentionally *not* set here. ratatui's
     // `Terminal::draw` shows or hides the cursor every frame based on
@@ -2952,15 +2954,19 @@ mod tests {
     }
 
     #[test]
-    fn write_enter_commands_does_not_hide_cursor() {
+    fn write_enter_commands_does_not_hide_cursor_or_drop_mouse_capture() {
         // Regression for live-room "no visible cursor" bug: the alt-screen
         // setup must not emit DECRST 25 (`CSI ?25 l`). ratatui's
         // `Terminal::draw` is responsible for the cursor's visibility on
         // every frame, so a one-shot `Hide` here races the composer's
         // per-frame `set_cursor_position` call and leaves Ask without a
         // visible caret.
+        //
+        // Regression for live-room mouse wheel history: the default path must
+        // still enable mouse capture so wheel events reach `handle_mouse`
+        // instead of the parent terminal scrollback.
         let mut buf: Vec<u8> = Vec::new();
-        super::write_enter_commands_with_mouse_capture(&mut buf, false)
+        super::write_enter_commands_with_mouse_capture(&mut buf, true)
             .expect("write enter commands");
         let text = String::from_utf8(buf).expect("enter commands are valid utf8");
         assert!(
@@ -2968,21 +2974,35 @@ mod tests {
             "enter commands must not hide the cursor: {text:?}"
         );
         assert!(
-            !text.contains("\x1b[?1000h") && !text.contains("\x1b[?1003h"),
-            "mouse capture should default off so terminal selection works: {text:?}"
+            text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
+            "default enter commands should enable mouse capture: {text:?}"
         );
     }
 
     #[test]
-    fn write_enter_commands_can_opt_into_mouse_capture() {
+    fn write_enter_commands_can_disable_mouse_capture() {
         let mut buf: Vec<u8> = Vec::new();
-        super::write_enter_commands_with_mouse_capture(&mut buf, true)
+        super::write_enter_commands_with_mouse_capture(&mut buf, false)
             .expect("write enter commands");
         let text = String::from_utf8(buf).expect("enter commands are valid utf8");
         assert!(
-            text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
-            "opt-in enter commands should enable mouse capture: {text:?}"
+            !text.contains("\x1b[?1000h") && !text.contains("\x1b[?1003h"),
+            "opt-out enter commands should not enable mouse capture: {text:?}"
         );
+    }
+
+    #[test]
+    fn mouse_capture_defaults_on_unless_explicitly_disabled() {
+        assert!(super::mouse_capture_enabled_from(None));
+        assert!(super::mouse_capture_enabled_from(Some("")));
+        assert!(super::mouse_capture_enabled_from(Some("1")));
+        assert!(super::mouse_capture_enabled_from(Some("true")));
+        assert!(super::mouse_capture_enabled_from(Some("yes")));
+        assert!(super::mouse_capture_enabled_from(Some("on")));
+        assert!(!super::mouse_capture_enabled_from(Some("0")));
+        assert!(!super::mouse_capture_enabled_from(Some("false")));
+        assert!(!super::mouse_capture_enabled_from(Some("no")));
+        assert!(!super::mouse_capture_enabled_from(Some("off")));
     }
 
     #[test]

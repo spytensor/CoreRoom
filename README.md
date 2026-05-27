@@ -247,9 +247,9 @@ Useful commands:
   replays the full event log when you need to audit what happened. Set
   `COREROOM_VERBOSE_TOOLS=1` to opt the live REPL back into the full
   per-tool trace stream when you need it inline.
-- The live room leaves terminal mouse capture off by default so transcript
-  text can be selected and copied normally. Set `COREROOM_MOUSE_CAPTURE=1`
-  if you prefer mouse-wheel routing inside the TUI.
+- The live room captures mouse wheel events by default so wheel / PgUp / PgDn
+  all scroll Room history inside the TUI. Set `COREROOM_MOUSE_CAPTURE=0` if
+  you prefer your terminal's native selection/scroll behavior for a session.
 - Permission prompts appear only while a decision is needed. Successful
   once-only allows clear the prompt and stay out of the chat stream; session
   approvals and denials remain visible because they change what the role can

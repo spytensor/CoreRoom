@@ -19,16 +19,12 @@
 .env.local
 .envrc
 
-# CodeRoom runtime artifacts in development
-/.coderoom/transcripts/
-/.coderoom/messages.jsonl
-/.coderoom/sessions/
-/.coderoom/liveness/
+# CoreRoom runtime artifacts in development. This repo IS CoreRoom's
+# source; devs dogfooding `cr` here will auto-bootstrap personal
+# `.coreroom/` roles/configs/gates that do not belong in published source.
+/.coreroom/
 
-# This repo IS coderoom's source — devs running `cr start` here for
-# dogfooding will auto-bootstrap a `.coderoom/` whose roles/configs
-# describe their personal dev setup, not anything that belongs in
-# the published source.
+# Legacy pre-v0.7 development state; keep ignored for old local checkouts.
 /.coderoom/
 
 # Spike sandbox leftovers (tmp dirs are normally cleaned by mktemp;

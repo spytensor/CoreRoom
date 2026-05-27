@@ -53,7 +53,9 @@ Bump scope must be a directory or module name (e.g. `adapter-cc`, `crep`,
 ## Tracker update
 
 For the active milestone, the PR is incomplete until the tracker named in
-`AGENTS.md` is updated. The current active tracker is #238.
+`AGENTS.md` is updated. If `AGENTS.md` says `Primary tracker: none`, set
+Tracker issue to `none` and explain why this standalone maintenance PR does
+not require a tracker update.
 
 - Tracker issue:
 - Issue checkbox updated:

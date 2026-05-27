@@ -1,12 +1,19 @@
-# CoreRoom Engineering Control Room Bootstrap Tasks
+# CoreRoom Milestone Ledger
 
-## Goal
+## Current Truth
 
-Bootstrap CoreRoom as the Engineering Control Room for AI Agents: host-led
-AI-assisted software engineering control with GitHub issue discipline,
-dependency context, evidence packets, status rollups, and tracker closure.
+- Latest aligned release tag: `v0.9.19`.
+- Active milestone/tracker for autonomous pickup: none. `AGENTS.md` is the
+  controlling worker protocol and must be updated before starting a new active
+  milestone or tracker.
+- GitHub issue state at the 2026-05-27 truth-alignment sweep: no open issues
+  returned by `gh issue list --state open`.
+- Commands remain automation, CI, debug, and recovery surface. The happy path is
+  user intent -> `@host` -> role/gate/evidence/tracker orchestration.
 
-## v0.6 Complete
+## Completed Bootstrap Milestones
+
+### v0.6 Engineering Control Room Bootstrap
 
 - [x] Pin GitHub epic #202 for v0.6.
 - [x] Create v0.6 tracker and implementation issues (#202-#212).
@@ -23,20 +30,26 @@ dependency context, evidence packets, status rollups, and tracker closure.
 - [x] #211: Enforce tracker update protocol and PR evidence template.
 - [x] #212: Add end-to-end host-led dogfood validation.
 
-## v0.7 Current Plan
+### v0.7 GitHub-native Engineering Loop / CoreRoom Rename
 
 - [x] Pin GitHub epic #213 for v0.7.
 - [x] #214: Implement GitHub-native WorkOrder/Issue/PR/CI status sync.
 - [x] #215: Implement host-managed worker action layer.
 - [x] #216: Implement multi-repo source graph and remote snapshots.
 - [x] #217: Implement release readiness and project status rollup.
-- [ ] #218: Implement CoreRoom rename and compatibility migration. (in progress)
+- [x] #218: Implement CoreRoom rename and compatibility migration.
 
-## Notes
+### v0.8+ Console / Live Room Milestones
 
-- v0.7 work must keep #213 updated. An issue is not done until tracker checkbox
-  and Evidence Ledger row are updated.
-- Commands are automation, CI, debug, and recovery surface. The happy path is
-  user intent -> `@host` -> role/gate/evidence/tracker orchestration.
-- CoreRoom rename implementation is tracked in #218 and must preserve the `cr`
-  happy-path command unless explicitly changed.
+- [x] #238: v0.8 Console Data Plane tracker closed with dogfood evidence.
+- [x] v0.9 Full-screen CoreRoom Console release path landed; see
+  `docs/v0.9-real-user-dogfood.md` and `CHANGELOG.md`.
+- [x] #377 and follow-up v0.10 work-status/chat-stream surface issues closed;
+  see `docs/v0.10-chat-stream-vs-dashboard.md` and `CHANGELOG.md`.
+
+## Maintenance Rule
+
+This file is a human-readable ledger, not the active work queue. Before an AI
+worker claims or starts new work, it must use `AGENTS.md` plus fresh GitHub
+state as the authority. If this file, `AGENTS.md`, and GitHub disagree, fix the
+truth-alignment drift before claiming product work is in scope.
