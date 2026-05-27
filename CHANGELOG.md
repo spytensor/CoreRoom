@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.20] - 2026-05-27
+
 ### Fixed
 
 - Aligned project-truth docs and contributor templates with the current `v0.9.19`
@@ -1723,7 +1725,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.19...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.20...HEAD
+[0.9.20]: https://github.com/spytensor/CoreRoom/compare/v0.9.19...v0.9.20
 [0.9.19]: https://github.com/spytensor/CoreRoom/compare/v0.9.18...v0.9.19
 [0.9.18]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/spytensor/CoreRoom/compare/v0.9.16...v0.9.17
