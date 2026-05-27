@@ -1195,6 +1195,30 @@ async fn send_and_drain(
 
         let known: Vec<&str> = roles.keys().map(String::as_str).collect();
         let route_instructions = extract_route_instructions(&current.role, &captured.text, &known);
+        if route_instructions.is_empty() {
+            let targets = unrouted_delegation_intent_targets(&captured.text, &known);
+            if !targets.is_empty() {
+                let examples = targets
+                    .iter()
+                    .take(3)
+                    .map(|target| format!("@{target}: <brief>"))
+                    .collect::<Vec<_>>()
+                    .join("`, `");
+                room_io::emit_line(
+                    sink.as_ref(),
+                    format!(
+                        "  {} {}",
+                        "↳".with(output::FADE),
+                        format!(
+                            "no follow-up dispatched: delegation-like wording mentioned {}; use `{examples}` to route",
+                            role_mentions(&targets),
+                        )
+                        .with(output::DIM)
+                        .italic(),
+                    ),
+                );
+            }
+        }
 
         // Grounding gate: if the role's tool calls were systematically
         // denied, don't auto-route its explicit `@<peer>` delegations. The
@@ -1623,6 +1647,72 @@ fn extract_route_instructions(
 
     flush_route_block(&mut out, &mut targets, &mut block, &mut next_group_id);
     stabilize_route_instructions(out)
+}
+
+fn unrouted_delegation_intent_targets(text: &str, known_roles: &[&str]) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let fence_marker_line = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        if fence_marker_line {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+
+        let lower = line.to_ascii_lowercase();
+        for role in known_roles {
+            if line_has_delegation_like_prose(&lower, role)
+                && !targets.iter().any(|target| target == role)
+            {
+                targets.push((*role).to_owned());
+            }
+        }
+    }
+
+    targets
+}
+
+fn line_has_delegation_like_prose(lower: &str, role: &str) -> bool {
+    let mention = format!("@{}", role.to_ascii_lowercase());
+    let english_patterns = [
+        format!("ask {mention}"),
+        format!("check with {mention}"),
+        format!("consult {mention}"),
+        format!("delegate to {mention}"),
+        format!("get {mention}"),
+        format!("have {mention}"),
+        format!("ping {mention}"),
+        format!("route to {mention}"),
+        format!("send to {mention}"),
+    ];
+    if english_patterns
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+    {
+        return true;
+    }
+
+    [
+        format!("请 {mention}"),
+        format!("请{mention}"),
+        format!("让 {mention}"),
+        format!("让{mention}"),
+        format!("问 {mention}"),
+        format!("问{mention}"),
+        format!("咨询 {mention}"),
+        format!("咨询{mention}"),
+        format!("委派给 {mention}"),
+        format!("委派给{mention}"),
+        format!("派给 {mention}"),
+        format!("派给{mention}"),
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
 }
 
 fn flush_route_block(
