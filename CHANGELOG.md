@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Aligned project-truth docs and contributor templates with the current `v0.9.19`
   state, current `.coreroom/` paths, and no-active-tracker issue pickup policy.
+- Restored live-room mouse-wheel history scrolling by enabling mouse capture by
+  default again; users who prefer terminal-native selection can opt out with
+  `COREROOM_MOUSE_CAPTURE=0`.
 
 ## [0.9.19] - 2026-05-26
 
