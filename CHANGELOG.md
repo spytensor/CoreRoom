@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Aligned project-truth docs and contributor templates with the current `v0.9.19`
+  state, current `.coreroom/` paths, and no-active-tracker issue pickup policy.
+
 ## [0.9.19] - 2026-05-26
 
 ### Fixed

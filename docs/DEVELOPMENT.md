@@ -84,24 +84,30 @@ CI runs `shellcheck` on these scripts; keep them lint-clean.
 
 ```
 src/
-├── main.rs              # `cr` binary entry; thin clap dispatcher
-├── lib.rs               # library root (re-exports stable public API)
-├── crep.rs              # CoreRoom Event Protocol — typed event enum
-└── adapter/
-    ├── mod.rs           # EngineAdapter trait, RoleHandle
-    ├── cc.rs            # Claude Code adapter
-    ├── codex.rs         # (planned for v0.2)
-    └── gemini.rs        # (planned for v0.2)
+├── main.rs                  # `cr` binary entry; thin clap dispatcher
+├── lib.rs                   # library root and module exports
+├── crep.rs                  # CoreRoom Event Protocol — typed event enum
+├── adapter/                 # EngineAdapter implementations
+│   ├── cc.rs                # Claude Code adapter
+│   ├── codex.rs             # Codex CLI adapter
+│   ├── gemini.rs            # Gemini CLI adapter
+│   └── fake.rs              # deterministic local dogfood/test adapter
+├── console_*                # snapshot, projection, navigation, TUI, live-room surfaces
+├── gate.rs                  # host-led SDLC gate ledger commands and validation
+├── permissions/             # permission bridge and session policy plumbing
+└── repl/                    # direct-runtime command, render, session, and turn modules
 
 tests/
-├── cc_adapter_smoke.rs  # real claude smoke test, #[ignore]
-└── ...                  # more as features land
+├── *_test.rs                # fast unit/integration tests
+├── *_adapter_smoke.rs       # real-engine smoke tests, #[ignore]
+└── fixtures/                # structural snapshots, transcripts, and dogfood fixtures
 
 docs/
-├── architecture.md            # v0.1 constitution — read first
-├── spike-2026-05-09.md        # feasibility report
-├── proposed-amendments.md     # any deviation from architecture lands here first
-└── DEVELOPMENT.md             # this file
+├── architecture.md          # v0.1 constitution — read first
+├── proposed-amendments.md   # accepted/deferred architecture amendments
+├── sdlc-gates.md            # host-led gate/evidence protocol
+├── v0.9-real-user-dogfood.md # release-blocking local user-case harness
+└── DEVELOPMENT.md           # this file
 ```
 
 ## Visual / TUI changes need screenshot verification
@@ -223,12 +229,13 @@ If `@backend` looks frozen:
 
 ## Performance baselines
 
-(Filled in as v0.1 stabilizes — first measurements expected after
-the CC adapter lands.)
+These are release targets, not measured evidence unless a PR includes the
+measurement command/output that produced them. Refresh this table when a
+release gate records repeatable timings.
 
-| Operation                          | Target         |
-| ---------------------------------- | -------------- |
-| `cr` cold start                    | < 50 ms        |
-| Spawn one role + RoleStarted event | < 1.5 s        |
-| Per-turn wrapper overhead          | < 5 ms         |
-| Memory at 5 active roles, idle     | < 50 MB        |
+| Operation                          | Target         | Evidence status |
+| ---------------------------------- | -------------- | --------------- |
+| `cr` cold start                    | < 50 ms        | target          |
+| Spawn one role + first output      | < 1.5 s        | target          |
+| Per-turn wrapper overhead          | < 5 ms         | target          |
+| Memory at 5 active roles, idle     | < 50 MB        | target          |

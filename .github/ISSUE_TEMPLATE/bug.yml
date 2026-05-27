@@ -67,7 +67,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: Include relevant output, stack traces, or excerpts from `.coderoom/messages.jsonl`.
+      description: Include relevant output, stack traces, or excerpts from `.coreroom/messages.jsonl`.
       render: text
     validations:
       required: true
