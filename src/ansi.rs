@@ -183,14 +183,13 @@ mod tests {
     }
 
     #[test]
-    fn rgb_foreground_round_trips_through_crossterm() {
-        let styled = "@backend".with(crossterm::style::Color::Rgb {
-            r: 0x6b,
-            g: 0xb6,
-            b: 0xff,
-        });
-        let raw = styled.to_string();
-        let line = ansi_to_line(&raw);
+    fn rgb_foreground_is_preserved() {
+        // Keep this as a literal SGR sequence instead of relying on
+        // crossterm's Display impl. The Display path intentionally honors
+        // environment such as NO_COLOR, but the parser must remain testable
+        // in release shells that disable color globally.
+        let raw = "\x1b[38;2;107;182;255m@backend\x1b[39m";
+        let line = ansi_to_line(raw);
         assert!(line.spans.iter().any(|span| span.content == "@backend"
             && span.style.fg == Some(Color::Rgb(0x6b, 0xb6, 0xff))));
     }
@@ -209,12 +208,8 @@ mod tests {
 
     #[test]
     fn reset_returns_to_default_style() {
-        let raw = format!(
-            "{}{}",
-            "red".with(crossterm::style::Color::Rgb { r: 255, g: 0, b: 0 }),
-            "plain"
-        );
-        let line = ansi_to_line(&raw);
+        let raw = "\x1b[38;2;255;0;0mred\x1b[39mplain";
+        let line = ansi_to_line(raw);
         // The "plain" span should not inherit the red fg.
         let plain = line
             .spans
@@ -241,20 +236,8 @@ mod tests {
 
     #[test]
     fn ansi_to_lines_splits_on_newlines() {
-        let raw = format!(
-            "{}\n{}",
-            "one".with(crossterm::style::Color::Rgb {
-                r: 50,
-                g: 50,
-                b: 50
-            }),
-            "two".with(crossterm::style::Color::Rgb {
-                r: 200,
-                g: 200,
-                b: 200
-            })
-        );
-        let lines = ansi_to_lines(&raw);
+        let raw = "\x1b[38;2;50;50;50mone\x1b[39m\n\x1b[38;2;200;200;200mtwo\x1b[39m";
+        let lines = ansi_to_lines(raw);
         assert_eq!(lines.len(), 2);
         assert_eq!(span_fg(&lines[0], 0), Some(Color::Rgb(50, 50, 50)));
         assert_eq!(span_fg(&lines[1], 0), Some(Color::Rgb(200, 200, 200)));
