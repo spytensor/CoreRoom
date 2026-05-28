@@ -2604,11 +2604,11 @@ fn mouse_capture_enabled() -> bool {
 
 fn mouse_capture_enabled_from(value: Option<&str>) -> bool {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return true;
+        return false;
     };
-    !matches!(
+    matches!(
         value.to_ascii_lowercase().as_str(),
-        "0" | "false" | "no" | "off" | "disable" | "disabled"
+        "1" | "true" | "yes" | "on" | "enable" | "enabled"
     )
 }
 
@@ -2616,10 +2616,9 @@ fn write_enter_commands_with_mouse_capture<W: Write>(
     mut writer: W,
     enable_mouse_capture: bool,
 ) -> io::Result<()> {
-    // Mouse capture is on by default so the live room owns wheel
-    // events and can scroll its own Room history. Users who prefer the
-    // terminal's native selection/scroll behavior can opt out with
-    // `COREROOM_MOUSE_CAPTURE=0`.
+    // Mouse capture is opt-in so terminals keep native text selection
+    // by default. Users who prefer wheel events to scroll Room history
+    // inside the TUI can opt in with `COREROOM_MOUSE_CAPTURE=1`.
     //
     // Cursor visibility is intentionally *not* set here. ratatui's
     // `Terminal::draw` shows or hides the cursor every frame based on
@@ -2954,7 +2953,7 @@ mod tests {
     }
 
     #[test]
-    fn write_enter_commands_does_not_hide_cursor_or_drop_mouse_capture() {
+    fn write_enter_commands_does_not_hide_cursor_or_enable_mouse_capture_by_default() {
         // Regression for live-room "no visible cursor" bug: the alt-screen
         // setup must not emit DECRST 25 (`CSI ?25 l`). ratatui's
         // `Terminal::draw` is responsible for the cursor's visibility on
@@ -2962,25 +2961,36 @@ mod tests {
         // per-frame `set_cursor_position` call and leaves Ask without a
         // visible caret.
         //
-        // Regression for live-room mouse wheel history: the default path must
-        // still enable mouse capture so wheel events reach `handle_mouse`
-        // instead of the parent terminal scrollback.
+        // Regression for live-room native selection: the default path must
+        // not enable mouse capture, otherwise drag-select/copy is intercepted
+        // by the TUI.
         let mut buf: Vec<u8> = Vec::new();
-        super::write_enter_commands_with_mouse_capture(&mut buf, true)
-            .expect("write enter commands");
+        super::write_enter_commands(&mut buf).expect("write enter commands");
         let text = String::from_utf8(buf).expect("enter commands are valid utf8");
         assert!(
             !text.contains("\x1b[?25l"),
             "enter commands must not hide the cursor: {text:?}"
         );
         assert!(
-            text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
-            "default enter commands should enable mouse capture: {text:?}"
+            !text.contains("\x1b[?1000h") && !text.contains("\x1b[?1003h"),
+            "default enter commands should not enable mouse capture: {text:?}"
         );
     }
 
     #[test]
-    fn write_enter_commands_can_disable_mouse_capture() {
+    fn write_enter_commands_can_enable_mouse_capture() {
+        let mut buf: Vec<u8> = Vec::new();
+        super::write_enter_commands_with_mouse_capture(&mut buf, true)
+            .expect("write enter commands");
+        let text = String::from_utf8(buf).expect("enter commands are valid utf8");
+        assert!(
+            text.contains("\x1b[?1000h") || text.contains("\x1b[?1003h"),
+            "opt-in enter commands should enable mouse capture: {text:?}"
+        );
+    }
+
+    #[test]
+    fn write_enter_commands_omits_mouse_capture_when_disabled() {
         let mut buf: Vec<u8> = Vec::new();
         super::write_enter_commands_with_mouse_capture(&mut buf, false)
             .expect("write enter commands");
@@ -2992,17 +3002,21 @@ mod tests {
     }
 
     #[test]
-    fn mouse_capture_defaults_on_unless_explicitly_disabled() {
-        assert!(super::mouse_capture_enabled_from(None));
-        assert!(super::mouse_capture_enabled_from(Some("")));
+    fn mouse_capture_defaults_off_unless_explicitly_enabled() {
+        assert!(!super::mouse_capture_enabled_from(None));
+        assert!(!super::mouse_capture_enabled_from(Some("")));
         assert!(super::mouse_capture_enabled_from(Some("1")));
         assert!(super::mouse_capture_enabled_from(Some("true")));
         assert!(super::mouse_capture_enabled_from(Some("yes")));
         assert!(super::mouse_capture_enabled_from(Some("on")));
+        assert!(super::mouse_capture_enabled_from(Some("enable")));
+        assert!(super::mouse_capture_enabled_from(Some("enabled")));
         assert!(!super::mouse_capture_enabled_from(Some("0")));
         assert!(!super::mouse_capture_enabled_from(Some("false")));
         assert!(!super::mouse_capture_enabled_from(Some("no")));
         assert!(!super::mouse_capture_enabled_from(Some("off")));
+        assert!(!super::mouse_capture_enabled_from(Some("disable")));
+        assert!(!super::mouse_capture_enabled_from(Some("disabled")));
     }
 
     #[test]

@@ -123,7 +123,7 @@ Disable that with `COREROOM_NO_UPDATE_CHECK=1` or
 <summary>Don't have npm? Direct binary install.</summary>
 
 ```bash
-TAG=v0.9.20
+TAG=v0.9.21
 ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/spytensor/CoreRoom/releases/download/${TAG}/cr-${TAG}-${OS}-${ARCH}.tar.gz" \
@@ -247,9 +247,9 @@ Useful commands:
   replays the full event log when you need to audit what happened. Set
   `COREROOM_VERBOSE_TOOLS=1` to opt the live REPL back into the full
   per-tool trace stream when you need it inline.
-- The live room captures mouse wheel events by default so wheel / PgUp / PgDn
-  all scroll Room history inside the TUI. Set `COREROOM_MOUSE_CAPTURE=0` if
-  you prefer your terminal's native selection/scroll behavior for a session.
+- The live room leaves terminal-native text selection alone by default. PgUp /
+  PgDn scroll Room history inside the TUI; set `COREROOM_MOUSE_CAPTURE=1` if
+  you also want mouse wheel events captured by the TUI for a session.
 - Permission prompts appear only while a decision is needed. Successful
   once-only allows clear the prompt and stay out of the chat stream; session
   approvals and denials remain visible because they change what the role can

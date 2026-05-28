@@ -640,7 +640,7 @@ fn snapshot_boot_dashboard_at_80() {
     .trim_start_matches('\n')
     .to_owned();
     insta::assert_snapshot!(rendered, @r"
-┌─ CoreRoom v0.9.20 ───────────────────────────────────────────────────────────┐
+┌─ CoreRoom v0.9.21 ───────────────────────────────────────────────────────────┐
 │                                                                              │
 │ welcome back, Ada                       tips for getting started             │
 │                                         • type @role to send a task to a sp… │
@@ -1885,6 +1885,28 @@ fn route_instructions_require_explicit_task_separator() {
     );
     let out = extract_route_instructions("host", text, known);
     assert!(out.is_empty());
+}
+
+#[test]
+fn unrouted_delegation_hint_detects_promise_without_route() {
+    use super::unrouted_delegation_intent_targets;
+    let known = &["host", "engineer", "backend"];
+    let text = "I'll check with @engineer and then synthesize the recommended approach.";
+    assert_eq!(
+        unrouted_delegation_intent_targets(text, known),
+        vec!["engineer".to_owned()]
+    );
+}
+
+#[test]
+fn unrouted_delegation_hint_ignores_plain_status_mentions() {
+    use super::unrouted_delegation_intent_targets;
+    let known = &["host", "backend", "ci"];
+    let text = concat!(
+        "@backend 和 @ci 都给了完整只读命令清单,但都明确需要 @host 点头才执行。\n",
+        "Still waiting for @backend and @ci."
+    );
+    assert!(unrouted_delegation_intent_targets(text, known).is_empty());
 }
 
 #[test]

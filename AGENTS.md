@@ -5,7 +5,7 @@ repository, including Codex, Claude Code, and other terminal coding agents.
 
 ## Current Project Phase
 
-Latest release tag: v0.9.20.
+Latest release tag: v0.9.21.
 
 Active milestone: none. All currently scoped GitHub issues were closed when
 this file was last aligned (2026-05-27). Do not autonomously pick up new
