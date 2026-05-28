@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.21] - 2026-05-28
+
+### Fixed
+
+- Live-room terminal text selection works by default again by making mouse
+  capture opt-in with `COREROOM_MOUSE_CAPTURE=1`.
+- Delegation-like host wording such as "check with @engineer" now emits a
+  visible no-follow-up hint instead of silently idling without dispatch.
+
 ## [0.9.20] - 2026-05-27
 
 ### Fixed
@@ -1725,7 +1734,8 @@ API stability, not feature completeness.
 - **No timestamps in CREP events.** `cr cost --since` honors the log
   file's mtime only; per-event timestamps land in v0.2.
 
-[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.20...HEAD
+[Unreleased]: https://github.com/spytensor/CoreRoom/compare/v0.9.21...HEAD
+[0.9.21]: https://github.com/spytensor/CoreRoom/compare/v0.9.20...v0.9.21
 [0.9.20]: https://github.com/spytensor/CoreRoom/compare/v0.9.19...v0.9.20
 [0.9.19]: https://github.com/spytensor/CoreRoom/compare/v0.9.18...v0.9.19
 [0.9.18]: https://github.com/spytensor/CoreRoom/compare/v0.9.17...v0.9.18
